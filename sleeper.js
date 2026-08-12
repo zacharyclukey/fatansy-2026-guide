@@ -32,6 +32,7 @@ export const getUser = (name) => get(`/user/${encodeURIComponent(name.trim())}`)
 export const getLeagues = (userId, season) => get(`/user/${userId}/leagues/nfl/${season}`);
 export const getDraft = (draftId) => get(`/draft/${draftId}`);
 export const getPicks = (draftId) => get(`/draft/${draftId}/picks`);
+export const getRosters = (leagueId) => get(`/league/${leagueId}/rosters`);
 
 // Sleeper's roster_positions is a flat list with one entry per slot, bench included.
 function starters(rosterPositions = []) {
@@ -74,6 +75,14 @@ export async function importLeagues(username, season, scoreKeys) {
     let rounds = null;
     let slot = null;
     let when = null;
+    // Which roster is yours. Needed because an AUTODRAFTED pick can come back with an
+    // empty picked_by - if we only matched on that, every pick made while you were on
+    // autopick would look like somebody else's.
+    let rosterId = null;
+    try {
+      const rosters = await getRosters(L.league_id);
+      rosterId = (rosters || []).find((r) => r.owner_id === user.user_id)?.roster_id ?? null;
+    } catch { /* not fatal - picked_by still covers manual picks */ }
     try {
       const d = await getDraft(L.draft_id);
       rounds = d?.settings?.rounds ?? null;
@@ -90,6 +99,7 @@ export async function importLeagues(username, season, scoreKeys) {
       slot,
       starters: s,
       bench,
+      rosterId,
       scoring,
       ignored,
       imported: true,
@@ -99,12 +109,45 @@ export async function importLeagues(username, season, scoreKeys) {
 }
 
 // Every pick made so far, as {playerId, mine, pick, round}.
-export async function draftPicks(draftId, userId) {
+export async function draftPicks(draftId, userId, rosterId) {
   const picks = await getPicks(draftId);
   return (picks || []).map((p) => ({
     playerId: String(p.player_id),
-    mine: p.picked_by === userId,
+    // whoever actually made it, falling back to the roster it landed on
+    mine: (!!userId && p.picked_by === userId)
+      || (rosterId != null && p.roster_id === rosterId),
     pick: p.pick_no,
     round: p.round,
   }));
+}
+
+// A read-only rehearsal. Runs the whole live-sync path against a season that has already
+// drafted and reports what it WOULD do, without touching anything you have set up.
+export async function dryRun(username, season, knownIds) {
+  const user = await getUser(username);
+  if (!user?.user_id) throw new SleeperError(`No Sleeper account called "${username}".`, 'notfound');
+  const leagues = await getLeagues(user.user_id, season);
+  if (!leagues?.length) throw new SleeperError(`No ${season} leagues on that account.`, 'empty');
+
+  const out = [];
+  for (const L of leagues) {
+    if (!L.draft_id) continue;
+    let rosterId = null;
+    try {
+      const rosters = await getRosters(L.league_id);
+      rosterId = (rosters || []).find((r) => r.owner_id === user.user_id)?.roster_id ?? null;
+    } catch { /* fall back to picked_by */ }
+    let picks = [];
+    try {
+      picks = await draftPicks(L.draft_id, user.user_id, rosterId);
+    } catch { /* draft may have been deleted */ }
+    out.push({
+      name: L.name,
+      total: picks.length,
+      matched: picks.filter((p) => knownIds.has(p.playerId)).length,
+      mine: picks.filter((p) => p.mine).length,
+      unknown: picks.filter((p) => !knownIds.has(p.playerId)).length,
+    });
+  }
+  return out;
 }

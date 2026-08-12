@@ -1,5 +1,5 @@
 import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js';
-import { importLeagues, draftPicks, SleeperError } from './sleeper.js';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
@@ -370,7 +370,7 @@ async function doSync() {
   const lg = data.leagues[st.league];
   if (!lg.draft_id) return msg('#syncMsg', 'This league has no draft on Sleeper yet.', 'bad');
   try {
-    const list = await draftPicks(lg.draft_id, st.sleeperId);
+    const list = await draftPicks(lg.draft_id, st.sleeperId, lg.rosterId);
     if (!list.length) return msg('#syncMsg', 'The draft has not started — no picks yet.');
     const known = new Set(data.players.map((p) => p.id));
     const pk = picks();
@@ -383,10 +383,35 @@ async function doSync() {
     }
     save();
     rebuild();
-    msg('#syncMsg', `${list.length} picks made, ${added} new.`
+    st.lastSync = Date.now();
+    $('#syncClock').textContent = `last synced ${new Date().toLocaleTimeString()}`;
+    msg('#syncMsg', `${list.length} picks made, ${added} new, ${pk.mine.length} yours.`
       + (skipped ? ` ${skipped} not in the player pool — deep bench, safe to ignore.` : ''), 'good');
   } catch (e) {
     msg('#syncMsg', e instanceof SleeperError ? e.message : `Sync failed: ${e.message}`, 'bad');
+  }
+}
+
+async function doDryRun() {
+  const name = st.sleeperUser || $('#user').value.trim();
+  if (!name) return msg('#setupMsg', 'Type your Sleeper username first.', 'bad');
+  $('#dryOut').innerHTML = '<p class="setupMsg">Reading that season…</p>';
+  try {
+    const known = new Set(data.players.map((p) => p.id));
+    const res = await dryRun(name, $('#drySeason').value.trim(), known);
+    if (!res.length) {
+      $('#dryOut').innerHTML = '<p class="setupMsg bad">No drafts found for that season.</p>';
+      return;
+    }
+    $('#dryOut').innerHTML = res.map((r) => `<div class="lgCard">
+<b>${r.name}</b> — read ${r.total} picks, ${r.mine} of them yours
+<span class="hint">${r.matched} matched a player on the board`
+      + `${r.unknown ? `, ${r.unknown} ${r.unknown === 1 ? 'was' : 'were'} not in the pool (deep bench or since retired)` : ''}.
+${r.total && r.mine ? 'The live sync would work on this draft.'
+    : r.total ? 'Picks read, but none came back as yours — tell me and I will look at it.'
+      : 'No picks in this draft.'}</span></div>`).join('');
+  } catch (e) {
+    $('#dryOut').innerHTML = `<p class="setupMsg bad">${e instanceof SleeperError ? e.message : e.message}</p>`;
   }
 }
 
@@ -476,6 +501,7 @@ function wire() {
   $('#importL').onclick = doImport;
   $('#syncOnce').onclick = doSync;
   $('#syncAuto').onclick = toggleAuto;
+  $('#dryBtn').onclick = doDryRun;
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };
 
   // ratings profile as a file, so you and someone else can keep different ones
