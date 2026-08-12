@@ -1,10 +1,10 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js?v=202608121204';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121204';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121204';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121216';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121216';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121216';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121204';
+const BUILD = '202608121216';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -19,6 +19,7 @@ let cache = null;
 let cacheKey = '';
 let frame = null;
 let limit = 100;
+let clock = null;
 
 // The board always shows your rating and the room's ADP - those two are the whole
 // argument for or against a pick, so they are never behind a toggle. Everything else is
@@ -48,6 +49,9 @@ const GROUPS = [
     ['P/g', (r) => one(r.p.m.proj_ppg), 48, ''],
     ['Tch', (r) => Math.round((r.p.proj?.rush_att || 0) + (r.p.proj?.rec || 0)) || '—', 48, ''],
   ]],
+  ['back', 'Back next turn?', [
+    ['Back?', (r) => backCell(r), 62, ''],
+  ]],
   ['rz', 'Red zone', [
     ['RZ/g', (r) => one(r.p.m.rz_pg), 50, ''],
     ['RZ TD%', (r) => pct(r.p.m.rz_conv * 100), 60, ''],
@@ -55,6 +59,15 @@ const GROUPS = [
 ];
 const one = (v) => (v == null ? '—' : (+v).toFixed(1));
 const pct = (v) => (v == null || Number.isNaN(v) ? '—' : `${Math.round(v)}%`);
+function backCell(r) {
+  if (!clock?.target) return '<em class="soft">—</em>';
+  const p = availability(r.p.adp, clock.target, clock.currentPick);
+  if (p == null) return '<em class="soft">—</em>';
+  const v = Math.round(p * 100);
+  const txt = p < 0.01 ? '<1%' : p > 0.99 ? '>99%' : `${v}%`;
+  return `<em class="${v >= 65 ? 'up' : v < 35 ? 'dn' : ''}">${txt}</em>`;
+}
+
 function gapCell(r) {
   const g = r.adpRank - r.rank;
   return `<em class="${g >= 8 ? 'up' : g <= -8 ? 'dn' : ''}">${g > 0 ? '+' : ''}${g}</em>`;
@@ -114,17 +127,53 @@ const WORRY = {
 
 // The projection is left out of both halves - it is most of what the score already says,
 // so naming it as his strength tells you nothing.
+// Where he sits against the pick that is actually on the clock, not against a static rank.
+function callFor(r) {
+  const now = clock?.currentPick;
+  if (!now || !r.p.adp) {
+    const g = r.adpRank - r.rank;
+    return g >= 12 ? ['Value', `You rate him ${g} picks above the room.`]
+      : g <= -12 ? ['Reach', `You have him ${-g} picks ahead of the room.`]
+        : ['Fair', 'Priced about where the room has him.'];
+  }
+  const past = now - r.p.adp;   // positive = the draft is already past where he goes
+  if (past >= 12) return ['Steal', `${Math.round(past)} picks past his ADP and still on the board.`];
+  if (past >= 4) return ['Value', `Lasted ${Math.round(past)} picks longer than the room expects.`];
+  if (past >= -6) return ['Fair', 'About where the room has him going.'];
+  return ['Reach', `${Math.round(-past)} picks earlier than the room would take him.`];
+}
+
+// Wait, or take him now - the question the whole board exists to answer. The wording
+// changes depending on whether you are actually on the clock, because "take him now" is
+// useless advice when it is somebody else's pick.
+function waitAdvice(r, drafted) {
+  if (!clock?.target) return '';
+  const p = availability(r.p.adp, clock.target, clock.currentPick);
+  if (p == null) return '';
+  // never print "0%" - it reads as a bug rather than as long odds
+  const v = p < 0.01 ? '<1' : p > 0.99 ? '>99' : Math.round(p * 100);
+  const n = Math.round(p * 100);
+  const pool = poolAround(board.rows, r, drafted);
+  const at = `pick ${clock.target} (${clock.gap} away)`;
+  const similar = pool >= 4 ? ` ${pool} similar players are still on the board.` : '';
+  const alone = pool === 0 ? ' Nobody close to him is left.' : '';
+
+  if (clock.onClock) {
+    if (n >= 65) return `<b class="good">You can wait.</b> ${v}% he comes back to you at ${at}.${similar}`;
+    if (n >= 35) return `<b class="warn">Coin flip.</b> ${v}% he lasts to ${at}.${similar || alone}`;
+    return `<b class="bad">Take him now.</b> Only ${v}% he lasts to ${at}.${similar || alone}`;
+  }
+  if (n >= 65) return `<b class="good">Should reach you.</b> ${v}% he is still there at ${at}.${similar}`;
+  if (n >= 35) return `<b class="warn">Might reach you.</b> ${v}% he lasts to ${at}.${similar || alone}`;
+  return `<b class="bad">Will not reach you.</b> Only ${v}% he lasts to ${at}.${similar || alone}`;
+}
+
 function verdict(r) {
-  const gap = r.adpRank - r.rank;
   const ranked = Object.entries(r.scores)
     .filter(([k, v]) => v != null && NAMED[k]).sort((a, b) => b[1] - a[1]);
   const [bk, bv] = ranked[0];
   const [wk, wv] = ranked[ranked.length - 1];
-  const lead = gap >= 12 ? `Value — the room lets him fall ${gap} picks past where you rate him.`
-    : gap <= -12 ? `A reach — you have him ${-gap} picks ahead of the room.`
-      : 'Priced about where the room has him.';
-  return lead
-    + (bv >= 60 ? ` The case for him: ${NAMED[bk]} (${Math.round(bv)}).` : '')
+  return (bv >= 60 ? `The case for him: ${NAMED[bk]} (${Math.round(bv)}).` : '')
     + (wv < 45 ? ` The worry: ${WORRY[wk]} (${Math.round(wv)}).` : '');
 }
 
@@ -144,10 +193,31 @@ function syncCustoms() {
   }
 }
 
+function tickClock() {
+  const lg = board?.league || data.leagues[st.league];
+  const slot = st.slot || lg?.slot || null;
+  // the pick on the clock is simply however many are already off the board, plus one
+  const now = picks().drafted.length + 1;
+  clock = draftContext(lg, slot, now);
+  const bar = $('#clockBar');
+  if (!bar) return;
+  $('#clockNow').textContent = `Pick ${now}`;
+  if (!slot) {
+    $('#clockNext').innerHTML = '<span class="hint">Add your draft slot to see whether players come back to you.</span>';
+  } else if (clock?.onClock) {
+    $('#clockNext').innerHTML = `<b class="good">You are on the clock.</b> Then pick ${clock.target} — ${clock.gap} away.`;
+  } else if (clock?.target) {
+    $('#clockNext').innerHTML = `Your next pick is <b>${clock.next}</b>, then <b>${clock.after ?? '—'}</b>. Waiting costs ${clock.gap} picks.`;
+  } else {
+    $('#clockNext').innerHTML = '<span class="hint">Draft finished.</span>';
+  }
+}
+
 function rebuild() {
   const key = JSON.stringify(st.sub);
   if (key !== cacheKey) { cache = subScores(data, st); cacheKey = key; }
   board = buildBoard(data, { ...st, mine: picks().mine.map((id) => byId(id)?.pos) }, cache);
+  tickClock();
   renderAll();
 }
 
@@ -221,7 +291,12 @@ function detail(r) {
     m.last_ppg ? `${m.last_ppg.toFixed(1)} points a game` : null,
     m.draft_pick ? `NFL pick ${m.draft_pick}` : null,
   ].filter(Boolean);
+  const [call, why] = callFor(r);
+  const drafted = new Set(picks().drafted);
+  const wait = waitAdvice(r, drafted);
   return `<div class="detail">
+<p class="call"><span class="callTag ${call}">${call}</span> ${why}</p>
+${wait ? `<p class="wait">${wait}</p>` : ''}
 <p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}</p>
 <div class="bars">${bars}</div>
 ${statCards(r)}
@@ -485,6 +560,7 @@ function renderChrome() {
   $('#colToggles').innerHTML = GROUPS.map(([k, label]) => `<label class="chip">
 <input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`).join('');
   $('#rookie').checked = st.rookie;
+  $('#slot').value = st.slot || data.leagues[st.league]?.slot || '';
   $('#hideGone').checked = !!st.hideGone;
   readouts();
 }
@@ -569,6 +645,7 @@ function wire() {
     $(`#${id}`).oninput = (e) => { fn(e.target.value); readouts(); save(); scheduleRebuild(); };
   }
   $('#rookie').onchange = (e) => { st.rookie = e.target.checked; save(); rebuild(); };
+  $('#slot').oninput = (e) => { st.slot = +e.target.value || null; save(); rebuild(); };
   if (window.ResizeObserver) new ResizeObserver(measure).observe(document.querySelector('.top'));
   window.addEventListener('resize', measure);
   $('#importL').onclick = doImport;

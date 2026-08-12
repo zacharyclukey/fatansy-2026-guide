@@ -258,6 +258,63 @@ export function buildBoard(data, st, cache) {
   return { rows, repl, league, weights: cw };
 }
 
+// ---------------------------------------------------------------- draft clock
+// Which overall picks belong to you in a snake draft, and therefore how long you have to
+// wait. Slot 1 and slot 12 wait very different amounts, which is the whole reason
+// "can I get him next time round?" is worth answering.
+export function myPicks(teams, slot, rounds = 16) {
+  const out = [];
+  for (let r = 1; r <= rounds; r += 1) {
+    out.push(r % 2 === 1 ? (r - 1) * teams + slot : (r - 1) * teams + (teams - slot + 1));
+  }
+  return out;
+}
+
+export function draftContext(league, slot, currentPick) {
+  if (!slot || !league.teams) return null;
+  const picks = myPicks(league.teams, slot, league.rounds || 16);
+  const next = picks.find((p) => p >= currentPick) ?? null;
+  const after = picks.find((p) => p > (next ?? currentPick)) ?? null;
+  return {
+    picks, currentPick, next, after,
+    onClock: next === currentPick,
+    // the gap that matters: if you are on the clock it is until your NEXT one
+    gap: (next === currentPick ? after : next) - currentPick,
+    target: next === currentPick ? after : next,
+  };
+}
+
+// Chance a player is still on the board at a given pick, GIVEN he is still here now.
+//
+// Two things matter here and both were wrong first time round:
+//
+// 1. It has to be conditional. A player with an ADP of 3 who is somehow still there at
+//    pick 26 has already done something the model called impossible. Asking "what were
+//    the odds he lasts to 28" unconditionally answers ~0%, which is useless. Asking
+//    "given he is here at 26, does he last two more" is the question you actually have.
+// 2. A normal distribution has tails far too thin for this. Players slide much more
+//    often than a bell curve allows, so a logistic is used instead - same shape in the
+//    middle, far more forgiving at the edges.
+//
+// Sleeper gives a mean ADP and no spread, so the spread is modelled: sd = 2 + 0.18 x ADP.
+// Early picks are predictable, late ones are not. It is an estimate and is labelled as one.
+export function availability(adp, atPick, fromPick = 0) {
+  if (!adp || !atPick) return null;
+  const s = (2 + 0.18 * adp) / 1.81;           // logistic scale from the same sd
+  const surv = (t) => 1 / (1 + Math.exp((t - adp) / s));
+  const now = Math.max(fromPick, 0);
+  const base = now > 0 ? surv(now) : 1;
+  if (base <= 0) return 0;
+  return Math.max(0, Math.min(1, surv(atPick) / base));
+}
+
+// How many comparable players are still there. If six similar guys remain you can wait on
+// any of them; if he is alone in his tier, waiting means missing the tier.
+export function poolAround(rows, r, drafted, band = 6) {
+  return rows.filter((x) => !drafted.has(x.p.id)
+    && x.p.id !== r.p.id && Math.abs(x.score - r.score) <= band).length;
+}
+
 // A plain-English read of what the current weights mean, for the ratings editor.
 export function priorityOrder(data, st) {
   const cw = componentWeights(st);

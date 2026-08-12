@@ -389,3 +389,40 @@ span.nm:hover { text-decoration: none; }
 }
 .tip b { font-weight: 600; display: block; }
 .tip span { display: block; margin-top: 5px; color: #bcd6c9; font-size: 12px; }
+
+/* ---------------------------------------------------------------- draft clock */
+.clockBar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 14px 22px 0; padding: 10px 14px;
+  background: var(--fieldSoft); border: 1px solid var(--field); border-radius: var(--r);
+  font-size: 13px;
+}
+.clockNow {
+  font-family: var(--num); font-weight: 700; font-size: 13px;
+  background: var(--field); color: var(--chalk); border-radius: 4px; padding: 3px 9px;
+}
+.clockNext { color: var(--ink2); }
+.clockNext b { color: var(--ink); font-weight: 600; }
+.clockNext b.good { color: var(--good); }
+.clockSlot {
+  margin-left: auto; display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--ink2);
+}
+.clockSlot input { width: 58px; text-align: center; height: 30px; }
+
+/* ---------------------------------------------------------------- the call */
+.call { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.callTag {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  border-radius: 4px; padding: 4px 9px;
+}
+.callTag.Steal { background: var(--good); color: #fff; }
+.callTag.Value { background: var(--goodSoft); color: var(--good); border: 1px solid var(--good); }
+.callTag.Fair { background: var(--panel2); color: var(--ink2); }
+.callTag.Reach { background: var(--badSoft); color: var(--bad); border: 1px solid var(--bad); }
+.wait {
+  margin: 0 0 12px; font-size: 14px; padding: 9px 12px;
+  background: var(--card); border-left: 3px solid var(--line2); border-radius: 0 var(--r) var(--r) 0;
+}
+.wait b.good { color: var(--good); } .wait b.warn { color: var(--warn); } .wait b.bad { color: var(--bad); }
+.num em.soft { color: var(--ink3); }

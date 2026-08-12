@@ -47,6 +47,9 @@ export const TIPS = {
   situation: ['The team and schedule around him.', ''],
   projection: ['What 2026 projections expect.', 'Percentile within his position.'],
 
+  'Back?': ['Chance he is still there at your next pick.',
+    'Estimated from ADP spread — a guide, not a guarantee.'],
+
   posW: ['What this stat counts for at this position.', 'Zero means it says nothing there.'],
 };
 
