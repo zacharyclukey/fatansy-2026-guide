@@ -69,6 +69,9 @@ export const TIPS = {
   'card:ppg': ['PPR points per game.', 'Total points / games played.'],
   'card:finish': ['Where he finished at his position in 2025.', ''],
 
+  cliff: ['The last player of his tier.',
+    'The next one at his position is a clear step down, not a small one.'],
+
   advice: ['What to do with this pick.',
     'Compares the best man at each position now against the best you could still expect next turn.'],
 

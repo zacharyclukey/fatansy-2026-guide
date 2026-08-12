@@ -139,9 +139,14 @@ input[type="checkbox"] { accent-color: var(--field); width: 15px; height: 15px; 
 .filters button { padding: 0 11px; height: 30px; font-size: 13px; }
 .spacer { flex: 1; }
 main { padding: 16px 22px 46px; max-width: 1200px; }
-/* the board view gets the full width - extra stat columns should use the empty space on
-   the right rather than squeezing the player names */
-#v-board main { max-width: none; overflow-x: auto; }
+/* The board view gets the full width so extra stat columns use the empty space on the
+   right instead of squeezing the player names.
+   DO NOT put overflow on this or on .board. A sticky element positions itself against its
+   nearest SCROLLING ancestor, so any overflow here traps .row.head inside the list and the
+   column labels end up floating over row two. That bug has now happened twice - once from
+   overflow:hidden on .board, once from overflow-x:auto here. The page scrolls sideways at
+   body level instead, which keeps the header stuck to the viewport where it belongs. */
+#v-board main { max-width: none; }
 #v-board .board { min-width: min-content; }
 
 /* ---------------------------------------------------------------- settings */
@@ -219,8 +224,19 @@ span.nm:hover { text-decoration: none; }
 .acts { display: flex; gap: 5px; justify-content: flex-end; }
 .acts button { height: 24px; padding: 0 8px; font-size: 12px; border-radius: 5px; }
 
-/* a chalk line between tiers, so the cliffs are visible without reading numbers */
-.row.cliff { border-top: 2px solid var(--line2); }
+/* a chalk line under the last man of a tier, so the drop-offs are visible without
+   reading a single number */
+.row.cliff { border-bottom: 2px solid var(--pigskin); }
+.tierEnd {
+  font-size: 9px; font-weight: 700; letter-spacing: .03em; flex: none; cursor: help;
+  color: var(--pigskin); border: 1px solid var(--pigskin); border-radius: 3px;
+  padding: 0 4px; line-height: 14px; white-space: nowrap;
+}
+.cliffTag {
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--pigskin); border: 1px solid var(--pigskin); border-radius: 4px; padding: 3px 8px;
+}
+.verdict b.warn { color: var(--warn); }
 
 /* ---------------------------------------------------------------- detail */
 .detail { padding: 14px 16px 16px 60px; border-bottom: 1px solid var(--line); background: var(--panel); }
@@ -346,9 +362,9 @@ span.nm:hover { text-decoration: none; }
 /* ---------------------------------------------------------------- narrow */
 @media (max-width: 760px) {
   .top, .bar2, main, .foot { padding-left: 14px; padding-right: 14px; }
-  /* the board scrolls sideways rather than dropping columns - if you ticked a group
-     you want to see it, and hiding it silently is worse than a swipe */
-  main { overflow-x: auto; }
+  /* the board scrolls sideways rather than dropping columns - if you ticked a group you
+     want to see it, and hiding it silently is worse than a swipe. The scroll is at body
+     level, NOT on main: overflow here would break the sticky column header (see above). */
   .board { min-width: 560px; }
   .row.lineup { grid-template-columns: 44px minmax(0, 1fr) 64px; }
   .row.lineup > :nth-child(3), .row.lineup > :nth-child(4) { display: none; }

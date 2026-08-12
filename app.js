@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121316';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121316';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121316';
-import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121316';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121327';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121327';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121327';
+import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121327';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121316';
+const BUILD = '202608121327';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -263,6 +263,7 @@ function renderAdvice() {
   if (!ranked.length) { box.innerHTML = ''; return; }
 
   const top = ranked[0];
+  const cliff = top.best.lastOfTier;
   // kickers and defences always "can wait" - saying so is noise
   const cheap = ranked.filter((x) => x.cost < top.cost * 0.55 && x.pos !== top.pos
     && !['K', 'DEF'].includes(x.pos)).slice(0, 2);
@@ -272,6 +273,7 @@ function renderAdvice() {
 <span class="advTag">${when} ${top.pos}</span>
 <b>${top.best.p.name}</b> <span class="tm">${top.best.p.team || ''}</span>
 <span class="hint">score ${top.best.score.toFixed(1)}${top.shortfall ? ` · you still need ${top.shortfall}` : ''}</span>
+${cliff ? `<span class="cliffTag">last of ${top.pos} tier ${top.best.tier}</span>` : ''}
 </div>
 <p class="advWhy">${top.cost < 1
     ? `Nothing is urgent — the best ${top.pos} should still be there at pick ${clock.target}.`
@@ -355,7 +357,8 @@ function rowHTML(r, cols, d, m) {
   return `<span class="rk">${r.rank}</span>
 <span class="who">${posTag(r.p.pos)}
 <button class="nm" data-open="${r.p.id}" title="Show detail">${r.p.name} <span class="tm">${r.p.team || ''}</span></button>
-${r.p.rookie ? '<span class="rook">R</span>' : ''}${injBadge(r.p)}</span>
+${r.p.rookie ? '<span class="rook">R</span>' : ''}${injBadge(r.p)}
+${r.lastOfTier ? `<span class="tierEnd" data-tip="cliff">last ${r.p.pos}${r.tier}</span>` : ''}</span>
 ${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
 <button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
@@ -406,11 +409,20 @@ function renderBoard() {
         const v = String(c[1](r));
         if (nums[i] && nums[i].innerHTML !== v) nums[i].innerHTML = v;
       });
+      const who = el.querySelector('.who');
+      const badge = who.querySelector('.tierEnd');
+      if (r.lastOfTier && !badge) {
+        who.insertAdjacentHTML('beforeend',
+          `<span class="tierEnd" data-tip="cliff">last ${r.p.pos}${r.tier}</span>`);
+      } else if (r.lastOfTier && badge) {
+        badge.textContent = `last ${r.p.pos}${r.tier}`;
+      } else if (badge) { badge.remove(); }
       const [gb, mb] = el.querySelectorAll('.acts button');
       if (gb.getAttribute('aria-pressed') !== String(d)) gb.setAttribute('aria-pressed', String(d));
       if (mb.getAttribute('aria-pressed') !== String(m)) mb.setAttribute('aria-pressed', String(m));
     }
-    const cls = `row player${d ? ' drafted' : ''}${m ? ' mine' : ''}`;
+    const cls = `row player${d ? ' drafted' : ''}${m ? ' mine' : ''}`
+      + `${r.lastOfTier && !d ? ' cliff' : ''}`;
     if (el.className !== cls) el.className = cls;
     keep.add(r.p.id);
     frag.appendChild(el);          // appendChild MOVES an existing node, it does not clone
@@ -456,7 +468,8 @@ function detail(r) {
   return `<div class="detail">
 <p class="call"><span class="callTag ${call.replace(/\s+/g, '')}" data-tip="call" tabindex="0">${call}</span> ${why}</p>
 ${wait ? `<p class="wait" data-tip="wait" tabindex="0">${wait}</p>` : ''}
-<p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}</p>
+<p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}
+${r.lastOfTier ? ` <b class="warn">He is the last ${r.p.pos} of his tier</b> — the next one down is a clear step worse.` : ''}</p>
 <div class="bars">${bars}</div>
 ${statCards(r)}
 <p class="facts">${facts.length ? `2025: <b>${facts.join('</b> · <b>')}</b>`

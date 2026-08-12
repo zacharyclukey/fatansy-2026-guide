@@ -70,6 +70,23 @@ const fire = (el, type) => {
   el.dispatchEvent(new w.Event(type, { bubbles: true }));
 };
 
+// ------------------------------------------------------- 0. the sticky-header trap
+// This bug has shipped twice: the column labels detach and float over row two. Both times
+// the cause was an `overflow` on an ancestor of .row.head, which makes a sticky element
+// position against that box instead of the viewport. It is invisible in jsdom because
+// jsdom does no layout, so it is checked in the stylesheet instead.
+{
+  const css = fs.readFileSync(`${DIR}/styles.css`, 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');          // strip comments, they discuss overflow
+  const blocks = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)];
+  const ancestors = /(^|,)\s*(main|body|html|section|\.board|#v-board main|#v-board \.board)\s*$/;
+  const guilty = blocks.filter(([, sel, body]) => /overflow(-x|-y)?\s*:/.test(body)
+    && sel.split(',').some((s) => ancestors.test(s.trim())));
+  ok('nothing that contains the board sets overflow', guilty.length === 0,
+    guilty.map(([, s]) => s.trim()).join(' / '));
+  ok('the sticky header is still sticky', /\.row\.head\s*\{[^}]*position:\s*sticky/.test(css));
+}
+
 // ---------------------------------------------------------------- 1. the engine
 {
   const m = await import(`file://${DIR}/engine.js`);
@@ -157,6 +174,12 @@ const fire = (el, type) => {
   await settle();
   ok('injury leads the risk line', /Injury question|Not playing/
     .test(d.querySelector('.detail .verdict').textContent));
+  // tier cliffs: the last man before a real step down at his position
+  const cliffs = [...d.querySelectorAll('.tierEnd')];
+  ok('tier cliffs are marked', cliffs.length > 0, `${cliffs.length} visible in the top 100`);
+  ok('cliff labels name the position and tier', cliffs.every((c) => /^last [A-Z]{2,3}\d+$/.test(c.textContent)),
+    cliffs.slice(0, 3).map((c) => c.textContent).join(', '));
+
   ok('data age is shown', /data .*(today|day)/.test(d.querySelector('#meta').textContent),
     d.querySelector('#meta').textContent.slice(-60));
 }

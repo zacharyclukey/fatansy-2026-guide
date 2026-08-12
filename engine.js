@@ -310,6 +310,8 @@ export function buildBoard(data, st, cache) {
   rows.sort((a, b) => b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
 
+  markTiers(rows);
+
   const adpOrder = [...rows].sort((a, b) => a.p.adp - b.p.adp);
   adpOrder.forEach((r, i) => { r.adpRank = i + 1; });
 
@@ -380,6 +382,44 @@ export function availability(adp, atPick, fromPick = 0) {
 export function poolAround(rows, r, drafted, band = 6) {
   return rows.filter((x) => !drafted.has(x.p.id)
     && x.p.id !== r.p.id && Math.abs(x.score - r.score) <= band).length;
+}
+
+// ---------------------------------------------------------------- tiers
+// Where a position falls off a cliff.
+//
+// Walking down a position by score, most gaps are small and a few are large. A gap much
+// bigger than that position's typical gap is a tier break: the last player above it is
+// the last of his kind, and if you pass on him the next one is a real step down. That is
+// the single most useful thing to know when deciding whether to reach.
+export function markTiers(rows) {
+  const byPos = {};
+  for (const r of rows) {
+    r.lastOfTier = false;
+    r.tier = 1;
+    (byPos[r.p.pos] ||= []).push(r);
+  }
+  for (const list of Object.values(byPos)) {
+    list.sort((a, b) => b.score - a.score);
+    if (list.length < 4) continue;
+    const gaps = [];
+    for (let i = 1; i < list.length; i += 1) gaps.push(list[i - 1].score - list[i].score);
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)] || 0;
+    // A break has to clear two bars: much larger than this position's normal step down,
+    // AND large in absolute terms. Without the second test the flat tail of near-identical
+    // players deep in the pool generates a "cliff" every few rows, which is just noise.
+    const threshold = Math.max(median * 3, 4);
+    let tier = 1;
+    for (let i = 1; i < list.length; i += 1) {
+      // below replacement everyone is interchangeable; cliffs there mean nothing
+      if (gaps[i - 1] >= threshold && list[i - 1].score > 0) {
+        list[i - 1].lastOfTier = true;
+        tier += 1;
+      }
+      list[i].tier = tier;
+    }
+  }
+  return rows;
 }
 
 // ---------------------------------------------------------------- what to do now
