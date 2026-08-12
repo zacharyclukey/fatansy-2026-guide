@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>2026 draft guide</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <h1>2026 draft guide</h1>
+    <select id="league" aria-label="League"></select>
+  </div>
+  <nav class="views" aria-label="Views">
+    <button data-v="board" aria-pressed="true">Board</button>
+    <button data-v="roster" aria-pressed="false">My team</button>
+    <button data-v="ratings" aria-pressed="false">Ratings</button>
+  </nav>
+</header>
+
+<!-- ============================================================ BOARD -->
+<section id="v-board">
+  <div class="bar2">
+    <input id="search" type="search" placeholder="Search players" aria-label="Search players" />
+    <nav class="filters" id="filters" aria-label="Position filter"></nav>
+    <button id="settingsBtn" class="ghost" aria-expanded="false">Settings</button>
+  </div>
+
+  <div id="settings" class="panel" hidden>
+    <div class="knobs">
+      <label class="knob">
+        <span class="knobLabel">Safe <em id="styleOut">balanced</em> Upside</span>
+        <input id="style" type="range" min="0" max="100" step="5" value="50" />
+        <span class="hint">What kind of player wins your league</span>
+      </label>
+      <label class="knob">
+        <span class="knobLabel">Trust my ratings <em id="tiltOut">50%</em></span>
+        <input id="tilt" type="range" min="0" max="100" step="5" value="50" />
+        <span class="hint">0 = pure value, 100 = trust the rating</span>
+      </label>
+      <label class="knob">
+        <span class="knobLabel">Need bonus <em id="needOut">8</em></span>
+        <input id="need" type="range" min="0" max="20" step="1" value="8" />
+        <span class="hint">Nudge toward positions you still have to fill</span>
+      </label>
+      <div class="checks">
+        <label class="check">
+          <input id="rookie" type="checkbox" checked />
+          <span>Rookie upside<span class="hint">Pay up for rookies you trust</span></span>
+        </label>
+        <label class="check">
+          <input id="hideGone" type="checkbox" />
+          <span>Hide drafted<span class="hint">Clear players already off the board</span></span>
+        </label>
+      </div>
+    </div>
+    <p class="priority">You are drafting for <span id="priority"></span></p>
+  </div>
+
+  <main>
+    <div class="board" role="table" aria-label="Draft board">
+      <div class="row head" role="row">
+        <span role="columnheader">#</span>
+        <span role="columnheader">Player</span>
+        <span role="columnheader">Bye</span>
+        <span role="columnheader">Score</span>
+        <span role="columnheader">vs ADP</span>
+        <span role="columnheader" class="sr-only">Actions</span>
+      </div>
+      <div id="rows"></div>
+    </div>
+    <p id="empty" class="empty" hidden>No players match.</p>
+  </main>
+</section>
+
+<!-- ============================================================ MY TEAM -->
+<section id="v-roster" hidden>
+  <main>
+    <div id="lineup"></div>
+    <h2 class="h2">Bye weeks</h2>
+    <div id="byes" class="byes"></div>
+    <h2 class="h2">What the draft cost</h2>
+    <div id="cost" class="cards"></div>
+    <h2 class="h2">What you still need</h2>
+    <div id="needs" class="board"></div>
+  </main>
+</section>
+
+<!-- ============================================================ RATINGS -->
+<section id="v-ratings" hidden>
+  <main>
+    <p class="lede">Drag the top sliders to say what wins a league. Open one to choose the
+      individual stats behind it, and how much each is worth at each position.</p>
+    <div class="rowbtns">
+      <button id="exportR">Export my ratings</button>
+      <label class="fileBtn">Import ratings<input id="importR" type="file" accept=".json" /></label>
+      <button id="resetR" class="ghost">Reset to default</button>
+    </div>
+    <p class="priority big">You are drafting for <span id="priority2"></span></p>
+    <div id="comps"></div>
+  </main>
+</section>
+
+<footer class="foot">
+  <span id="meta"></span>
+  <button id="reset" class="ghost small">Reset drafted</button>
+</footer>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

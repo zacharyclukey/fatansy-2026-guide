@@ -1,0 +1,57 @@
+# 2026 draft guide
+
+A draft board for Sleeper leagues. Everything is computed in the browser — pick a league,
+set what you care about, and the board re-scores as you type.
+
+**Live:** _(fill in once Pages is on — `https://<your-user>.github.io/<repo>/`)_
+
+## Publishing this to the web (one time)
+
+1. Install **GitHub Desktop** and sign in.
+2. `File → Add local repository…` and choose this folder. It is already a git repo with
+   history, so it will just pick it up.
+3. Click **Publish repository**. Untick "Keep this code private" if you want your fiancée
+   to be able to open the link without a GitHub account.
+4. On github.com, open the repo → **Settings → Pages**. Set Source to **Deploy from a
+   branch**, branch **main**, folder **/ (root)**. Save.
+5. Wait a minute, refresh, and the URL appears at the top of that page.
+
+After that, every change is: open GitHub Desktop → **Push origin**. The site updates in
+under a minute.
+
+## What is in here
+
+| File | What it does |
+|---|---|
+| `index.html` | The three views: board, my team, ratings |
+| `app.js` | Everything on screen, and the settings that persist in your browser |
+| `engine.js` | The rating maths — components, per-position stat weights, VOR, draft score |
+| `data/players.json` | 259 players, their percentiles, projections and league rules |
+| `styles.css` | Layout and colours, light and dark |
+
+The spreadsheet (`Draft Guide 2026.xlsx`) is deliberately **not** published — it stays on
+disk as a draft-day backup. `.gitignore` keeps it out.
+
+## Regenerating the data
+
+The player data is built by a Python pipeline that pulls from Sleeper. `data/players.json`
+is the only thing the app needs; drop in a new one and everything re-scores.
+
+## How the rating works
+
+Two levels. Each **component** (volume, red zone, efficiency, …) is a weighted blend of
+named stats, and the components are then weighted against each other.
+
+Stat weights are **per position**, which matters more than it sounds: "broken tackles per
+carry" has two distinct values across every tight end in the league, so weighting it for
+tight ends was flattening the real differences between them. Zeroed weights are greyed out
+in the ratings view but still editable.
+
+**Floor** and **Ceiling** are not typed directly — the Safe ↔ Upside slider on the board
+splits a fixed budget between them.
+
+`DRAFT SCORE = (value over replacement + tilt × rating) × position multiplier + need bonus
++ rookie bonus`
+
+The rating is *added*, never multiplied: multiplying erases it when value is zero and
+inverts it when value is negative.

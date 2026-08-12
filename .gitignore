@@ -1,0 +1,11 @@
+# LibreOffice / Excel lock files
+.~lock.*#
+~$*
+
+# The spreadsheet era - kept on disk as a draft-day backup, not published to the web
+*.xlsx
+*.gs
+
+# OS noise
+.DS_Store
+Thumbs.db
