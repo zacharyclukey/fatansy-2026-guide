@@ -1,9 +1,10 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js?v=202608121156';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121156';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js?v=202608121204';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121204';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121204';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121156';
+const BUILD = '202608121204';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -177,7 +178,8 @@ function renderBoard() {
   const cols = activeCols();
   $('#board').style.setProperty('--cols',
     `34px minmax(0, 1fr) ${cols.map((c) => `${c[2]}px`).join(' ')} 102px`);
-  $('#colHeads').innerHTML = cols.map((c) => `<span>${c[0]}</span>`).join('');
+  $('#colHeads').innerHTML = cols
+    .map((c) => `<span data-tip="${c[0]}" tabindex="0">${c[0]}</span>`).join('');
 
   const out = [];
   for (const r of rows.slice(0, limit)) {
@@ -225,7 +227,8 @@ function detail(r) {
 ${statCards(r)}
 <p class="facts">${facts.length ? `2025: <b>${facts.join('</b> · <b>')}</b>`
     : 'No 2025 data — rated off the projection.'}</p>
-<p class="facts">Projected ${r.pts.toFixed(1)} points · ${r.vor.toFixed(1)} above replacement · your rating ${r.rating.toFixed(1)}</p>
+<p class="facts">Your grade <b>${r.rating.toFixed(0)}</b> ranks him <b>${r.posRated}</b> of ${r.posCount} ${r.p.pos}s.
+Projected <b>${r.pts.toFixed(1)}</b> points, <b>${r.vor.toFixed(1)}</b> above a replacement ${r.p.pos} — which is why the board has him at <b>#${r.rank}</b> overall.</p>
 </div>`;
 }
 
@@ -320,9 +323,9 @@ function renderRatings() {
       const cfg = st.sub[sm.key];
       if (!cfg) return '';
       return `<div class="statRow${cfg.on ? '' : ' off'}">
-<label><input type="checkbox" data-son="${sm.key}"${cfg.on ? ' checked' : ''} />
+<label data-tip="sub:${sm.key}"><input type="checkbox" data-son="${sm.key}"${cfg.on ? ' checked' : ''} />
 <span>${sm.label}${sm.custom ? ' <em class="hint" style="display:inline">added</em>' : ''}</span></label>
-${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}">
+${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}" data-tip="posW">
 <input type="range" min="0" max="40" step="1" data-sw="${sm.key}" data-q="${q}" value="${cfg.w[q]}" />
 <u>${cfg.w[q]}</u></span>`).join('')}
 </div>`;
@@ -330,7 +333,7 @@ ${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}">
 
     const unused = RAW_FIELDS.filter(([f]) => !customsFor(c.key).some((x) => x.field === f));
     return `<details class="comp"${c.key === 'volume' ? ' open' : ''}>
-<summary><span class="cName">${c.label}</span>
+<summary><span class="cName" data-tip="${c.key}" tabindex="0">${c.label}</span>
 <span class="cDesc">${c.desc}</span>
 <span class="cMeter"><b style="width:${Math.round(((cw[c.key] ?? 0) / maxW) * 100)}%"></b></span>
 <span class="cW">${cw[c.key] ?? 0}</span></summary>
@@ -501,6 +504,46 @@ function show(v) {
   renderAll();
 }
 
+let tipEl = null;
+function showTip(el) {
+  const [what, how] = tipEl.data[el.dataset.tip] || [];
+  if (!what) return;
+  tipEl.innerHTML = `<b>${what}</b>${how ? `<span>${how}</span>` : ''}`;
+  tipEl.hidden = false;
+  const r = el.getBoundingClientRect();
+  const w = Math.min(320, window.innerWidth - 20);
+  tipEl.style.width = `${w}px`;
+  const th = tipEl.offsetHeight;
+  // above the element by default, below it when there is no room up there
+  const top = r.top - th - 8 > 4 ? r.top - th - 8 : r.bottom + 8;
+  tipEl.style.top = `${top}px`;
+  tipEl.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - w - 8))}px`;
+}
+const hideTip = () => { if (tipEl) tipEl.hidden = true; };
+
+function wireTips() {
+  tipEl = document.createElement('div');
+  tipEl.className = 'tip';
+  tipEl.hidden = true;
+  tipEl.data = { ...TIPS };
+  // stat tips travel with the data, so a stat added later explains itself too
+  for (const c of data.components) {
+    for (const sm of c.subs) {
+      if (sm.tip) tipEl.data[`sub:${sm.key}`] = [sm.label, `${sm.tip} ${PCT_NOTE}`];
+    }
+  }
+  document.body.appendChild(tipEl);
+  document.body.addEventListener('mouseover', (e) => {
+    const t = e.target.closest('[data-tip]');
+    if (t) showTip(t); else hideTip();
+  });
+  document.body.addEventListener('focusin', (e) => {
+    const t = e.target.closest('[data-tip]');
+    if (t) showTip(t); else hideTip();
+  });
+  window.addEventListener('scroll', hideTip, true);
+}
+
 function measure() {
   const h = document.querySelector('.top')?.offsetHeight || 60;
   document.documentElement.style.setProperty('--stick', `${h}px`);
@@ -632,7 +675,21 @@ function toggle(list, id) {
 // ---------------------------------------------------------------- go
 fetch('data/players.json')
   .then((r) => r.json())
-  .then((d) => { data = d; load(); wire(); renderChrome(); rebuild(); })
+  .then((d) => {
+    data = d;
+    load();
+    syncCustoms();     // restore any stats the user added, before anything is scored
+    wire();
+    wireTips();
+    renderChrome();
+    rebuild();
+    measure();         // the sticky column header sits under the real header height
+    if (!st.imported?.length) {
+      show('setup');
+      msg('#setupMsg', 'Start here: put in your Sleeper username and import your leagues. '
+        + 'Until then the board is scored for a standard 12-team PPR league.');
+    }
+  })
   .catch((e) => {
     document.querySelector('#v-board main').innerHTML =
       `<p class="empty">Could not load the player data.<br><small>${e}</small></p>`;

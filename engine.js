@@ -246,6 +246,15 @@ export function buildBoard(data, st, cache) {
   const adpOrder = [...rows].sort((a, b) => a.p.adp - b.p.adp);
   adpOrder.forEach((r, i) => { r.adpRank = i + 1; });
 
+  // where the grade alone would have put him, so the detail panel can show the gap
+  // between "good for his position" and "worth this pick"
+  const byPos2 = {};
+  for (const r of rows) (byPos2[r.p.pos] ||= []).push(r);
+  for (const list of Object.values(byPos2)) {
+    list.sort((a, b) => b.rating - a.rating);
+    list.forEach((r, i) => { r.posRated = i + 1; r.posCount = list.length; });
+  }
+
   return { rows, repl, league, weights: cw };
 }
 

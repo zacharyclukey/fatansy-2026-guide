@@ -150,7 +150,7 @@ main { padding: 16px 22px 46px; max-width: 1200px; }
   gap: 20px 30px; align-items: start;
 }
 .knob { display: flex; flex-direction: column; gap: 3px; }
-.knobLabel { font-size: 13px; color: var(--ink2); display: flex; justify-content: space-between; gap: 10px; }
+.knobLabel { font-size: 13px; color: var(--ink2); display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
 .knobLabel em { font-style: normal; color: var(--ink); font-weight: 500; }
 .hint { font-size: 12px; color: var(--ink3); display: block; line-height: 1.45; }
 .checks { display: flex; flex-direction: column; gap: 12px; }
@@ -375,3 +375,17 @@ span.nm:hover { text-decoration: none; }
 }
 .rt { font-weight: 600; color: var(--ink); }
 .num em { font-style: normal; }
+
+/* ---------------------------------------------------------------- tooltips */
+[data-tip] { cursor: help; }
+.knobLabel > [data-tip], .cName[data-tip] { text-decoration: underline dotted var(--ink3); text-underline-offset: 3px; }
+.row.head [data-tip] { text-decoration: underline dotted var(--ink3); text-underline-offset: 2px; }
+.tip {
+  position: fixed; z-index: 100; pointer-events: none;
+  background: var(--fieldDeep); color: var(--chalk);
+  border-radius: var(--r); padding: 10px 12px;
+  font-size: 13px; line-height: 1.45; max-width: 260px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .22);
+}
+.tip b { font-weight: 600; display: block; }
+.tip span { display: block; margin-top: 5px; color: #bcd6c9; font-size: 12px; }

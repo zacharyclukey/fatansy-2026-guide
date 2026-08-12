@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608121156" />
+<link rel="stylesheet" href="styles.css?v=202608121204" />
 </head>
 <body>
 
@@ -33,28 +33,28 @@
   <div id="settings" class="panel" hidden>
     <div class="knobs">
       <label class="knob">
-        <span class="knobLabel">Safe <em id="styleOut">balanced</em> Upside</span>
+        <span class="knobLabel"><span data-tip="style" tabindex="0">Safe <em id="styleOut">balanced</em> Upside</span></span>
         <input id="style" type="range" min="0" max="100" step="5" value="50" />
         <span class="hint">What kind of player wins your league</span>
       </label>
       <label class="knob">
-        <span class="knobLabel">Trust my ratings <em id="tiltOut">50%</em></span>
+        <span class="knobLabel"><span data-tip="tilt" tabindex="0">Trust my ratings</span> <em id="tiltOut">50%</em></span>
         <input id="tilt" type="range" min="0" max="100" step="5" value="50" />
         <span class="hint">0 = pure value, 100 = trust the rating</span>
       </label>
       <label class="knob">
-        <span class="knobLabel">Need bonus <em id="needOut">8</em></span>
+        <span class="knobLabel"><span data-tip="need" tabindex="0">Need bonus</span> <em id="needOut">8</em></span>
         <input id="need" type="range" min="0" max="20" step="1" value="8" />
         <span class="hint">Nudge toward positions you still have to fill</span>
       </label>
       <div class="checks">
         <label class="check">
           <input id="rookie" type="checkbox" checked />
-          <span>Rookie upside<span class="hint">Pay up for rookies you trust</span></span>
+          <span data-tip="rookie" tabindex="0">Rookie upside<span class="hint">Pay up for rookies you trust</span></span>
         </label>
         <label class="check">
           <input id="hideGone" type="checkbox" />
-          <span>Hide drafted<span class="hint">Clear players already off the board</span></span>
+          <span data-tip="hideGone" tabindex="0">Hide drafted<span class="hint">Clear players already off the board</span></span>
         </label>
       </div>
     </div>
@@ -149,6 +149,6 @@
   <button id="reset" class="ghost small">Reset drafted</button>
 </footer>
 
-<script type="module" src="app.js?v=202608121156"></script>
+<script type="module" src="app.js?v=202608121204"></script>
 </body>
 </html>
