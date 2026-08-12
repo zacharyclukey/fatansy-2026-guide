@@ -518,3 +518,21 @@ span.nm:hover { text-decoration: none; }
   padding: 11px 13px; margin: 0 0 18px; max-width: 90ch; line-height: 1.55;
 }
 .inflNote b { color: var(--ink); font-weight: 600; }
+
+/* ---------------------------------------------------------------- position lean */
+.lean {
+  margin: 10px 22px 0; padding: 11px 15px;
+  background: var(--card); border: 1px solid var(--line2);
+  border-left: 3px solid var(--pigskin); border-radius: 0 var(--r) var(--r) 0;
+}
+.lean:empty { display: none; }
+.leanHead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.leanHead b { font-size: 14px; font-weight: 600; }
+.leanHead .hint { flex-basis: 100%; margin-top: 4px; }
+.leanTag {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  background: var(--pigskin); color: var(--chalk); border-radius: 4px; padding: 3px 8px;
+}
+.leanBtns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.leanBtns .hint { flex-basis: 100%; margin-top: 2px; }
+.labKnobs { margin: 0 0 20px; max-width: 620px; }

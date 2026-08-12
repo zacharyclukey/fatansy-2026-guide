@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121334';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121334';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121334';
-import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121334';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore } from './engine.js?v=202608121354';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121354';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121354';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608121354';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121334';
+const BUILD = '202608121354';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -124,7 +124,7 @@ const styleWord = (v) => (v <= 15 ? 'safest floor' : v <= 40 ? 'leaning safe'
   : v < 60 ? 'balanced' : v < 85 ? 'leaning upside' : 'highest ceiling');
 
 function riskOf(r) {
-  const f = r.scores.floor ?? 50;
+  const f = r.scores.floorish ?? 50;
   if (r.p.inj) {
     const bad = INJ_BAD.includes(r.p.inj);
     return `${bad ? 'Not playing' : 'Injury question'} — ${r.p.inj}`
@@ -333,7 +333,7 @@ function scheduleRebuild() {
 }
 
 function renderAll() {
-  if (view === 'board') { renderBoard(); renderAdvice(); }
+  if (view === 'board') { renderBoard(); renderAdvice(); renderLean(); }
   if (view === 'roster') renderRoster();
   if (view === 'ratings') renderRatings();
   if (view === 'setup') renderSetup();
@@ -781,24 +781,61 @@ function renderChrome() {
 <input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`).join('');
   $('#rookie').checked = st.rookie;
   $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
+  if ($('#tilt2')) $('#tilt2').value = Math.round(st.tilt * 100);
+  if ($('#style2')) $('#style2').value = st.style;
   $('#hideGone').checked = !!st.hideGone;
   readouts();
 }
 
 function renderStrategies() {
-  const on = activeStrategy(st);
-  $('#stratChips').innerHTML = STRATEGIES
+  if (!$('#stratChips')) return;
+  const on = activePreset(st);
+  $('#stratChips').innerHTML = PRESETS
     .map((x) => `<button class="chipBtn" data-strat="${x.key}" aria-pressed="${x.key === on}">${x.name}</button>`)
     .join('');
-  const cur = STRATEGIES.find((x) => x.key === on);
+  const cur = PRESETS.find((x) => x.key === on);
   $('#stratWhy').innerHTML = cur
     ? `<b>${cur.blurb}</b> ${cur.when}`
-    : 'Custom — you have edited the sliders away from any of these. That is fine; they are only starting points.';
+    : 'Custom — you have moved away from all of these. That is the point of them; they are starting points, not rules.';
+}
+
+// The position lean is a reading of the board, not a personality. It changes as players go.
+function renderLean() {
+  const box = $('#lean');
+  if (!box) return;
+  if (!clock?.target) {
+    box.innerHTML = '<p class="hint">Set your draft slot above and the board will tell you '
+      + 'whether a position is worth leaning into.</p>';
+    return;
+  }
+  const drafted = new Set(picks().drafted);
+  const have = {};
+  for (const id of picks().mine) {
+    const p = byId(id);
+    if (p) have[p.pos] = (have[p.pos] || 0) + 1;
+  }
+  const costs = costOfWaiting(board.rows, clock, drafted, board.league, have, { need: st.need });
+  const s = suggestLean(costs);
+  const on = activeLean(st) || 'custom';
+  if (!s) { box.innerHTML = ''; return; }
+  const rec = LEANS.find((l) => l.key === s.key);
+  const same = on === s.key;
+  box.innerHTML = `<div class="leanHead">
+<span class="leanTag">Board reading</span>
+<b>${rec.name}</b><span class="hint">${s.why}</span></div>
+<div class="leanBtns">
+${LEANS.map((l) => `<button class="chipBtn" data-lean="${l.key}" aria-pressed="${on === l.key}"
+ title="${l.blurb}">${l.name}${l.key === s.key ? ' ★' : ''}</button>`).join('')}
+<span class="hint">${same ? 'Your board already matches the reading.'
+    : `★ is what the board suggests right now. You are on ${LEANS.find((l) => l.key === on)?.name || 'a custom lean'}.`}</span>
+</div>`;
 }
 
 function readouts() {
   $('#styleOut').textContent = styleWord(st.style);
   $('#tiltOut').textContent = `${Math.round(st.tilt * 100)}%`;
+  if ($('#styleOut2')) $('#styleOut2').textContent = styleWord(st.style);
+  if ($('#tiltOut2')) $('#tiltOut2').textContent = `${Math.round(st.tilt * 100)}%`;
   $('#needOut').textContent = st.need;
   $('#priority').textContent = priorityOrder(data, st).slice(0, 3)
     .map((c) => c.label.toLowerCase()).join(' › ');
@@ -879,8 +916,17 @@ function wire() {
   });
   $('#reset').onclick = () => { st.picks[st.league] = { drafted: [], mine: [] }; save(); rebuild(); };
   for (const [id, fn] of [['style', (v) => { st.style = +v; }],
-    ['tilt', (v) => { st.tilt = +v / 100; }], ['need', (v) => { st.need = +v; }]]) {
-    $(`#${id}`).oninput = (e) => { fn(e.target.value); readouts(); save(); scheduleRebuild(); };
+    ['tilt', (v) => { st.tilt = +v / 100; }], ['need', (v) => { st.need = +v; }],
+    ['style2', (v) => { st.style = +v; }], ['tilt2', (v) => { st.tilt = +v / 100; }]]) {
+    const el = $(`#${id}`);
+    if (!el) continue;
+    el.oninput = (e) => {
+      fn(e.target.value);
+      readouts();
+      if (id === 'style2') $('#style').value = st.style;
+      if (id === 'tilt2') $('#tilt').value = Math.min(100, Math.round(st.tilt * 100));
+      save(); scheduleRebuild();
+    };
   }
   $('#rookie').onchange = (e) => { st.rookie = e.target.checked; save(); rebuild(); };
   $('#slot').oninput = (e) => {
@@ -979,10 +1025,12 @@ function wire() {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.strat) {
-      const x = STRATEGIES.find((y) => y.key === b.dataset.strat);
-      // a strategy is just these knobs - it never touches your stat weights
-      Object.assign(st, { ...x.set, posx: { ...x.set.posx } });
+      // a preset sets temperament only - never position values, never stat weights
+      Object.assign(st, PRESETS.find((y) => y.key === b.dataset.strat).set);
       save(); renderChrome(); rebuild();
+    } else if (b.dataset.lean) {
+      st.posx = { ...LEANS.find((l) => l.key === b.dataset.lean).posx };
+      save(); rebuild();
     } else if (b.dataset.clearcustom) {
       st.customs = (st.customs || []).filter((c) => c.comp !== b.dataset.clearcustom);
       syncCustoms(); subVersion += 1; save(); rebuild();

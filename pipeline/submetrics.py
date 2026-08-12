@@ -7,6 +7,10 @@ Level 2 - the components are blended against each other.
 Each sub-metric is
     (key, label, extractor, higher_is_better, default_weight, needs_history, default_on)
 
+Nothing here may repeat a formula used by another component. Floor used to break that
+rule with all five of its stats and Ceiling with three of five, which quietly
+double-counted snap share, touch share, games played and team offence.
+
 `needs_history` marks stats computed from 2025 play - rookies and veterans with no 2025 row
 get a substituted score for those, never a zero.
 `default_on` keeps the starting board sensible: the well-covered stats are on, the niche
@@ -117,32 +121,11 @@ COMPONENTS = [
         ('pen_pg', 'Penalties / game',
          lambda a, s, m: _d(a.get('penalty'), a.get('gp')), False, 10, True, False),
     ]),
-    ('floor', 'Floor', 'How safe he is - the reasons he cannot bust', [
-        ('f_games', 'Games played',
-         lambda a, s, m: a.get('gp') or 0, True, 25, True, True),
-        ('f_snap', 'Snap share %',
-         lambda a, s, m: _d(a.get('off_snp'), a.get('tm_off_snp')) * 100, True, 25, True, True),
-        ('f_start', 'Games started %',
-         lambda a, s, m: _d(a.get('gs'), a.get('gp')) * 100, True, 20, True, True),
-        ('f_share', 'Locked-in share of touches',
-         lambda a, s, m: m.get('role_pct', 0), True, 20, False, True),
-        ('f_finish', 'Proven finish last year',
-         lambda a, s, m: a.get('pos_rank_ppr') or 999, False, 10, True, True),
-    ]),
-    ('ceiling', 'Ceiling', 'How high he can go - the reasons he could win you the league', [
-        ('c_exp', 'Explosive plays / game',
-         lambda a, s, m: _d((a.get('rec_40p') or 0) + (a.get('rush_40p') or 0), a.get('gp')),
-         True, 25, True, True),
-        ('c_rz', 'TDs per red-zone touch',
-         lambda a, s, m: _d(a.get('anytime_tds'),
-                            (a.get('rush_rz_att') or 0) + (a.get('rec_rz_tgt') or 0)),
-         True, 20, True, True),
-        ('c_off', 'Team offence',
-         lambda a, s, m: m.get('team_off', 0), True, 20, False, True),
+    ('upside', 'Upside', 'What could make him leap - nothing here is measured elsewhere', [
         ('c_young', 'Young enough to leap',
-         lambda a, s, m: m.get('years_exp', 5), False, 15, False, True),
+         lambda a, s, m: m.get('years_exp', 5), False, 40, False, True),
         ('c_breakout', 'Projected jump on last year',
-         lambda a, s, m: m.get('breakout', 0), True, 20, False, True),
+         lambda a, s, m: m.get('breakout', 0), True, 60, False, True),
     ]),
     ('situation', 'Situation', 'The team around him', [
         ('team_off', 'Team offence',
@@ -156,11 +139,12 @@ COMPONENTS = [
 
 # Level 2 starting weights. Volume and red zone lead, as asked.
 COMPONENT_WEIGHTS = {
-    'volume': 16, 'efficiency': 10, 'redzone': 12, 'explosive': 6,
-    'production': 12, 'role': 9, 'reliability': 5, 'situation': 4, 'projection': 11,
-    # Floor and Ceiling are driven by the Safe <-> Upside slider on Draft Day, which
-    # splits a fixed budget between them. The numbers here are only the starting split.
-    'floor': 8, 'ceiling': 7,
+    'volume': 18, 'efficiency': 11, 'redzone': 13, 'explosive': 7,
+    'production': 13, 'role': 10, 'reliability': 6, 'situation': 5, 'projection': 12,
+    # Upside is the only component with no overlap with any other. The Safe <-> Upside
+    # slider moves weight between the steady components and this one, rather than
+    # inflating two components built from copies of the others.
+    'upside': 5,
 }
 
 # A component with no sub-metrics - the 2026 projected-points percentile. League-specific,

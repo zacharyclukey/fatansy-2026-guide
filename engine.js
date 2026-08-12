@@ -24,13 +24,35 @@ export const DEFAULT_SETTINGS = (data) => ({
       c.subs.map((s) => [s.key, { on: s.on, w: { ...s.w } }]))),
 });
 
-// Floor and Ceiling are two ends of one dial - the style slider splits a fixed budget
-// between them rather than being typed independently.
+// Safe <-> Upside moves weight between the components that describe a settled, dependable
+// player and the one that describes room to grow.
+//
+// It used to inflate two components, Floor and Ceiling, that were built almost entirely
+// from formulas copied out of the others - Floor was 100% copies. Sliding it was secretly
+// re-weighting volume and role under a different name. Now it shifts the real weights.
+export const STEADY = ['volume', 'role', 'reliability', 'production'];
+export const RISKY = ['upside', 'explosive'];
+
 export function componentWeights(st) {
   const w = { ...st.comp };
-  w.floor = Math.round((st.styleBudget * (100 - st.style)) / 100);
-  w.ceiling = Math.round((st.styleBudget * st.style) / 100);
+  // -1 at full safe, +1 at full upside
+  const lean = ((st.style ?? 50) - 50) / 50;
+  const shift = (st.styleBudget ?? 15) * lean;
+  const give = (keys, amount) => {
+    const total = keys.reduce((a, k) => a + (w[k] || 0), 0) || 1;
+    for (const k of keys) w[k] = Math.max(0, Math.round((w[k] || 0) + amount * ((w[k] || 0) / total)));
+  };
+  give(STEADY, -shift);
+  give(RISKY, shift);
   return w;
+}
+
+// A player's floor, for the risk label only. It is deliberately NOT a rating component:
+// it is made of volume, role and reliability, and counting it again inside the rating is
+// exactly the double-count that was there before.
+export function floorScore(scores) {
+  const parts = [scores.volume, scores.role, scores.reliability].filter((v) => v != null);
+  return parts.length ? parts.reduce((a, b) => a + b, 0) / parts.length : 50;
 }
 
 const RATE_POS = ['QB', 'RB', 'WR', 'TE'];
@@ -257,6 +279,7 @@ export function buildBoard(data, st, cache) {
         }
         return s;
       })();
+      scores.floorish = floorScore(scores);   // display only, never weighted
       return { p, pts, vor, scores };
     });
 
@@ -298,6 +321,9 @@ export function buildBoard(data, st, cache) {
     const posx = st.posx[r.p.pos] ?? 1;
     // The rating is ADDED, not multiplied: multiplying erases it when VOR is 0 and
     // inverts it when VOR is negative.
+    // tilt 0-1 behaves as before (up to +/-20 points of score). Above 1 the rating starts
+    // to genuinely outrank value, which is what "I trust my own ratings" has to mean if it
+    // is to mean anything - the board makes the trade-off explicit rather than capping it.
     let s = (r.vorPct + st.tilt * 40 * ((r.rating - 50) / 50)) * posx + r.need;
     if (st.rookie && r.p.rookie) {
       const c = r.p.m.rookie_conf || '';
@@ -478,7 +504,6 @@ export function influence(data, st, cache) {
   const out = {};
   for (const c of data.components) {
     const alt = { ...st, comp: { ...st.comp, [c.key]: 0 } };
-    if (c.key === 'floor' || c.key === 'ceiling') alt.styleBudget = 0;
     const rows = buildBoard(data, alt, cache).rows;
     let sum = 0;
     let top = 0;

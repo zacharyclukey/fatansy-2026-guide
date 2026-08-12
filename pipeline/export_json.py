@@ -35,6 +35,7 @@ RAW_KEEP = ['gp', 'gs', 'off_snp', 'tm_off_snp', 'rush_att', 'rec_tgt', 'rec', '
 # then gets "ranked 0-100 against others at his position" appended, because that part is
 # true of all of them.
 TIPS = {
+ 'c_young': 'Years in the league, inverted - younger players have more room to improve.',
  'snap_share': 'Share of his team offensive snaps he was on the field for. Snaps / team snaps.',
  'snaps_pg': 'Offensive snaps divided by games played.',
  'touches_pg': 'Carries plus targets, divided by games played.',
@@ -72,15 +73,6 @@ TIPS = {
  'starts': 'Games started in 2025.',
  'fum_pg': 'Fumbles divided by games played. Lower is better.',
  'pen_pg': 'Penalties divided by games played. Lower is better.',
- 'f_games': 'Games played - the simplest durability signal there is.',
- 'f_snap': 'Share of team snaps. A high snap share is hard to lose.',
- 'f_start': 'Games started divided by games played.',
- 'f_share': "Share of his team's projected touches - how locked in the role is.",
- 'f_finish': 'Where he finished at his position last year. Proven, not projected.',
- 'c_exp': 'Plays of 40+ yards divided by games - the league-winning kind.',
- 'c_rz': 'Touchdowns per red-zone touch.',
- 'c_off': 'Quality of his offence, from its projected fantasy points.',
- 'c_young': 'Years in the league, inverted - younger has more room to leap.',
  'c_breakout': 'How much more the 2026 projection expects per game than he managed in 2025.',
  'team_off': "His offence's projected fantasy points.",
  'team_def': "His defence's quality - a good defence means more of the game with the lead.",

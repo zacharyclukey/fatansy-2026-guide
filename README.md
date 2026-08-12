@@ -72,24 +72,30 @@ the data but not commit it.
 The Ratings Lab shows a **±** figure per component: how far the board moves if you switch
 that component off. It is measured by rebuilding the board, not estimated.
 
-The numbers are smaller than the size of the interface suggests. At the default settings,
-switching off any single component moves players about **1-3 places on average** and
-changes almost nobody in the top 50. Two reasons:
+At the default settings the numbers are small — most components move players 2-4 places
+and change almost nobody in the top 50. Two reasons, and only one of them was fixable:
 
-1. **The components overlap.** They are percentiles within position and they agree with
-   each other — volume and production correlate at r = 0.83, role and floor at 0.83. Drop
-   one and the others carry the same signal.
-2. **Value over replacement dominates the draft score.** The rating is a tilt on top of
-   real projected points, and at the default `Trust my ratings = 50` it can move a player
-   by at most about 20 points of score.
+1. **Value over replacement dominates the draft score.** The rating is a tilt on top of
+   real projected points. Below `Trust my ratings = 100` it can only nudge. The slider now
+   goes to 200, where your ratings genuinely outrank the projections — measured at ±7.7
+   places and 5 players in and out of the top 50, roughly double what 100 does.
+2. **The components used to overlap, badly.** That part is fixed — see below.
 
-The one component that genuinely moves the board is the **2026 projection** (±12 places),
-because it is the only one measuring this season rather than last.
+### The duplication that was there
 
-None of that makes the ratings pointless — they decide the order *within* a tier and they
-are what makes "your guy" differ from the room. But if you want them to change who you
-draft rather than just the order you rank them, the lever is **Trust my ratings**, not the
-component weights.
+`Floor` was **100% formulas copied from other components** — its snap share was Volume's,
+its touch share was Role's, its games played was Reliability's, its finish was
+Production's. `Ceiling` was 65% copies. So the Safe ↔ Upside slider was secretly a second
+volume/role knob, and every one of those stats was counted twice in any rating that used
+both.
+
+Fixed by deleting Floor as a component and trimming Ceiling to the two stats that are
+genuinely its own — youth and the jump the 2026 projection expects — now called **Upside**.
+A player's floor is still shown in the risk label; it is just computed from volume, role
+and reliability for display rather than being fed back into the rating as if it were new
+information. Safe ↔ Upside now moves weight between the steady components and Upside.
+
+No stat appears in two components any more, and the test suite fails if one ever does.
 
 ## How the rating works
 
@@ -110,7 +116,7 @@ backs against the room's 6. The app now fills each position's own slots, lets th
 remaining flex-eligible players take the flex spots, and reads off who they actually are.
 It self-corrects for PPR, half-PPR, TE premium or anything else a league invents.
 
-**Floor** and **Ceiling** are not typed directly — the Safe ↔ Upside slider on the board
+**Floor** and **Ceiling** are gone as components; **Upside** is not typed directly — the Safe ↔ Upside slider on the board
 splits a fixed budget between them.
 
 `DRAFT SCORE = (value over replacement + tilt × rating) × position multiplier + need bonus

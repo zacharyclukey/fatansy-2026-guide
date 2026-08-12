@@ -26,8 +26,9 @@ export const TIPS = {
 
   // draft-day settings
   style: ['Safe starters, or players who could win the league.',
-    'Shifts weight between the Floor and Ceiling components.'],
-  tilt: ['How much your ratings override plain value.', '0 = pure value. 100 = trust yourself.'],
+    'Moves weight between volume/role/reliability and Upside.'],
+  tilt: ['How much your ratings override plain value.',
+    '0 = pure value, 100 = equal footing, above that your ratings lead.'],
   need: ['Nudges toward positions you still need.', 'Adds points to a position short of starters.'],
   rookie: ['Pay up for rookies.', 'Up to +10, scaled by how sure the draft-capital read is.'],
   hideGone: ['Clear drafted players off the board.', ''],
@@ -40,8 +41,8 @@ export const TIPS = {
   production: ['What he actually scored last year.', ''],
   role: ['His place in the offence this year.', ''],
   reliability: ['Whether he stays on the field.', ''],
-  floor: ['The reasons he cannot bust.', 'Set by the Safe ↔ Upside slider.'],
-  ceiling: ['The reasons he could win your league.', 'Set by the Safe ↔ Upside slider.'],
+  upside: ['Room to grow — youth and the jump the projection expects.',
+    'The only component that shares no formula with any other.'],
   situation: ['The team and schedule around him.', ''],
   projection: ['What 2026 projections expect.', 'Percentile within his position.'],
 
@@ -84,8 +85,10 @@ export const TIPS = {
   age: ['How old the projections and ADP are.',
     'Rebuilt from Sleeper each morning. Over a week old means the refresh has stopped.'],
 
-  strat: ['A shortcut for the sliders below.',
-    'Sets position multipliers, tilt, need and style. Never touches your stat weights.'],
+  strat: ['A temperament to start from.',
+    'Sets trust, need and safe/upside. Never touches position values or stat weights.'],
+  lean: ['Whether to favour a position right now.',
+    'Read from how deep each position still is, so it changes as the board empties.'],
 
   posW: ['What this stat counts for at this position.', 'Zero means it says nothing there.'],
 };

@@ -65,6 +65,11 @@ async function boot({ store = {}, offline = false } = {}) {
   return { window, d: window.document, errs, store };
 }
 const settle = () => new Promise((r) => setTimeout(r, 60));
+// position multipliers as the app has them, read back out of saved settings
+const st_posx = (d) => {
+  const raw = d.defaultView.localStorage.getItem('draft2026');
+  return raw ? (JSON.parse(raw).posx || {}) : {};
+};
 const fire = (el, type) => {
   const w = el.ownerDocument ? el.ownerDocument.defaultView : el;   // works for window too
   el.dispatchEvent(new w.Event(type, { bubbles: true }));
@@ -219,8 +224,10 @@ const fire = (el, type) => {
   d.querySelector('[data-v="ratings"]').click();
   await settle();
   ok('every weight is a slider', d.querySelectorAll('#comps input[type="number"]').length === 0);
-  ok('per-position sliders', d.querySelectorAll('#comps [data-sw]').length === 200,
-    `${d.querySelectorAll('#comps [data-sw]').length}`);
+  // derived, not hardcoded - the stat list changes and the test should follow it
+  const nStats = players.components.reduce((a, c) => a + c.subs.length, 0);
+  ok('per-position sliders', d.querySelectorAll('#comps [data-sw]').length === nStats * 4,
+    `${d.querySelectorAll('#comps [data-sw]').length} for ${nStats} stats x 4 positions`);
 
   const before = d.querySelectorAll('#comps .statRow:not(.hdr)').length;
   const menu = d.querySelector('#addPick');
@@ -252,8 +259,9 @@ const fire = (el, type) => {
   d.querySelector('[data-v="ratings"]').click();
   // the influence readout - it is measured, so it must actually be there and be numeric
   const moves = [...d.querySelectorAll('#comps .cMove')].map((x) => x.textContent.trim());
-  ok('every component reports its influence', moves.length === 11 && moves.every((x) => /^±\d/.test(x)),
-    moves.join(' '));
+  ok('every component reports its influence',
+    moves.length === players.components.length && moves.every((x) => /^±\d/.test(x)),
+    `${moves.length} of ${players.components.length}: ${moves.join(' ')}`);
   ok('the influence note explains itself', /switch a component off|switch/.test(d.querySelector('#inflNote').textContent));
 
   ok('an unused stat can be added',
@@ -269,6 +277,25 @@ const fire = (el, type) => {
     again.d.querySelectorAll('#comps .statRow:not(.hdr)').length === before + 1);
 }
 
+// -------------------------------------------- 4b. the model has no duplicated formulas
+{
+  // Floor used to be 100% formulas copied from volume/role/reliability/production, which
+  // double-counted them every time the Safe/Upside slider moved. Nothing may share a stat.
+  const seen = new Map();
+  for (const c of players.components) {
+    for (const s of c.subs) {
+      if (!seen.has(s.label)) seen.set(s.label, []);
+      seen.get(s.label).push(c.key);
+    }
+  }
+  const shared = [...seen].filter(([, cs]) => new Set(cs).size > 1);
+  ok('no stat appears in two components', shared.length === 0,
+    shared.map(([l, cs]) => `${l} in ${cs.join('+')}`).join('; '));
+  ok('floor is gone as a component', !players.components.some((c) => c.key === 'floor'));
+  ok('upside survives with its own stats',
+    players.components.find((c) => c.key === 'upside')?.subs.length === 2);
+}
+
 // ---------------------------------------------------------------- 5. strategies
 {
   const { d } = await boot();
@@ -281,14 +308,35 @@ const fire = (el, type) => {
       .forEach((r) => { const p = r.querySelector('.pos').textContent; c[p] = (c[p] || 0) + 1; });
     return c;
   };
-  d.querySelector('[data-strat="zerorb"]').click(); await settle();
+  // the lean is a reading of the board, so it needs to know when you pick
+  ok('a lean needs the draft slot first',
+    /Set your draft slot/.test(d.querySelector('#lean').textContent));
+  const sl2 = d.querySelector('#slot'); sl2.value = '4'; fire(sl2, 'input');
+  await settle();
+  ok('with a slot the board reads itself',
+    /Waiting costs you .* at running back/.test(d.querySelector('#lean').textContent),
+    d.querySelector('#lean').textContent.replace(/\s+/g, ' ').slice(0, 90));
+  ok('one lean is starred as the suggestion',
+    [...d.querySelectorAll('[data-lean]')].filter((x) => x.textContent.includes('★')).length === 1);
+
+  d.querySelector('[data-lean="zerorb"]').click(); await settle();
   const zero = mix();
-  d.querySelector('[data-strat="robustrb"]').click(); await settle();
+  d.querySelector('[data-lean="robustrb"]').click(); await settle();
   const robust = mix();
   ok('Zero RB favours receivers', zero.WR > zero.RB, `WR ${zero.WR} vs RB ${zero.RB}`);
   ok('Robust RB favours backs', robust.RB > robust.WR, `RB ${robust.RB} vs WR ${robust.WR}`);
+
+  // presets are temperament only and live in the lab
+  d.querySelector('[data-v="ratings"]').click(); await settle();
+  ok('presets are in the lab', d.querySelectorAll('[data-strat]').length === 5);
+  ok('no position lean in the lab', d.querySelectorAll('#v-ratings [data-lean]').length === 0);
+  const before = JSON.stringify(st_posx(d));
+  d.querySelector('[data-strat="upside"]').click(); await settle();
+  d.querySelector('[data-v="ratings"]').click();
+  ok('a preset leaves position values alone', JSON.stringify(st_posx(d)) === before);
   const need = d.querySelector('#need'); need.value = '15'; fire(need, 'input');
   await settle();
+  d.querySelector('[data-v="ratings"]').click();
   ok('editing a slider drops the preset label',
     /Custom/.test(d.querySelector('#stratWhy').textContent));
 }

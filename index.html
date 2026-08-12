@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608121334" />
+<link rel="stylesheet" href="styles.css?v=202608121354" />
 </head>
 <body>
 
@@ -44,7 +44,7 @@
       </label>
       <label class="knob">
         <span class="knobLabel"><span data-tip="tilt" tabindex="0">Trust my ratings</span> <em id="tiltOut">50%</em></span>
-        <input id="tilt" type="range" min="0" max="100" step="5" value="50" />
+        <input id="tilt" type="range" min="0" max="200" step="5" value="50" />
         <span class="hint">0 = pure value, 100 = trust the rating</span>
       </label>
       <label class="knob">
@@ -75,6 +75,7 @@
   </div>
 
   <div id="advice" class="advice" data-tip="advice" tabindex="0"></div>
+  <div id="lean" class="lean"></div>
 
   <div class="colBar">
     <span class="colBarLabel">Show</span>
@@ -114,8 +115,25 @@
 <!-- ============================================================ RATINGS -->
 <section id="v-ratings" hidden>
   <main>
-    <p class="lede">Drag the top sliders to say what wins a league. Open one to choose the
-      individual stats behind it, and how much each is worth at each position.</p>
+    <p class="lede">Start from a temperament, then tune it. Open a component to choose the
+      individual stats behind it and what each is worth at each position.</p>
+    <div class="strat">
+      <span class="stratLabel" data-tip="strat" tabindex="0">Starting point</span>
+      <span id="stratChips" class="chips"></span>
+      <p id="stratWhy" class="hint"></p>
+    </div>
+    <div class="knobs labKnobs">
+      <label class="knob">
+        <span class="knobLabel"><span data-tip="tilt" tabindex="0">Trust my ratings</span> <em id="tiltOut2">50%</em></span>
+        <input id="tilt2" type="range" min="0" max="200" step="5" value="50" />
+        <span class="hint">Past 100 your ratings start to outrank projected points.</span>
+      </label>
+      <label class="knob">
+        <span class="knobLabel"><span data-tip="style" tabindex="0">Safe <em id="styleOut2">balanced</em> Upside</span></span>
+        <input id="style2" type="range" min="0" max="100" step="5" value="50" />
+        <span class="hint">Moves weight between the steady components and Upside.</span>
+      </label>
+    </div>
     <div class="rowbtns">
       <button id="exportR">Export my ratings</button>
       <label class="fileBtn">Import ratings<input id="importR" type="file" accept=".json" /></label>
@@ -169,6 +187,6 @@
   <button id="reset" class="ghost small">Reset drafted</button>
 </footer>
 
-<script type="module" src="app.js?v=202608121334"></script>
+<script type="module" src="app.js?v=202608121354"></script>
 </body>
 </html>
