@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608121233" />
+<link rel="stylesheet" href="styles.css?v=202608121240" />
 </head>
 <body>
 
@@ -31,6 +31,11 @@
   </div>
 
   <div id="settings" class="panel" hidden>
+    <div class="strat">
+      <span class="stratLabel" data-tip="strat" tabindex="0">Strategy</span>
+      <span id="stratChips" class="chips"></span>
+      <p id="stratWhy" class="hint"></p>
+    </div>
     <div class="knobs">
       <label class="knob">
         <span class="knobLabel"><span data-tip="style" tabindex="0">Safe <em id="styleOut">balanced</em> Upside</span></span>
@@ -157,6 +162,6 @@
   <button id="reset" class="ghost small">Reset drafted</button>
 </footer>
 
-<script type="module" src="app.js?v=202608121233"></script>
+<script type="module" src="app.js?v=202608121240"></script>
 </body>
 </html>

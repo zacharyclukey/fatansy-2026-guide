@@ -69,6 +69,9 @@ export const TIPS = {
   'card:ppg': ['PPR points per game.', 'Total points / games played.'],
   'card:finish': ['Where he finished at his position in 2025.', ''],
 
+  strat: ['A shortcut for the sliders below.',
+    'Sets position multipliers, tilt, need and style. Never touches your stat weights.'],
+
   posW: ['What this stat counts for at this position.', 'Zero means it says nothing there.'],
 };
 

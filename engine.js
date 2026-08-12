@@ -70,30 +70,60 @@ export function inLeague(p, league) {
   return true;
 }
 
-// Replacement level: the best player at this position you could still get for free after
+// Replacement level: the best player at this position you could still get for free once
 // every team has filled its starting slots, flex included.
+//
+// The flex split used to be a hardcoded RB 40 / WR 55 / TE 5, which was simply wrong. In a
+// PPR league the twelve best players left over after everyone's starters are filled are
+// ALL receivers - so receivers were being measured against a bar 5 slots too shallow and
+// backs against one 5 slots too deep. Both errors pushed the same way and the board came
+// out far too RB-heavy.
+//
+// So it is derived instead: fill each position's own slots, then let the best remaining
+// flex-eligible players take the flex spots, and see who they actually are. That
+// self-corrects for PPR, half-PPR, TE premium or any other scoring a league invents.
+export function flexFill(players, league) {
+  const flexSlots = (league.starters.FLEX || 0) * league.teams;
+  const eligible = ['RB', 'WR', 'TE'].filter((p) => league.starters[p] != null || flexSlots);
+  const pool = {};
+  for (const pos of eligible) {
+    pool[pos] = players
+      .filter((p) => p.pos === pos && inLeague(p, league))
+      .map((p) => ({ p, pts: projectedPoints(p, league) }))
+      .sort((a, b) => b.pts - a.pts);
+  }
+  // everyone locked into a dedicated slot at his own position
+  const used = {};
+  for (const pos of eligible) used[pos] = (league.starters[pos] || 0) * league.teams;
+  // then the flex spots go to the best of whoever is left, wherever they play
+  const leftovers = eligible
+    .flatMap((pos) => pool[pos].slice(used[pos]).map((x) => ({ ...x, pos })))
+    .sort((a, b) => b.pts - a.pts)
+    .slice(0, flexSlots);
+  for (const x of leftovers) used[x.pos] += 1;
+  return { used, pool };
+}
+
 export function replacementLevels(players, league) {
-  const flexShare = { RB: 0.40, WR: 0.55, TE: 0.05 };
-  const flex = league.starters.FLEX || 0;
   const out = {};
+  const { used, pool } = flexFill(players, league);
+
   for (const pos of Object.keys(league.starters)) {
     if (pos === 'FLEX') continue;
-    const pool = players
+    const list = pool[pos] ? pool[pos].map((x) => x.pts) : players
       .filter((p) => p.pos === pos && inLeague(p, league))
       .map((p) => projectedPoints(p, league))
       .sort((a, b) => b - a);
-    if (!pool.length) { out[pos] = 0; continue; }
-    const n = Math.max(1, Math.round(
-      league.teams * (league.starters[pos] + (flexShare[pos] || 0) * flex)));
+    if (!list.length) { out[pos] = 0; continue; }
+    // flex-eligible positions use the derived count; K and DEF just use their own slots
+    const n = Math.max(1, used[pos] ?? (league.starters[pos] || 0) * league.teams);
     // smoothed across three ranks so one odd projection cannot set the baseline
-    const win = pool.slice(Math.max(0, n - 2), Math.min(pool.length, n + 1));
-    out[pos] = win.reduce((a, b) => a + b, 0) / win.length;
+    const win = list.slice(Math.max(0, n - 2), Math.min(list.length, n + 1));
+    out[pos] = win.length ? win.reduce((a, b) => a + b, 0) / win.length : list[list.length - 1];
   }
   return out;
 }
 
-// Any account can open this page, so nobody else's leagues are assumed. Until you import
-// from Sleeper you get one neutral league, and importing replaces it with your own.
 export const SAMPLE_LEAGUE = {
   name: 'Standard 12-team PPR',
   teams: 12,

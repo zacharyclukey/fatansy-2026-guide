@@ -436,3 +436,15 @@ span.nm:hover { text-decoration: none; }
 }
 .wait b.good { color: var(--good); } .wait b.warn { color: var(--warn); } .wait b.bad { color: var(--bad); }
 .num em.soft { color: var(--ink3); }
+
+/* ---------------------------------------------------------------- strategies */
+.strat { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid var(--line2); }
+.stratLabel {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink3); display: block; margin-bottom: 8px;
+}
+.chipBtn {
+  height: 30px; padding: 0 13px; font-size: 13px; border-radius: 999px;
+}
+.strat .hint { margin-top: 10px; max-width: 78ch; }
+.strat .hint b { color: var(--ink); font-weight: 500; }

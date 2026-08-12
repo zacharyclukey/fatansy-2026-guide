@@ -1,10 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121233';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121233';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121233';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121240';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121240';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121240';
+import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121240';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121233';
+const BUILD = '202608121240';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -248,9 +249,12 @@ function rebuild() {
 
 // Sliders fire an input event per pixel. Coalescing to one rebuild per animation frame
 // keeps the drag smooth instead of queueing a full re-render behind every event.
+const raf = typeof requestAnimationFrame === 'function'
+  ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+
 function scheduleRebuild() {
   if (frame) return;
-  frame = requestAnimationFrame(() => { frame = null; rebuild(); });
+  frame = raf(() => { frame = null; rebuild(); });
 }
 
 function renderAll() {
@@ -596,12 +600,24 @@ function renderChrome() {
   readouts();
 }
 
+function renderStrategies() {
+  const on = activeStrategy(st);
+  $('#stratChips').innerHTML = STRATEGIES
+    .map((x) => `<button class="chipBtn" data-strat="${x.key}" aria-pressed="${x.key === on}">${x.name}</button>`)
+    .join('');
+  const cur = STRATEGIES.find((x) => x.key === on);
+  $('#stratWhy').innerHTML = cur
+    ? `<b>${cur.blurb}</b> ${cur.when}`
+    : 'Custom — you have edited the sliders away from any of these. That is fine; they are only starting points.';
+}
+
 function readouts() {
   $('#styleOut').textContent = styleWord(st.style);
   $('#tiltOut').textContent = `${Math.round(st.tilt * 100)}%`;
   $('#needOut').textContent = st.need;
   $('#priority').textContent = priorityOrder(data, st).slice(0, 3)
     .map((c) => c.label.toLowerCase()).join(' › ');
+  renderStrategies();
 }
 
 function show(v) {
@@ -760,7 +776,12 @@ function wire() {
   document.body.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.clearcustom) {
+    if (b.dataset.strat) {
+      const x = STRATEGIES.find((y) => y.key === b.dataset.strat);
+      // a strategy is just these knobs - it never touches your stat weights
+      Object.assign(st, { ...x.set, posx: { ...x.set.posx } });
+      save(); renderChrome(); rebuild();
+    } else if (b.dataset.clearcustom) {
       st.customs = (st.customs || []).filter((c) => c.comp !== b.dataset.clearcustom);
       syncCustoms(); cacheKey = ''; save(); rebuild();
     } else if (b.id === 'more') { limit += 100; renderBoard(); }

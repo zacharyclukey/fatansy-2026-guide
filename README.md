@@ -61,6 +61,15 @@ carry" has two distinct values across every tight end in the league, so weightin
 tight ends was flattening the real differences between them. Zeroed weights are greyed out
 in the ratings view but still editable.
 
+**Replacement level is derived, not assumed.** The flex split used to be a hardcoded
+RB 40 / WR 55 / TE 5. In a full-PPR league the twelve best players left over after every
+team fills its dedicated slots are *all receivers*, so that guess measured receivers
+against a bar five slots too shallow and backs against one five slots too deep. Both
+errors pushed the same way and the board came out badly RB-heavy — 8 of the top 12 were
+backs against the room's 6. The app now fills each position's own slots, lets the best
+remaining flex-eligible players take the flex spots, and reads off who they actually are.
+It self-corrects for PPR, half-PPR, TE premium or anything else a league invents.
+
 **Floor** and **Ceiling** are not typed directly — the Safe ↔ Upside slider on the board
 splits a fixed budget between them.
 
