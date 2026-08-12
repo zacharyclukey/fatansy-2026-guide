@@ -1,9 +1,9 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js?v=202608121152';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121152';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js?v=202608121156';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121156';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121152';
+const BUILD = '202608121156';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -19,24 +19,49 @@ let cacheKey = '';
 let frame = null;
 let limit = 100;
 
-// Four ways to look at the same player. Columns and headers both switch.
-const VIEWS = [
-  ['Value', ['Bye', 'Score', 'vs ADP'], (r) => [r.p.bye || '—', r.score.toFixed(1),
-    fmtGap(r.adpRank - r.rank)]],
-  ['2025 per game', ['Snap %', 'Touch/g', 'Pts/g'], (r) => [
-    pct(r.p.m.snap_share), one(r.p.m.touches_pg), one(r.p.m.last_ppg)]],
-  ['2025 totals', ['Games', 'Yards', 'TDs'], (r) => [
-    r.p.a?.gp ?? '—', r.p.a?.rush_rec_yd ?? '—', r.p.a?.anytime_tds ?? '—']],
-  ['2026 projection', ['Points', 'Pts/g', 'Touches'], (r) => [
-    r.pts.toFixed(0), one(r.p.m.proj_ppg),
-    Math.round((r.p.proj?.rush_att || 0) + (r.p.proj?.rec || 0)) || '—']],
-  ['Red zone', ['RZ/g', 'RZ TD%', 'TDs'], (r) => [
-    one(r.p.m.rz_pg), pct(r.p.m.rz_conv * 100), r.p.a?.anytime_tds ?? '—']],
+// The board always shows your rating and the room's ADP - those two are the whole
+// argument for or against a pick, so they are never behind a toggle. Everything else is
+// a group you can switch on, and several can be on at once.
+const FIXED = [
+  ['Rating', (r) => Math.round(r.rating), 54, 'rt'],
+  ['ADP', (r) => (r.p.adp ? r.p.adp.toFixed(1) : '—'), 52, ''],
+  ['Score', (r) => r.score.toFixed(1), 58, 'sc'],
+];
+const GROUPS = [
+  ['bye', 'Bye + value', [
+    ['Bye', (r) => r.p.bye || '—', 42, ''],
+    ['vs ADP', (r) => gapCell(r), 56, ''],
+  ]],
+  ['pg', '2025 per game', [
+    ['Snap %', (r) => pct(r.p.m.snap_share), 56, ''],
+    ['Tch/g', (r) => one(r.p.m.touches_pg), 52, ''],
+    ['Pts/g', (r) => one(r.p.m.last_ppg), 52, ''],
+  ]],
+  ['tot', '2025 totals', [
+    ['Gms', (r) => r.p.a?.gp ?? '—', 44, ''],
+    ['Yards', (r) => r.p.a?.rush_rec_yd ?? '—', 56, ''],
+    ['TDs', (r) => r.p.a?.anytime_tds ?? '—', 44, ''],
+  ]],
+  ['proj', '2026 projection', [
+    ['Proj', (r) => r.pts.toFixed(0), 52, ''],
+    ['P/g', (r) => one(r.p.m.proj_ppg), 48, ''],
+    ['Tch', (r) => Math.round((r.p.proj?.rush_att || 0) + (r.p.proj?.rec || 0)) || '—', 48, ''],
+  ]],
+  ['rz', 'Red zone', [
+    ['RZ/g', (r) => one(r.p.m.rz_pg), 50, ''],
+    ['RZ TD%', (r) => pct(r.p.m.rz_conv * 100), 60, ''],
+  ]],
 ];
 const one = (v) => (v == null ? '—' : (+v).toFixed(1));
 const pct = (v) => (v == null || Number.isNaN(v) ? '—' : `${Math.round(v)}%`);
-const fmtGap = (g) => `${g > 0 ? '+' : ''}${g}`;
-let statView = 0;
+function gapCell(r) {
+  const g = r.adpRank - r.rank;
+  return `<em class="${g >= 8 ? 'up' : g <= -8 ? 'dn' : ''}">${g > 0 ? '+' : ''}${g}</em>`;
+}
+const activeCols = () => [
+  ...FIXED,
+  ...GROUPS.filter(([k]) => st.cols?.[k]).flatMap(([, , cols]) => cols),
+];
 
 // ---------------------------------------------------------------- state
 function load() {
@@ -149,22 +174,21 @@ function renderBoard() {
     && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
     && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
 
-  const [, heads, cells] = VIEWS[statView];
-  $('#colHeads').innerHTML = heads
-    .map((h, i) => `<span class="col${'ABC'[i]}">${h}</span>`).join('');
+  const cols = activeCols();
+  $('#board').style.setProperty('--cols',
+    `34px minmax(0, 1fr) ${cols.map((c) => `${c[2]}px`).join(' ')} 102px`);
+  $('#colHeads').innerHTML = cols.map((c) => `<span>${c[0]}</span>`).join('');
 
   const out = [];
   for (const r of rows.slice(0, limit)) {
     const d = drafted.has(r.p.id);
     const m = mine.has(r.p.id);
-    const gap = r.adpRank - r.rank;
     out.push(`<div class="row player${d ? ' drafted' : ''}${m ? ' mine' : ''}" role="row">
 <span class="rk">${r.rank}</span>
 <span class="who">${posTag(r.p.pos)}
 <button class="nm" data-open="${r.p.id}" title="Show detail">${r.p.name} <span class="tm">${r.p.team || ''}</span></button>
 ${r.p.rookie ? '<span class="rook">R</span>' : ''}</span>
-${cells(r).map((v, i) => `<span class="num col${'ABC'[i]}${statView === 0 && i === 1 ? ' sc' : ''}`
-  + `${statView === 0 && i === 2 ? (gap >= 8 ? ' up' : gap <= -8 ? ' dn' : '') : ''}">${v}</span>`).join('')}
+${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
 <button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
 <button data-m="${r.p.id}" aria-pressed="${m}">Mine</button></span></div>`);
@@ -454,8 +478,9 @@ function renderChrome() {
   $('#style').value = st.style;
   $('#tilt').value = Math.round(st.tilt * 100);
   $('#need').value = st.need;
-  $('#statView').innerHTML = VIEWS
-    .map(([n], i) => `<option value="${i}"${i === statView ? ' selected' : ''}>${n}</option>`).join('');
+  st.cols ||= { bye: true };
+  $('#colToggles').innerHTML = GROUPS.map(([k, label]) => `<label class="chip">
+<input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`).join('');
   $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
   readouts();
@@ -490,7 +515,11 @@ function wire() {
   };
   $('#league').onchange = (e) => { st.league = +e.target.value; open = null; save(); rebuild(); };
   $('#search').oninput = (e) => { query = e.target.value; limit = 100; renderBoard(); };
-  $('#statView').onchange = (e) => { statView = +e.target.value; save(); renderBoard(); };
+  document.body.addEventListener('change', (e) => {
+    if (!e.target.dataset.col) return;
+    st.cols[e.target.dataset.col] = e.target.checked;
+    save(); renderBoard();
+  });
   $('#reset').onclick = () => { st.picks[st.league] = { drafted: [], mine: [] }; save(); rebuild(); };
   for (const [id, fn] of [['style', (v) => { st.style = +v; }],
     ['tilt', (v) => { st.tilt = +v / 100; }], ['need', (v) => { st.need = +v; }]]) {

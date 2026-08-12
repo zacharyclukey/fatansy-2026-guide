@@ -166,7 +166,7 @@ main { padding: 16px 22px 46px; max-width: 1200px; }
 .board { border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .row {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) var(--cols, 62px 62px 62px) 102px;
+  grid-template-columns: var(--cols, 34px minmax(0, 1fr) 54px 52px 58px 102px);
   gap: 10px; align-items: center;
   padding: 0 14px; min-height: 40px;
   border-bottom: 1px solid var(--line);
@@ -338,8 +338,10 @@ span.nm:hover { text-decoration: none; }
 /* ---------------------------------------------------------------- narrow */
 @media (max-width: 760px) {
   .top, .bar2, main, .foot { padding-left: 14px; padding-right: 14px; }
-  .row { grid-template-columns: 28px minmax(0, 1fr) 58px 92px; gap: 8px; }
-  .row > .colB, .row > .colC { display: none; }
+  /* the board scrolls sideways rather than dropping columns - if you ticked a group
+     you want to see it, and hiding it silently is worse than a swipe */
+  main { overflow-x: auto; }
+  .board { min-width: 560px; }
   .row.lineup { grid-template-columns: 44px minmax(0, 1fr) 64px; }
   .row.lineup > :nth-child(3), .row.lineup > :nth-child(4) { display: none; }
   .detail { padding-left: 16px; }
@@ -348,3 +350,28 @@ span.nm:hover { text-decoration: none; }
   .statRow { grid-template-columns: minmax(0, 1fr) repeat(2, 76px); }
   .statRow > :nth-child(4), .statRow > :nth-child(5) { display: none; }
 }
+
+
+/* ---------------------------------------------------------------- column chips */
+.colBar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 22px 0;
+}
+.colBarLabel {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink3);
+}
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font-size: 13px; background: var(--card); border: 1px solid var(--line2);
+  border-radius: 999px; padding: 0 12px 0 10px; height: 30px;
+  transition: background .12s, border-color .12s;
+}
+.chip:hover { background: var(--panel); border-color: var(--ink3); }
+.chip input { width: 14px; height: 14px; }
+.chip:has(input:checked) {
+  background: var(--fieldSoft); border-color: var(--field); color: var(--field);
+}
+.rt { font-weight: 600; color: var(--ink); }
+.num em { font-style: normal; }

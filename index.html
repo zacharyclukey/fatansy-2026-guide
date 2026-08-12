@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608121152" />
+<link rel="stylesheet" href="styles.css?v=202608121156" />
 </head>
 <body>
 
@@ -27,7 +27,6 @@
     <input id="search" type="search" placeholder="Search players" aria-label="Search players" />
     <nav class="filters" id="filters" aria-label="Position filter"></nav>
     <span class="spacer"></span>
-    <select id="statView" aria-label="Which numbers to show"></select>
     <button id="settingsBtn" aria-expanded="false">Settings</button>
   </div>
 
@@ -62,8 +61,13 @@
     <p class="priority">You are drafting for <span id="priority"></span></p>
   </div>
 
+  <div class="colBar">
+    <span class="colBarLabel">Show</span>
+    <span id="colToggles" class="chips"></span>
+  </div>
+
   <main>
-    <div class="board" role="table" aria-label="Draft board">
+    <div class="board" id="board" role="table" aria-label="Draft board">
       <div class="row head" role="row">
         <span role="columnheader">#</span>
         <span role="columnheader">Player</span>
@@ -145,6 +149,6 @@
   <button id="reset" class="ghost small">Reset drafted</button>
 </footer>
 
-<script type="module" src="app.js?v=202608121152"></script>
+<script type="module" src="app.js?v=202608121156"></script>
 </body>
 </html>
