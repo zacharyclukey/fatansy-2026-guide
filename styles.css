@@ -419,6 +419,8 @@ span.nm:hover { text-decoration: none; }
 .callTag.Steal { background: var(--good); color: #fff; }
 .callTag.Value { background: var(--goodSoft); color: var(--good); border: 1px solid var(--good); }
 .callTag.Fair { background: var(--panel2); color: var(--ink2); }
+.callTag.Yourguy { background: var(--accentSoft); color: var(--accent); border: 1px solid var(--accent); }
+.callTag.Roomisright { background: var(--panel2); color: var(--warn); border: 1px solid var(--warn); }
 .callTag.Reach { background: var(--badSoft); color: var(--bad); border: 1px solid var(--bad); }
 .wait {
   margin: 0 0 12px; font-size: 14px; padding: 9px 12px;

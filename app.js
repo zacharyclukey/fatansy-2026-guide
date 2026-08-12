@@ -1,10 +1,10 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121216';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121216';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121216';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121221';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121221';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121221';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121216';
+const BUILD = '202608121221';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -127,20 +127,41 @@ const WORRY = {
 
 // The projection is left out of both halves - it is most of what the score already says,
 // so naming it as his strength tells you nothing.
-// Where he sits against the pick that is actually on the clock, not against a static rank.
+// Two different gaps, and the call needs both:
+//
+//   market edge = how far past his ADP the draft has gone. Is the ROOM letting him slide?
+//   your edge   = how far above the current pick your own board has him. Do YOU want him?
+//
+// Only when both are positive is it a steal. A player who has slid twenty picks but sits
+// 200th on your board is not a bargain - it means the room is right and you agree. And a
+// player you rate far above his ADP is worth taking early even though the market calls
+// that a reach, which is the whole point of having your own ratings.
 function callFor(r) {
   const now = clock?.currentPick;
-  if (!now || !r.p.adp) {
+  if (!now) {
     const g = r.adpRank - r.rank;
-    return g >= 12 ? ['Value', `You rate him ${g} picks above the room.`]
-      : g <= -12 ? ['Reach', `You have him ${-g} picks ahead of the room.`]
-        : ['Fair', 'Priced about where the room has him.'];
+    return g >= 12 ? ['Value', `You rate him ${g} spots above the room.`]
+      : g <= -12 ? ['Reach', `The room rates him ${-g} spots above you.`]
+        : ['Fair', 'You and the room agree on him.'];
   }
-  const past = now - r.p.adp;   // positive = the draft is already past where he goes
-  if (past >= 12) return ['Steal', `${Math.round(past)} picks past his ADP and still on the board.`];
-  if (past >= 4) return ['Value', `Lasted ${Math.round(past)} picks longer than the room expects.`];
-  if (past >= -6) return ['Fair', 'About where the room has him going.'];
-  return ['Reach', `${Math.round(-past)} picks earlier than the room would take him.`];
+  const mkt = r.p.adp ? now - r.p.adp : 0;   // + = the draft is past where he normally goes
+  const you = now - r.rank;                  // + = your board has him better than this pick
+
+  if (you >= 10 && mkt >= 8) {
+    return ['Steal', `You have him ${Math.round(you)} picks better than this slot, and he is `
+      + `${Math.round(mkt)} past his ADP. Both you and the room have left him here.`];
+  }
+  if (you >= 10) {
+    return ['Your guy', `Your board has him ${Math.round(you)} picks better than this slot. `
+      + `The room would call this early — that is your rating disagreeing, not a mistake.`];
+  }
+  if (mkt >= 12 && you <= 0) {
+    return ['Room is right', `He has slid ${Math.round(mkt)} picks past his ADP, but your `
+      + `board has him at #${r.rank} too. A faller you also do not rate is not a bargain.`];
+  }
+  if (you >= 4) return ['Value', `A little better than this slot on your board (#${r.rank}).`];
+  if (you >= -8) return ['Fair', `About right for this slot — your board has him #${r.rank}.`];
+  return ['Reach', `Your board has him #${r.rank}, ${Math.round(-you)} picks later than this.`];
 }
 
 // Wait, or take him now - the question the whole board exists to answer. The wording
@@ -155,7 +176,9 @@ function waitAdvice(r, drafted) {
   const n = Math.round(p * 100);
   const pool = poolAround(board.rows, r, drafted);
   const at = `pick ${clock.target} (${clock.gap} away)`;
-  const similar = pool >= 4 ? ` ${pool} similar players are still on the board.` : '';
+  // deep into the draft the scores compress and "122 similar players" is true but absurd
+  const many = pool > 20 ? '20+' : pool;
+  const similar = pool >= 4 ? ` ${many} similar players are still on the board.` : '';
   const alone = pool === 0 ? ' Nobody close to him is left.' : '';
 
   if (clock.onClock) {
@@ -295,7 +318,7 @@ function detail(r) {
   const drafted = new Set(picks().drafted);
   const wait = waitAdvice(r, drafted);
   return `<div class="detail">
-<p class="call"><span class="callTag ${call}">${call}</span> ${why}</p>
+<p class="call"><span class="callTag ${call.replace(/\s+/g, '')}">${call}</span> ${why}</p>
 ${wait ? `<p class="wait">${wait}</p>` : ''}
 <p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}</p>
 <div class="bars">${bars}</div>

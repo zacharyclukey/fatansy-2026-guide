@@ -11,8 +11,6 @@ export const TIPS = {
 
   ADP: ['Where the wider Sleeper room drafts him.', 'Not your league specifically.'],
   Bye: ['The week his team is off.', ''],
-  'vs ADP': ['How far he falls past your rank. Positive is a bargain.',
-    'His ADP rank minus his board rank.'],
 
   'Snap %': ['Share of team snaps he was on the field for, 2025.', ''],
   'Tch/g': ['Touches per game, 2025.', 'Carries plus catches / games.'],
@@ -46,6 +44,9 @@ export const TIPS = {
   ceiling: ['The reasons he could win your league.', 'Set by the Safe ↔ Upside slider.'],
   situation: ['The team and schedule around him.', ''],
   projection: ['What 2026 projections expect.', 'Percentile within his position.'],
+
+  'vs ADP': ['How far your board rates him above the room.',
+    'His ADP rank minus his rank on your board.'],
 
   'Back?': ['Chance he is still there at your next pick.',
     'Estimated from ADP spread — a guide, not a guarantee.'],
