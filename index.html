@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608121240" />
+<link rel="stylesheet" href="styles.css?v=202608121254" />
 </head>
 <body>
 
@@ -74,6 +74,8 @@
     </label>
   </div>
 
+  <div id="advice" class="advice" data-tip="advice" tabindex="0"></div>
+
   <div class="colBar">
     <span class="colBarLabel">Show</span>
     <span id="colToggles" class="chips"></span>
@@ -96,6 +98,9 @@
 <!-- ============================================================ MY TEAM -->
 <section id="v-roster" hidden>
   <main>
+    <h2 class="h2">Your next pick</h2>
+    <div id="rosterAdvice" class="advice"></div>
+    <h2 class="h2">Lineup</h2>
     <div id="lineup"></div>
     <h2 class="h2">Bye weeks</h2>
     <div id="byes" class="byes"></div>
@@ -116,6 +121,7 @@
       <label class="fileBtn">Import ratings<input id="importR" type="file" accept=".json" /></label>
       <button id="resetR" class="ghost">Reset to default</button>
     </div>
+    <div id="addStat" class="addStat"></div>
     <p class="priority big">You are drafting for <span id="priority2"></span></p>
     <div id="comps"></div>
   </main>
@@ -162,6 +168,6 @@
   <button id="reset" class="ghost small">Reset drafted</button>
 </footer>
 
-<script type="module" src="app.js?v=202608121240"></script>
+<script type="module" src="app.js?v=202608121254"></script>
 </body>
 </html>

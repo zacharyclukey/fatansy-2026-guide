@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121240';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121240';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121240';
-import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121240';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121254';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121254';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121254';
+import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121254';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121240';
+const BUILD = '202608121254';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -17,7 +17,8 @@ let query = '';
 let open = null;
 let timer = null;
 let cache = null;
-let cacheKey = '';
+let subVersion = 0;
+let cachedVersion = -1;
 let frame = null;
 let limit = 100;
 let clock = null;
@@ -95,7 +96,19 @@ function load() {
   st.picks ||= {};
   for (let i = 0; i < data.leagues.length; i++) st.picks[i] ||= { drafted: [], mine: [] };
 }
-const save = () => localStorage.setItem(KEY, JSON.stringify(st));
+let saveTimer = null;
+function save() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try { localStorage.setItem(KEY, JSON.stringify(st)); } catch { /* private mode */ }
+  }, 250);
+}
+// anything that must not be lost (closing the tab mid-drag) flushes immediately
+function saveNow() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+  try { localStorage.setItem(KEY, JSON.stringify(st)); } catch { /* private mode */ }
+}
 const picks = () => st.picks[st.league];
 const byId = (id) => data.players.find((p) => p.id === id);
 
@@ -218,6 +231,52 @@ function syncCustoms() {
   }
 }
 
+// The recommendation panel: what to do with THIS pick, and why.
+function renderAdvice() {
+  const box = $('#advice');
+  if (!box) return;
+  const drafted = new Set(picks().drafted);
+  const have = {};
+  for (const id of picks().mine) {
+    const p = byId(id);
+    if (p) have[p.pos] = (have[p.pos] || 0) + 1;
+  }
+  if (!clock?.target) {
+    box.innerHTML = '<p class="hint">Add your draft slot above and this will tell you '
+      + 'what to do with each pick.</p>';
+    return;
+  }
+  const ranked = costOfWaiting(board.rows, clock, drafted, board.league, have, { need: st.need })
+    .filter((x) => !['K', 'DEF'].includes(x.pos) || x.shortfall > 0);
+  if (!ranked.length) { box.innerHTML = ''; return; }
+
+  const top = ranked[0];
+  // kickers and defences always "can wait" - saying so is noise
+  const cheap = ranked.filter((x) => x.cost < top.cost * 0.55 && x.pos !== top.pos
+    && !['K', 'DEF'].includes(x.pos)).slice(0, 2);
+  const when = clock.onClock ? 'Take' : 'Line up';
+
+  box.innerHTML = `<div class="advHead">
+<span class="advTag">${when} ${top.pos}</span>
+<b>${top.best.p.name}</b> <span class="tm">${top.best.p.team || ''}</span>
+<span class="hint">score ${top.best.score.toFixed(1)}${top.shortfall ? ` · you still need ${top.shortfall}` : ''}</span>
+</div>
+<p class="advWhy">${top.cost < 1
+    ? `Nothing is urgent — the best ${top.pos} should still be there at pick ${clock.target}.`
+    : `Waiting on ${top.pos} costs you about <b>${top.cost.toFixed(0)}</b> points of score —`}
+${top.cost < 1 ? '' : top.survivor
+    ? `the best one you could still expect at pick ${clock.target} is ${top.survivor.p.name}.`
+    : `there is nobody at ${top.pos} you could count on being there at pick ${clock.target}.`}
+${cheap.length
+    ? ` ${cheap.map((c) => c.pos).join(' and ')} can wait${cheap.every((c) => c.cost < 1)
+      ? ' — the same player will be there next turn.'
+      : ` — ${cheap.length > 1 ? 'they cost' : 'it costs'} about ${cheap.map((c) => c.cost.toFixed(0)).join(' and ')}.`}`
+    : ''}</p>
+<div class="advCost">${ranked.slice(0, 5).map((x) => `<span class="costPill${x === top ? ' hot' : ''}">
+<b>${x.pos}</b>${x.cost.toFixed(0)}</span>`).join('')}
+<span class="hint">cost of waiting, by position</span></div>`;
+}
+
 function tickClock() {
   const lg = board?.league || data.leagues[st.league];
   // per league: slot 4 in one is not slot 4 in another
@@ -240,8 +299,10 @@ function tickClock() {
 }
 
 function rebuild() {
-  const key = JSON.stringify(st.sub);
-  if (key !== cacheKey) { cache = subScores(data, st); cacheKey = key; }
+  if (cachedVersion !== subVersion) {
+    cache = subScores(data, st);
+    cachedVersion = subVersion;
+  }
   board = buildBoard(data, { ...st, mine: picks().mine.map((id) => byId(id)?.pos) }, cache);
   tickClock();
   renderAll();
@@ -258,7 +319,7 @@ function scheduleRebuild() {
 }
 
 function renderAll() {
-  if (view === 'board') renderBoard();
+  if (view === 'board') { renderBoard(); renderAdvice(); }
   if (view === 'roster') renderRoster();
   if (view === 'ratings') renderRatings();
   if (view === 'setup') renderSetup();
@@ -266,42 +327,91 @@ function renderAll() {
     + `${picks().mine.length} on your roster · data ${data.generated} · build ${BUILD}`;
 }
 
-function renderBoard() {
-  const q = query.trim().toLowerCase();
-  const drafted = new Set(picks().drafted);
-  const mine = new Set(picks().mine);
-  const rows = board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
-    && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
-    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
+// Rebuilding the whole list with innerHTML meant discarding and re-parsing roughly two
+// thousand nodes on every frame of a slider drag. Instead the row elements are kept and
+// reused: only the numbers that changed are rewritten, and reordering is done by moving
+// the existing nodes. Dragging a slider now touches text, not structure.
+let rowEls = new Map();
+let lastCols = '';
 
-  const cols = activeCols();
-  // minmax with a real floor: extra columns extend the table rightwards into the empty
-  // space instead of eating the player-name column, which was truncating names.
-  $('#board').style.setProperty('--cols',
-    `34px minmax(190px, 1fr) ${cols.map((c) => `${c[2]}px`).join(' ')} 102px`);
-  $('#colHeads').innerHTML = cols
-    .map((c) => `<span data-tip="${c[0]}" tabindex="0">${c[0]}</span>`).join('');
-
-  const out = [];
-  for (const r of rows.slice(0, limit)) {
-    const d = drafted.has(r.p.id);
-    const m = mine.has(r.p.id);
-    out.push(`<div class="row player${d ? ' drafted' : ''}${m ? ' mine' : ''}" role="row">
-<span class="rk">${r.rank}</span>
+function rowHTML(r, cols, d, m) {
+  return `<span class="rk">${r.rank}</span>
 <span class="who">${posTag(r.p.pos)}
 <button class="nm" data-open="${r.p.id}" title="Show detail">${r.p.name} <span class="tm">${r.p.team || ''}</span></button>
 ${r.p.rookie ? '<span class="rook">R</span>' : ''}</span>
 ${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
 <button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
-<button data-m="${r.p.id}" aria-pressed="${m}">Mine</button></span></div>`);
-    if (open === r.p.id) out.push(detail(r));
+<button data-m="${r.p.id}" aria-pressed="${m}">Mine</button></span>`;
+}
+
+function renderBoard() {
+  const q = query.trim().toLowerCase();
+  const drafted = new Set(picks().drafted);
+  const mine = new Set(picks().mine);
+  const cols = activeCols();
+  const colKey = cols.map((c) => c[0]).join('|');
+
+  $('#board').style.setProperty('--cols',
+    `34px minmax(190px, 1fr) ${cols.map((c) => `${c[2]}px`).join(' ')} 102px`);
+  if (colKey !== lastCols) {
+    $('#colHeads').innerHTML = cols
+      .map((c) => `<span data-tip="${c[0]}" tabindex="0">${c[0]}</span>`).join('');
+    rowEls = new Map();            // the cell layout changed, so start the rows again
+    $('#rows').innerHTML = '';
+    lastCols = colKey;
   }
-  if (rows.length > limit) {
-    out.push(`<div class="more"><button id="more">Show ${Math.min(100, rows.length - limit)} more`
-      + ` <span class="hint">(${limit} of ${rows.length})</span></button></div>`);
+
+  const rows = board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
+    && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
+    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q))
+    .slice(0, limit);
+
+  const host = $('#rows');
+  const frag = document.createDocumentFragment();
+  const keep = new Set();
+
+  for (const r of rows) {
+    const d = drafted.has(r.p.id);
+    const m = mine.has(r.p.id);
+    let el = rowEls.get(r.p.id);
+    if (!el) {
+      el = document.createElement('div');
+      el.dataset.id = r.p.id;
+      el.setAttribute('role', 'row');
+      el.innerHTML = rowHTML(r, cols, d, m);
+      rowEls.set(r.p.id, el);
+    } else {
+      // reuse: only rewrite the cells whose text actually differs
+      el.querySelector('.rk').textContent = r.rank;
+      const nums = el.querySelectorAll('.num');
+      cols.forEach((c, i) => {
+        const v = String(c[1](r));
+        if (nums[i] && nums[i].innerHTML !== v) nums[i].innerHTML = v;
+      });
+      const [gb, mb] = el.querySelectorAll('.acts button');
+      if (gb.getAttribute('aria-pressed') !== String(d)) gb.setAttribute('aria-pressed', String(d));
+      if (mb.getAttribute('aria-pressed') !== String(m)) mb.setAttribute('aria-pressed', String(m));
+    }
+    const cls = `row player${d ? ' drafted' : ''}${m ? ' mine' : ''}`;
+    if (el.className !== cls) el.className = cls;
+    keep.add(r.p.id);
+    frag.appendChild(el);          // appendChild MOVES an existing node, it does not clone
+    if (open === r.p.id) {
+      const det = document.createElement('div');
+      det.innerHTML = detail(r);
+      frag.appendChild(det.firstElementChild);
+    }
   }
-  $('#rows').innerHTML = out.join('');
+  for (const [id, el] of rowEls) if (!keep.has(id)) { el.remove(); rowEls.delete(id); }
+  if (rows.length < board.rows.length) {
+    const more = document.createElement('div');
+    more.className = 'more';
+    more.innerHTML = `<button id="more">Show ${Math.min(100, board.rows.length - limit)} more`
+      + ` <span class="hint">(${limit} shown)</span></button>`;
+    frag.appendChild(more);
+  }
+  host.replaceChildren(frag);
   $('#empty').hidden = rows.length > 0;
 }
 
@@ -342,6 +452,7 @@ Projected <b>${r.pts.toFixed(1)}</b> points, <b>${r.vor.toFixed(1)}</b> above a 
 // ---------------------------------------------------------------- my team
 function renderRoster() {
   const lg = board.league;
+  renderAdvice2();
   const mine = picks().mine;
   const rows = mine.map((id) => board.rows.find((r) => r.p.id === id)).filter(Boolean);
   const order = data.positions;
@@ -419,9 +530,32 @@ ${cards.map(({ r, n, role }) => `<div class="row lineup${role === 'Bench' ? ' dr
 // ---------------------------------------------------------------- ratings
 function customsFor(key) { return (st.customs || []).filter((c) => c.comp === key); }
 
+// the same recommendation, on the tab where you are reviewing what you have
+function renderAdvice2() {
+  const host = $('#rosterAdvice');
+  if (!host) return;
+  const keep = $('#advice')?.innerHTML || '';
+  host.innerHTML = keep || '<p class="hint">Set your draft slot on the Board tab and the '
+    + 'recommendation for your next pick appears here too.</p>';
+}
+
 function renderRatings() {
   const cw = board.weights;
   const maxW = Math.max(...Object.values(cw), 1);
+
+  // one place to add a stat, for the whole page. It files itself under the component it
+  // belongs to rather than making you decide.
+  const taken = new Set((st.customs || []).map((c) => c.field));
+  const free = RAW_FIELDS.filter(([f]) => !taken.has(f));
+  const label = (k) => data.components.find((c) => c.key === k)?.label || k;
+  $('#addStat').innerHTML = `<label class="addLine">
+<span class="stratLabel" data-tip="addstat" tabindex="0">Add a stat</span>
+<select id="addPick"><option value="">Choose a 2025 stat the rating is not using…</option>
+${free.map(([f, lbl, hi, pg, comp]) => `<option value="${f}|${hi}|${pg}|${comp}">`
+    + `${lbl}${pg ? ' per game' : ''} — goes into ${label(comp)}</option>`).join('')}</select>
+</label>
+${(st.customs || []).length ? `<p class="hint">Added: ${(st.customs || [])
+    .map((c) => `<b>${c.label}</b> in ${label(c.comp)}`).join(', ')}.</p>` : ''}`;
   $('#priority2').textContent = priorityOrder(data, st).slice(0, 4)
     .map((c) => c.label.toLowerCase()).join(' › ');
   $('#comps').innerHTML = data.components.map((c) => {
@@ -438,7 +572,7 @@ ${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}" data-ti
 </div>`;
     }).join('');
 
-    const unused = RAW_FIELDS.filter(([f]) => !customsFor(c.key).some((x) => x.field === f));
+    const mineHere = customsFor(c.key);
     return `<details class="comp"${c.key === 'volume' ? ' open' : ''}>
 <summary><span class="cName" data-tip="${c.key}" tabindex="0">${c.label}</span>
 <span class="cDesc">${c.desc}</span>
@@ -451,11 +585,9 @@ ${locked
 <input type="range" min="0" max="30" step="1" data-cw="${c.key}" value="${st.comp[c.key] ?? 0}" /></div>`}
 ${c.subs.length ? `<div class="statRow hdr"><span>Stat</span>${data.ratePos.map((q) => `<span>${q}</span>`).join('')}</div>${subs}
 <p class="hint">One slider per position. A zero means the stat says nothing there — a receiver has no carries to break tackles on — but you can raise it if you disagree.</p>` : ''}
-${locked ? '' : `<div class="addBar">
-<select data-addfield="${c.key}"><option value="">Add another stat…</option>
-${unused.map(([f, lbl, hi, pg]) => `<option value="${f}|${hi}|${pg}">${lbl}${pg ? ' (per game)' : ''}</option>`).join('')}</select>
-${customsFor(c.key).length ? `<button data-clearcustom="${c.key}" class="small">Remove added stats</button>` : ''}
-</div>`}
+${mineHere.length ? `<div class="addBar">
+<button data-clearcustom="${c.key}" class="small">Remove the ${mineHere.length} stat${mineHere.length > 1 ? 's' : ''} you added here</button>
+</div>` : ''}
 </div></details>`;
   }).join('');
 }
@@ -705,6 +837,13 @@ function wire() {
   };
   if (window.ResizeObserver) new ResizeObserver(measure).observe(document.querySelector('.top'));
   window.addEventListener('resize', measure);
+  // the save is debounced so a slider drag does not hammer the disk - which means a
+  // change made in the last quarter second has to be flushed before the page goes away
+  window.addEventListener('beforeunload', saveNow);
+  window.addEventListener('pagehide', saveNow);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveNow();
+  });
   $('#importL').onclick = doImport;
   $('#syncOnce').onclick = doSync;
   $('#syncAuto').onclick = toggleAuto;
@@ -747,28 +886,29 @@ function wire() {
       st.sub[t.dataset.sw].w[t.dataset.q] = v;
       t.parentElement.querySelector('u').textContent = v;
       t.parentElement.classList.toggle('zero', !v);
+      subVersion += 1;
       save(); scheduleRebuild();
     }
   });
   document.body.addEventListener('change', (e) => {
-    const add = e.target.dataset.addfield;
-    if (add && e.target.value) {
-      const [field, hi, pg] = e.target.value.split('|');
-      const meta = RAW_FIELDS.find(([f]) => f === field);
+    if (e.target.id === 'addPick' && e.target.value) {
+      const [field, hi, pg, comp] = e.target.value.split('|');
+      const meta = RAW_FIELDS.find((f) => f[0] === field);
       st.customs ||= [];
       st.customs.push({
-        key: `x_${add}_${field}`, field, comp: add,
+        key: `x_${comp}_${field}`, field, comp,
         hi: hi === 'true', pg: pg === 'true',
         label: meta[1] + (pg === 'true' ? ' / game' : ''),
       });
       syncCustoms();
-      cacheKey = '';
+      subVersion += 1;
       save(); rebuild();
       return;
     }
     if (e.target.dataset.son) {
       st.sub[e.target.dataset.son].on = e.target.checked;
       e.target.closest('.statRow').classList.toggle('off', !e.target.checked);
+      subVersion += 1;
       save(); rebuild();
     }
   });
@@ -783,7 +923,7 @@ function wire() {
       save(); renderChrome(); rebuild();
     } else if (b.dataset.clearcustom) {
       st.customs = (st.customs || []).filter((c) => c.comp !== b.dataset.clearcustom);
-      syncCustoms(); cacheKey = ''; save(); rebuild();
+      syncCustoms(); subVersion += 1; save(); rebuild();
     } else if (b.id === 'more') { limit += 100; renderBoard(); }
     else if (b.dataset.v) show(b.dataset.v);
     else if (b.dataset.f) {

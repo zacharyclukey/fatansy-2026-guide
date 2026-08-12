@@ -157,24 +157,32 @@ export function subScores(data, st) {
 // Every 2025 field carried in the data file, whether or not the built-in rating uses it.
 // Anything here can be switched on as a stat in any component - "available but unused"
 // should mean one click, not a rebuild.
+// field, label, higher-is-better, per-game option, and the component it naturally
+// belongs to - you should choose a stat, not have to decide where to file it.
 export const RAW_FIELDS = [
-  ['off_snp', 'Snaps', true, true], ['gp', 'Games played', true, false],
-  ['gs', 'Games started', true, false], ['rush_att', 'Carries', true, true],
-  ['rec_tgt', 'Targets', true, true], ['rec', 'Receptions', true, true],
-  ['rush_yd', 'Rushing yards', true, true], ['rec_yd', 'Receiving yards', true, true],
-  ['rush_rec_yd', 'Yards from scrimmage', true, true],
-  ['anytime_tds', 'Touchdowns', true, true],
-  ['rush_rz_att', 'Red-zone carries', true, true],
-  ['rec_rz_tgt', 'Red-zone targets', true, true],
-  ['rec_40p', '40+ yard catches', true, true], ['rush_40p', '40+ yard runs', true, true],
-  ['pts_ppr', 'Fantasy points', true, true],
-  ['pos_rank_ppr', 'Finish at his position', false, false],
-  ['rush_ypa', 'Yards per carry', true, false],
-  ['rec_ypt', 'Yards per target', true, false],
-  ['rec_ypr', 'Yards per catch', true, false],
-  ['rec_drop', 'Drops', false, true], ['fum', 'Fumbles', false, true],
-  ['fum_lost', 'Fumbles lost', false, true],
-  ['bonus_rush_rec_yd_100', '100-yard games', true, false],
+  ['off_snp', 'Snaps', true, true, 'volume'],
+  ['rush_att', 'Carries', true, true, 'volume'],
+  ['rec_tgt', 'Targets', true, true, 'volume'],
+  ['rec', 'Receptions', true, true, 'volume'],
+  ['rush_ypa', 'Yards per carry', true, false, 'efficiency'],
+  ['rec_ypt', 'Yards per target', true, false, 'efficiency'],
+  ['rec_ypr', 'Yards per catch', true, false, 'efficiency'],
+  ['rush_rz_att', 'Red-zone carries', true, true, 'redzone'],
+  ['rec_rz_tgt', 'Red-zone targets', true, true, 'redzone'],
+  ['anytime_tds', 'Touchdowns', true, true, 'redzone'],
+  ['rec_40p', '40+ yard catches', true, true, 'explosive'],
+  ['rush_40p', '40+ yard runs', true, true, 'explosive'],
+  ['bonus_rush_rec_yd_100', '100-yard games', true, false, 'explosive'],
+  ['pts_ppr', 'Fantasy points', true, true, 'production'],
+  ['rush_yd', 'Rushing yards', true, true, 'production'],
+  ['rec_yd', 'Receiving yards', true, true, 'production'],
+  ['rush_rec_yd', 'Yards from scrimmage', true, true, 'production'],
+  ['pos_rank_ppr', 'Finish at his position', false, false, 'production'],
+  ['gp', 'Games played', true, false, 'reliability'],
+  ['gs', 'Games started', true, false, 'reliability'],
+  ['rec_drop', 'Drops', false, true, 'reliability'],
+  ['fum', 'Fumbles', false, true, 'reliability'],
+  ['fum_lost', 'Fumbles lost', false, true, 'reliability'],
 ];
 
 // Percentiles for a user-added stat, worked out the same way the built-in ones were:
@@ -343,6 +351,48 @@ export function availability(adp, atPick, fromPick = 0) {
 export function poolAround(rows, r, drafted, band = 6) {
   return rows.filter((x) => !drafted.has(x.p.id)
     && x.p.id !== r.p.id && Math.abs(x.score - r.score) <= band).length;
+}
+
+// ---------------------------------------------------------------- what to do now
+// "Who is best" is the wrong question on the clock. The right one is "which position
+// costs me the most by waiting" - because the pick you skip is not lost, it is deferred
+// to your next turn, and some positions survive that wait far better than others.
+//
+// For each position: the best man available now, versus the best you could still
+// reasonably expect at your next pick. The gap between them is what waiting costs.
+export function costOfWaiting(rows, clock, drafted, league, have = {}, opts = {}) {
+  if (!clock?.target) return [];
+  const need = opts.need ?? 8;
+  const out = [];
+  const positions = Object.keys(league.starters).filter((p) => p !== 'FLEX');
+
+  for (const pos of positions) {
+    const avail = rows.filter((r) => r.p.pos === pos && !drafted.has(r.p.id));
+    if (!avail.length) continue;
+    const best = avail[0];
+
+    // the best man at this position with a real chance of lasting until your next pick
+    const survivor = avail.find((r) => (availability(r.p.adp, clock.target, clock.currentPick) ?? 0) >= 0.5);
+    const fallback = survivor ? survivor.score : (avail[avail.length - 1]?.score ?? 0);
+    const cost = Math.max(0, best.score - fallback);
+
+    // a position you have already filled is worth less to you than the raw gap suggests
+    const want = league.starters[pos] || 0;
+    const got = have[pos] || 0;
+    const shortfall = Math.max(0, want - got);
+    const urgency = shortfall > 0 ? 1 : 0.45;
+
+    out.push({
+      pos,
+      best,
+      survivor,
+      cost,
+      weighted: cost * urgency + (shortfall > 0 ? need / 2 : 0),
+      shortfall,
+      bestBackOdds: availability(best.p.adp, clock.target, clock.currentPick),
+    });
+  }
+  return out.sort((a, b) => b.weighted - a.weighted);
 }
 
 // A plain-English read of what the current weights mean, for the ratings editor.

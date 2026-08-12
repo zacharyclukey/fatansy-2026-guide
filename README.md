@@ -46,6 +46,17 @@ build number shown in the footer.
 The spreadsheet (`Draft Guide 2026.xlsx`) is deliberately **not** published — it stays on
 disk as a draft-day backup. `.gitignore` keeps it out.
 
+## Tests
+
+```
+npm --prefix test i jsdom
+node test/smoke.mjs
+```
+
+39 checks against the real `index.html` in a real DOM — the engine maths, the board, the
+draft clock, the call, strategies, Sleeper import and sync, and the offline path. Run it
+after any change; it has caught several bugs that looked fine by eye.
+
 ## Regenerating the data
 
 The player data is built by a Python pipeline that pulls from Sleeper. `data/players.json`

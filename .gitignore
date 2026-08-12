@@ -23,3 +23,6 @@ Thumbs.db
 /config
 /description
 /index
+
+# test deps
+test/node_modules/

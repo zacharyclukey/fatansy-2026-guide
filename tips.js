@@ -69,6 +69,12 @@ export const TIPS = {
   'card:ppg': ['PPR points per game.', 'Total points / games played.'],
   'card:finish': ['Where he finished at his position in 2025.', ''],
 
+  advice: ['What to do with this pick.',
+    'Compares the best man at each position now against the best you could still expect next turn.'],
+
+  addstat: ['Bring in a 2025 stat the rating does not use.',
+    'It is ranked within position like every other stat, and filed under the component it belongs to.'],
+
   strat: ['A shortcut for the sliders below.',
     'Sets position multipliers, tilt, need and style. Never touches your stat weights.'],
 
