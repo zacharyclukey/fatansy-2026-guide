@@ -26,7 +26,9 @@
   <div class="bar2">
     <input id="search" type="search" placeholder="Search players" aria-label="Search players" />
     <nav class="filters" id="filters" aria-label="Position filter"></nav>
-    <button id="settingsBtn" class="ghost" aria-expanded="false">Settings</button>
+    <span class="spacer"></span>
+    <select id="statView" aria-label="Which numbers to show"></select>
+    <button id="settingsBtn" aria-expanded="false">Settings</button>
   </div>
 
   <div id="settings" class="panel" hidden>
@@ -65,9 +67,7 @@
       <div class="row head" role="row">
         <span role="columnheader">#</span>
         <span role="columnheader">Player</span>
-        <span role="columnheader">Bye</span>
-        <span role="columnheader">Score</span>
-        <span role="columnheader">vs ADP</span>
+        <span role="columnheader" id="colHeads" style="display:contents"></span>
         <span role="columnheader" class="sr-only">Actions</span>
       </div>
       <div id="rows"></div>

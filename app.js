@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE } from './engine.js';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js';
 import { importLeagues, draftPicks, SleeperError } from './sleeper.js';
 
 const $ = (s) => document.querySelector(s);
@@ -17,6 +17,25 @@ let cache = null;
 let cacheKey = '';
 let frame = null;
 let limit = 100;
+
+// Four ways to look at the same player. Columns and headers both switch.
+const VIEWS = [
+  ['Value', ['Bye', 'Score', 'vs ADP'], (r) => [r.p.bye || '—', r.score.toFixed(1),
+    fmtGap(r.adpRank - r.rank)]],
+  ['2025 per game', ['Snap %', 'Touch/g', 'Pts/g'], (r) => [
+    pct(r.p.m.snap_share), one(r.p.m.touches_pg), one(r.p.m.last_ppg)]],
+  ['2025 totals', ['Games', 'Yards', 'TDs'], (r) => [
+    r.p.a?.gp ?? '—', r.p.a?.rush_rec_yd ?? '—', r.p.a?.anytime_tds ?? '—']],
+  ['2026 projection', ['Points', 'Pts/g', 'Touches'], (r) => [
+    r.pts.toFixed(0), one(r.p.m.proj_ppg),
+    Math.round((r.p.proj?.rush_att || 0) + (r.p.proj?.rec || 0)) || '—']],
+  ['Red zone', ['RZ/g', 'RZ TD%', 'TDs'], (r) => [
+    one(r.p.m.rz_pg), pct(r.p.m.rz_conv * 100), r.p.a?.anytime_tds ?? '—']],
+];
+const one = (v) => (v == null ? '—' : (+v).toFixed(1));
+const pct = (v) => (v == null || Number.isNaN(v) ? '—' : `${Math.round(v)}%`);
+const fmtGap = (g) => `${g > 0 ? '+' : ''}${g}`;
+let statView = 0;
 
 // ---------------------------------------------------------------- state
 function load() {
@@ -83,6 +102,21 @@ function verdict(r) {
 }
 
 // ---------------------------------------------------------------- board
+// User-added stats are spliced into the component definitions and given percentiles,
+// so from here on they behave exactly like the built-in ones.
+function syncCustoms() {
+  st.customs ||= [];
+  for (const c of data.components) c.subs = c.subs.filter((s2) => !s2.custom);
+  applyCustomStats(data, st.customs);
+  for (const cs of st.customs) {
+    const comp = data.components.find((c) => c.key === cs.comp);
+    if (!comp) continue;
+    comp.subs.push({ key: cs.key, label: cs.label, on: true, custom: true,
+      w: Object.fromEntries(data.ratePos.map((q) => [q, 10])) });
+    st.sub[cs.key] ||= { on: true, w: Object.fromEntries(data.ratePos.map((q) => [q, 10])) };
+  }
+}
+
 function rebuild() {
   const key = JSON.stringify(st.sub);
   if (key !== cacheKey) { cache = subScores(data, st); cacheKey = key; }
@@ -114,6 +148,10 @@ function renderBoard() {
     && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
     && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
 
+  const [, heads, cells] = VIEWS[statView];
+  $('#colHeads').innerHTML = heads
+    .map((h, i) => `<span class="col${'ABC'[i]}">${h}</span>`).join('');
+
   const out = [];
   for (const r of rows.slice(0, limit)) {
     const d = drafted.has(r.p.id);
@@ -124,9 +162,8 @@ function renderBoard() {
 <span class="who">${posTag(r.p.pos)}
 <button class="nm" data-open="${r.p.id}" title="Show detail">${r.p.name} <span class="tm">${r.p.team || ''}</span></button>
 ${r.p.rookie ? '<span class="rook">R</span>' : ''}</span>
-<span class="num">${r.p.bye || '—'}</span>
-<span class="num sc">${r.score.toFixed(1)}</span>
-<span class="num ${gap >= 8 ? 'up' : gap <= -8 ? 'dn' : ''}">${gap > 0 ? '+' : ''}${gap}</span>
+${cells(r).map((v, i) => `<span class="num col${'ABC'[i]}${statView === 0 && i === 1 ? ' sc' : ''}`
+  + `${statView === 0 && i === 2 ? (gap >= 8 ? ' up' : gap <= -8 ? ' dn' : '') : ''}">${v}</span>`).join('')}
 <span class="acts">
 <button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
 <button data-m="${r.p.id}" aria-pressed="${m}">Mine</button></span></div>`);
@@ -160,6 +197,7 @@ function detail(r) {
   return `<div class="detail">
 <p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}</p>
 <div class="bars">${bars}</div>
+${statCards(r)}
 <p class="facts">${facts.length ? `2025: <b>${facts.join('</b> · <b>')}</b>`
     : 'No 2025 data — rated off the projection.'}</p>
 <p class="facts">Projected ${r.pts.toFixed(1)} points · ${r.vor.toFixed(1)} above replacement · your rating ${r.rating.toFixed(1)}</p>
@@ -244,30 +282,45 @@ ${cards.map(({ r, n, role }) => `<div class="row lineup${role === 'Bench' ? ' dr
 }
 
 // ---------------------------------------------------------------- ratings
+function customsFor(key) { return (st.customs || []).filter((c) => c.comp === key); }
+
 function renderRatings() {
   const cw = board.weights;
+  const maxW = Math.max(...Object.values(cw), 1);
   $('#priority2').textContent = priorityOrder(data, st).slice(0, 4)
     .map((c) => c.label.toLowerCase()).join(' › ');
   $('#comps').innerHTML = data.components.map((c) => {
     const locked = c.key === 'floor' || c.key === 'ceiling';
-    const subs = c.subs.map((s) => {
-      const cfg = st.sub[s.key];
-      return `<tr${cfg.on ? '' : ' class="off"'}>
-<td><label><input type="checkbox" data-son="${s.key}"${cfg.on ? ' checked' : ''} /> ${s.label}</label></td>
-${data.ratePos.map((q) => `<td><input type="number" min="0" max="100" step="5"
- class="w${cfg.w[q] ? '' : ' zero'}" data-sw="${s.key}" data-q="${q}" value="${cfg.w[q]}" /></td>`).join('')}
-</tr>`;
+    const subs = c.subs.map((sm) => {
+      const cfg = st.sub[sm.key];
+      if (!cfg) return '';
+      return `<div class="statRow${cfg.on ? '' : ' off'}">
+<label><input type="checkbox" data-son="${sm.key}"${cfg.on ? ' checked' : ''} />
+<span>${sm.label}${sm.custom ? ' <em class="hint" style="display:inline">added</em>' : ''}</span></label>
+${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}">
+<input type="range" min="0" max="40" step="1" data-sw="${sm.key}" data-q="${q}" value="${cfg.w[q]}" />
+<u>${cfg.w[q]}</u></span>`).join('')}
+</div>`;
     }).join('');
+
+    const unused = RAW_FIELDS.filter(([f]) => !customsFor(c.key).some((x) => x.field === f));
     return `<details class="comp"${c.key === 'volume' ? ' open' : ''}>
 <summary><span class="cName">${c.label}</span>
 <span class="cDesc">${c.desc}</span>
+<span class="cMeter"><b style="width:${Math.round(((cw[c.key] ?? 0) / maxW) * 100)}%"></b></span>
 <span class="cW">${cw[c.key] ?? 0}</span></summary>
 <div class="cBody">
 ${locked
-    ? '<p class="hint">Set by the Safe ↔ Upside slider on the board.</p>'
-    : `<input type="range" min="0" max="30" step="1" data-cw="${c.key}" value="${st.comp[c.key] ?? 0}" />`}
-${c.subs.length ? `<table class="subs"><thead><tr><th>Stat</th>${data.ratePos.map((q) => `<th>${q}</th>`).join('')}</tr></thead><tbody>${subs}</tbody></table>
-<p class="hint">A zero means the stat says nothing about that position — a receiver has no carries to break tackles on.</p>` : ''}
+    ? '<p class="hint">Driven by the Safe ↔ Upside slider on the board, so it is not set here.</p>'
+    : `<div class="cTop"><span>How much this component counts</span>
+<input type="range" min="0" max="30" step="1" data-cw="${c.key}" value="${st.comp[c.key] ?? 0}" /></div>`}
+${c.subs.length ? `<div class="statRow hdr"><span>Stat</span>${data.ratePos.map((q) => `<span>${q}</span>`).join('')}</div>${subs}
+<p class="hint">One slider per position. A zero means the stat says nothing there — a receiver has no carries to break tackles on — but you can raise it if you disagree.</p>` : ''}
+${locked ? '' : `<div class="addBar">
+<select data-addfield="${c.key}"><option value="">Add another stat…</option>
+${unused.map(([f, lbl, hi, pg]) => `<option value="${f}|${hi}|${pg}">${lbl}${pg ? ' (per game)' : ''}</option>`).join('')}</select>
+${customsFor(c.key).length ? `<button data-clearcustom="${c.key}" class="small">Remove added stats</button>` : ''}
+</div>`}
 </div></details>`;
   }).join('');
 }
@@ -351,6 +404,22 @@ function toggleAuto() {
 }
 
 // ---------------------------------------------------------------- chrome
+function statCards(r) {
+  const a = r.p.a || {};
+  const g = Math.max(a.gp || 0, 1);
+  const cells = [
+    ['Games', a.gp], ['Carries', a.rush_att], ['Targets', a.rec_tgt],
+    ['Catches', a.rec], ['Scrim. yds', a.rush_rec_yd], ['TDs', a.anytime_tds],
+    ['RZ carries', a.rush_rz_att], ['RZ targets', a.rec_rz_tgt],
+    ['Yds/carry', a.rush_ypa?.toFixed(1)], ['Yds/target', a.rec_ypt?.toFixed(1)],
+    ['Pts/game', a.pts_ppr ? (a.pts_ppr / g).toFixed(1) : null],
+    ['2025 finish', a.pos_rank_ppr ? `${r.p.pos}${a.pos_rank_ppr}` : null],
+  ].filter(([, v]) => v != null && v !== '');
+  if (!cells.length) return '';
+  return `<div class="statGrid">${cells
+    .map(([l, v]) => `<span class="stat"><span>${l}</span><b>${v}</b></span>`).join('')}</div>`;
+}
+
 function renderChrome() {
   $('#league').innerHTML = data.leagues
     .map((l, i) => `<option value="${i}"${i === st.league ? ' selected' : ''}>${l.name}</option>`).join('');
@@ -359,6 +428,8 @@ function renderChrome() {
   $('#style').value = st.style;
   $('#tilt').value = Math.round(st.tilt * 100);
   $('#need').value = st.need;
+  $('#statView').innerHTML = VIEWS
+    .map(([n], i) => `<option value="${i}"${i === statView ? ' selected' : ''}>${n}</option>`).join('');
   $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
   readouts();
@@ -393,6 +464,7 @@ function wire() {
   };
   $('#league').onchange = (e) => { st.league = +e.target.value; open = null; save(); rebuild(); };
   $('#search').oninput = (e) => { query = e.target.value; limit = 100; renderBoard(); };
+  $('#statView').onchange = (e) => { statView = +e.target.value; save(); renderBoard(); };
   $('#reset').onclick = () => { st.picks[st.league] = { drafted: [], mine: [] }; save(); rebuild(); };
   for (const [id, fn] of [['style', (v) => { st.style = +v; }],
     ['tilt', (v) => { st.tilt = +v / 100; }], ['need', (v) => { st.need = +v; }]]) {
@@ -433,16 +505,37 @@ function wire() {
 
   document.body.addEventListener('input', (e) => {
     const t = e.target;
-    if (t.dataset.cw) { st.comp[t.dataset.cw] = +t.value; save(); scheduleRebuild(); }
-    else if (t.dataset.sw) {
-      st.sub[t.dataset.sw].w[t.dataset.q] = +t.value || 0;
-      t.classList.toggle('zero', !+t.value);
+    if (t.dataset.cw) {
+      st.comp[t.dataset.cw] = +t.value;
+      t.closest('.comp').querySelector('.cW').textContent = t.value;
+      save(); scheduleRebuild();
+    } else if (t.dataset.sw) {
+      const v = +t.value || 0;
+      st.sub[t.dataset.sw].w[t.dataset.q] = v;
+      t.parentElement.querySelector('u').textContent = v;
+      t.parentElement.classList.toggle('zero', !v);
       save(); scheduleRebuild();
     }
   });
   document.body.addEventListener('change', (e) => {
+    const add = e.target.dataset.addfield;
+    if (add && e.target.value) {
+      const [field, hi, pg] = e.target.value.split('|');
+      const meta = RAW_FIELDS.find(([f]) => f === field);
+      st.customs ||= [];
+      st.customs.push({
+        key: `x_${add}_${field}`, field, comp: add,
+        hi: hi === 'true', pg: pg === 'true',
+        label: meta[1] + (pg === 'true' ? ' / game' : ''),
+      });
+      syncCustoms();
+      cacheKey = '';
+      save(); rebuild();
+      return;
+    }
     if (e.target.dataset.son) {
       st.sub[e.target.dataset.son].on = e.target.checked;
+      e.target.closest('.statRow').classList.toggle('off', !e.target.checked);
       save(); rebuild();
     }
   });
@@ -450,7 +543,10 @@ function wire() {
   document.body.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.id === 'more') { limit += 100; renderBoard(); }
+    if (b.dataset.clearcustom) {
+      st.customs = (st.customs || []).filter((c) => c.comp !== b.dataset.clearcustom);
+      syncCustoms(); cacheKey = ''; save(); rebuild();
+    } else if (b.id === 'more') { limit += 100; renderBoard(); }
     else if (b.dataset.v) show(b.dataset.v);
     else if (b.dataset.f) {
       filter = b.dataset.f;

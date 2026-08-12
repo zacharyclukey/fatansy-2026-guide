@@ -124,6 +124,51 @@ export function subScores(data, st) {
   return out;
 }
 
+// Every 2025 field carried in the data file, whether or not the built-in rating uses it.
+// Anything here can be switched on as a stat in any component - "available but unused"
+// should mean one click, not a rebuild.
+export const RAW_FIELDS = [
+  ['off_snp', 'Snaps', true, true], ['gp', 'Games played', true, false],
+  ['gs', 'Games started', true, false], ['rush_att', 'Carries', true, true],
+  ['rec_tgt', 'Targets', true, true], ['rec', 'Receptions', true, true],
+  ['rush_yd', 'Rushing yards', true, true], ['rec_yd', 'Receiving yards', true, true],
+  ['rush_rec_yd', 'Yards from scrimmage', true, true],
+  ['anytime_tds', 'Touchdowns', true, true],
+  ['rush_rz_att', 'Red-zone carries', true, true],
+  ['rec_rz_tgt', 'Red-zone targets', true, true],
+  ['rec_40p', '40+ yard catches', true, true], ['rush_40p', '40+ yard runs', true, true],
+  ['pts_ppr', 'Fantasy points', true, true],
+  ['pos_rank_ppr', 'Finish at his position', false, false],
+  ['rush_ypa', 'Yards per carry', true, false],
+  ['rec_ypt', 'Yards per target', true, false],
+  ['rec_ypr', 'Yards per catch', true, false],
+  ['rec_drop', 'Drops', false, true], ['fum', 'Fumbles', false, true],
+  ['fum_lost', 'Fumbles lost', false, true],
+  ['bonus_rush_rec_yd_100', '100-yard games', true, false],
+];
+
+// Percentiles for a user-added stat, worked out the same way the built-in ones were:
+// within position, so a back is only ever compared with other backs.
+export function applyCustomStats(data, customs) {
+  for (const p of data.players) {
+    for (const k of Object.keys(p.sub)) if (k.startsWith('x_')) delete p.sub[k];
+  }
+  for (const c of customs) {
+    const byPos = {};
+    for (const p of data.players) {
+      const raw = p.a?.[c.field];
+      if (raw == null) continue;
+      const v = c.pg ? raw / Math.max(p.a.gp || 1, 1) : raw;
+      (byPos[p.pos] ||= []).push([p, v]);
+    }
+    for (const list of Object.values(byPos)) {
+      list.sort((a, b) => (c.hi ? a[1] - b[1] : b[1] - a[1]));
+      const n = list.length;
+      list.forEach(([p], i) => { p.sub[c.key] = n > 1 ? (i / (n - 1)) * 100 : 50; });
+    }
+  }
+}
+
 // ---------------------------------------------------------------- the board
 export function buildBoard(data, st, cache) {
   const league = data.leagues[st.league];
