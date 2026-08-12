@@ -57,6 +57,9 @@ export const TIPS = {
   wait: ['Whether he comes back to you next turn.',
     'Odds from ADP, plus how many similar players are left.'],
 
+  'card:pass_yd': ['Passing yards in 2025.', ''],
+  'card:pass_td': ['Passing touchdowns in 2025.', ''],
+  'card:pass_int': ['Interceptions thrown in 2025.', ''],
   'card:gp': ['Games played in 2025.', 'Out of 17.'],
   'card:rush_att': ['Carries in 2025.', ''],
   'card:rec_tgt': ['Times he was thrown at in 2025.', ''],

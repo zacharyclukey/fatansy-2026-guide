@@ -193,6 +193,12 @@ export function subScores(data, st) {
 // field, label, higher-is-better, per-game, component, the built-in it duplicates
 export const RAW_FIELDS = [
   ['off_snp', 'Snaps', true, true, 'volume', 'snaps_pg'],
+  ['pass_att', 'Pass attempts', true, true, 'volume', 'pass_att_pg'],
+  ['pass_yd', 'Passing yards', true, true, 'production', null],
+  ['pass_td', 'Passing touchdowns', true, true, 'redzone', 'pass_td_pg'],
+  ['pass_int', 'Interceptions thrown', false, true, 'reliability', 'int_pg'],
+  ['pass_sack', 'Sacks taken', false, true, 'reliability', 'sack_rate'],
+  ['pass_fd', 'Passing first downs', true, true, 'production', null],
   ['rush_att', 'Carries', true, true, 'volume', 'carries_pg'],
   ['rec_tgt', 'Targets', true, true, 'volume', 'targets_pg'],
   ['rec', 'Receptions', true, true, 'volume', 'rec_pg'],

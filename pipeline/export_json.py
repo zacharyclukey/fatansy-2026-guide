@@ -26,7 +26,9 @@ from engine import BASE as _BASE, HS_EXTRA as _HSX, HS as _HS
 SCORE_KEYS = sorted(set(_BASE) | set(_HSX))
 
 # raw 2025 fields worth carrying for the "show me the actual numbers" view
-RAW_KEEP = ['gp', 'gs', 'off_snp', 'tm_off_snp', 'rush_att', 'rec_tgt', 'rec', 'rush_yd',
+RAW_KEEP = ['pass_att', 'pass_cmp', 'pass_yd', 'pass_td', 'pass_int', 'cmp_pct', 'pass_ypa',
+            'pass_rtg', 'pass_sack', 'pass_rz_att', 'pass_td_40p', 'pass_fd',
+            'gp', 'gs', 'off_snp', 'tm_off_snp', 'rush_att', 'rec_tgt', 'rec', 'rush_yd',
             'rec_yd', 'rush_rec_yd', 'anytime_tds', 'fum', 'fum_lost', 'pts_ppr',
             'pos_rank_ppr', 'rush_rz_att', 'rec_rz_tgt', 'rec_40p', 'rush_40p',
             'rec_drop', 'rush_ypa', 'rec_ypt', 'rec_ypr', 'bonus_rush_rec_yd_100']
@@ -35,6 +37,15 @@ RAW_KEEP = ['gp', 'gs', 'off_snp', 'tm_off_snp', 'rush_att', 'rec_tgt', 'rec', '
 # then gets "ranked 0-100 against others at his position" appended, because that part is
 # true of all of them.
 TIPS = {
+ 'pass_att_pg': 'Pass attempts divided by games played - the quarterback version of volume.',
+ 'pass_ypa': 'Passing yards per attempt.',
+ 'cmp_pct': 'Completion percentage.',
+ 'pass_rtg': 'Traditional passer rating.',
+ 'sack_rate': 'Sacks taken per dropback. Lower is better.',
+ 'pass_rz_pg': 'Pass attempts inside the opponent 20, per game.',
+ 'pass_td_pg': 'Passing touchdowns divided by games played.',
+ 'pass_deep': 'Passing touchdowns of 40 yards or more.',
+ 'int_pg': 'Interceptions thrown per game. Lower is better.',
  'c_young': 'Years in the league, inverted - younger players have more room to improve.',
  'snap_share': 'Share of his team offensive snaps he was on the field for. Snaps / team snaps.',
  'snaps_pg': 'Offensive snaps divided by games played.',

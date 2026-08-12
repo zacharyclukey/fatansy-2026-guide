@@ -325,6 +325,25 @@ const fire = (el, type) => {
   ok('every component reports its influence',
     moves.length === players.components.length && moves.every((x) => /^±\d/.test(x)),
     `${moves.length} of ${players.components.length}: ${moves.join(' ')}`);
+  // the Ratings Lab must not slam your open panel shut when you change something in it
+  const comps = [...d.querySelectorAll('details.comp')];
+  comps[0].removeAttribute('open');
+  const rel = comps.find((c) => c.querySelector('.cName').textContent === 'Reliability');
+  rel.setAttribute('open', '');
+  rel.querySelector('input[type="checkbox"][data-son]').click();
+  await settle();
+  ok('the panel you are working in stays open',
+    [...d.querySelectorAll('details.comp[open]')].map((x) => x.dataset.comp).join(',') === 'reliability',
+    [...d.querySelectorAll('details.comp[open] .cName')].map((x) => x.textContent).join(','));
+
+  // a quarterback has to be rated on passing, not on his carries
+  const qbStats = players.components.flatMap((c) => c.subs.filter((s) => s.w.QB > 0));
+  ok('quarterbacks are rated on passing',
+    qbStats.some((s) => /pass|Completion|Interception/i.test(s.label)),
+    `${qbStats.length} stats count for a QB`);
+  ok('touches no longer counts for a quarterback',
+    !players.components.flatMap((c) => c.subs).find((s) => s.key === 'touches_pg')?.w.QB);
+
   ok('the influence note explains itself', /switch a component off|switch/.test(d.querySelector('#inflNote').textContent));
 
   ok('an unused stat can be added',

@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608121410';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121410';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121410';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608121410';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608121635';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121635';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121635';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608121635';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121410';
+const BUILD = '202608121635';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -41,8 +41,9 @@ const FIXED = [
 // The stats worth seeing differ by position - a receiver's carries tell you nothing. This
 // group only appears when you have filtered to one position, and it changes with it.
 const POS_COLS = {
-  QB: [['Pa yds', (r) => r.p.a?.pass_yd ?? '—', 58], ['Ru yds', (r) => r.p.a?.rush_yd ?? '—', 58],
-    ['TDs', (r) => r.p.a?.anytime_tds ?? '—', 46]],
+  QB: [['Pa yds', (r) => r.p.a?.pass_yd ?? '—', 62], ['Pa TD', (r) => r.p.a?.pass_td ?? '—', 52],
+    ['INT', (r) => r.p.a?.pass_int ?? '—', 46], ['Cmp%', (r) => pct(r.p.a?.cmp_pct), 52],
+    ['Y/att', (r) => one(r.p.a?.pass_ypa), 52], ['Ru yds', (r) => r.p.a?.rush_yd ?? '—', 58]],
   RB: [['Carries', (r) => r.p.a?.rush_att ?? '—', 60], ['Y/carry', (r) => one(r.p.a?.rush_ypa), 58],
     ['Targets', (r) => r.p.a?.rec_tgt ?? '—', 60], ['RZ car', (r) => r.p.a?.rush_rz_att ?? '—', 56]],
   WR: [['Targets', (r) => r.p.a?.rec_tgt ?? '—', 60], ['Catch%', (r) => pct(catchRate(r)), 58],
@@ -621,6 +622,17 @@ let infl = null;
 let inflKey = '';
 
 function renderRatings() {
+  // Re-rendering used to slam every panel shut and force Volume open, so ticking a stat
+  // in Reliability threw you back to the top of the page. Worse, a stat you added landed
+  // in a component that was now collapsed - which looked exactly like the stat had been
+  // lost, which is what it was reported as.
+  //
+  // The open panels are read back out of the DOM immediately before the rebuild rather
+  // than tracked through toggle events. <details> fires `toggle` without bubbling and it
+  // was not reaching a delegated listener, so the state silently went stale.
+  const live = [...document.querySelectorAll('details.comp[open]')].map((x) => x.dataset.comp);
+  if (live.length || st.openComps) st.openComps = live.length ? live : (st.openComps || []);
+  st.openComps ||= ['volume'];
   const cw = board.weights;
   const maxW = Math.max(...Object.values(cw), 1);
 
@@ -672,7 +684,7 @@ ${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}" data-ti
     }).join('');
 
     const mineHere = customsFor(c.key);
-    return `<details class="comp"${c.key === 'volume' ? ' open' : ''}>
+    return `<details class="comp" data-comp="${c.key}"${st.openComps?.includes(c.key) ? ' open' : ''}>
 <summary><span class="cName" data-tip="${c.key}" tabindex="0">${c.label}</span>
 <span class="cDesc">${c.desc}</span>
 <span class="cMeter"><b style="width:${Math.round(((cw[c.key] ?? 0) / maxW) * 100)}%"></b></span>
@@ -1055,7 +1067,11 @@ function wire() {
         // rather than creating a duplicate copy of the same number
         st.sub[parts[1]].on = true;
         subVersion += 1;
+        const home = data.components.find((c) => c.subs.some((x) => x.key === parts[1]));
+        st.openComps ||= [];
+        if (home && !st.openComps.includes(home.key)) st.openComps.push(home.key);
         save(); rebuild();
+        $(`details.comp[data-comp="${home?.key}"]`)?.scrollIntoView?.({ block: 'nearest' });
         return;
       }
       const [, field, hi, pg, comp] = parts;
@@ -1068,7 +1084,12 @@ function wire() {
       });
       syncCustoms();
       subVersion += 1;
+      // open the component it went into, so it is never added into a collapsed panel
+      st.openComps ||= [];
+      if (!st.openComps.includes(comp)) st.openComps.push(comp);
       save(); rebuild();
+      const panel = $(`details.comp[data-comp="${comp}"]`);
+      if (panel?.scrollIntoView) panel.scrollIntoView({ block: 'nearest' });
       return;
     }
     if (e.target.dataset.son) {
