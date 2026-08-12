@@ -480,3 +480,13 @@ span.nm:hover { text-decoration: none; }
 .addLine select { max-width: 420px; flex: 1; }
 .addStat .hint { margin-top: 8px; }
 .addStat .hint b { color: var(--ink); font-weight: 500; }
+
+/* ---------------------------------------------------------------- injuries + age */
+.inj {
+  font-size: 9px; font-weight: 700; letter-spacing: .03em; flex: none;
+  border-radius: 3px; padding: 1px 4px; line-height: 14px; cursor: help;
+}
+.inj.warn { color: var(--warn); border: 1px solid var(--warn); }
+.inj.bad { color: #fff; background: var(--bad); border: 1px solid var(--bad); }
+.age { color: var(--ink3); }
+.age.stale { color: var(--bad); font-weight: 500; }

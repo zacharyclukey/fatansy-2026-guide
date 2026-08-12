@@ -143,6 +143,22 @@ const fire = (el, type) => {
   ok('component bars have tips', d.querySelectorAll('.detail .bar[data-tip]').length >= 10);
   ok('stat cards have tips', d.querySelectorAll('.detail .stat[data-tip]').length >= 8);
   ok('no console errors', errs.length === 0, errs.join('; '));
+
+  // injuries were being dropped entirely - a torn ACL looked like a healthy player
+  const injured = players.players.filter((p) => p.inj);
+  ok('injuries reach the data', injured.length > 10, `${injured.length} flagged`);
+  d.querySelectorAll('.row.player [data-open]')[0].click();   // close the one opened above
+  const q = d.querySelector('#search');
+  q.value = injured[0].name; fire(q, 'input');
+  await settle();
+  ok('injury shows on the row', !!d.querySelector('.row.player .inj'),
+    `${injured[0].name} (${injured[0].inj})`);
+  d.querySelectorAll('.row.player [data-open]')[0].click();
+  await settle();
+  ok('injury leads the risk line', /Injury question|Not playing/
+    .test(d.querySelector('.detail .verdict').textContent));
+  ok('data age is shown', /data .*(today|day)/.test(d.querySelector('#meta').textContent),
+    d.querySelector('#meta').textContent.slice(-60));
 }
 
 // ---------------------------------------------------------------- 3. the call

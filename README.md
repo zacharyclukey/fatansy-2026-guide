@@ -59,8 +59,13 @@ after any change; it has caught several bugs that looked fine by eye.
 
 ## Regenerating the data
 
-The player data is built by a Python pipeline that pulls from Sleeper. `data/players.json`
-is the only thing the app needs; drop in a new one and everything re-scores.
+`pipeline/` holds the whole build, and a GitHub Action re-runs it every morning and commits
+the result, so the board is current on draft day without anyone doing anything. See
+[pipeline/README.md](pipeline/README.md).
+
+**One repo setting is needed for the automation:** Settings → Actions → General →
+Workflow permissions → **Read and write permissions**. Without it the Action can rebuild
+the data but not commit it.
 
 ## How the rating works
 

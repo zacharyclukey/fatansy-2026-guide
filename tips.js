@@ -75,6 +75,9 @@ export const TIPS = {
   addstat: ['Bring in a 2025 stat the rating does not use.',
     'It is ranked within position like every other stat, and filed under the component it belongs to.'],
 
+  age: ['How old the projections and ADP are.',
+    'Rebuilt from Sleeper each morning. Over a week old means the refresh has stopped.'],
+
   strat: ['A shortcut for the sliders below.',
     'Sets position multipliers, tilt, need and style. Never touches your stat weights.'],
 

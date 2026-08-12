@@ -26,3 +26,7 @@ Thumbs.db
 
 # test deps
 test/node_modules/
+
+# raw Sleeper payloads - refetched by the pipeline, no need to version them
+pipeline/sleeper_*.json
+pipeline/board.json

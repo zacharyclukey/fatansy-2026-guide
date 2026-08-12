@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121254';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121254';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121254';
-import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121254';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121307';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121307';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121307';
+import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121307';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121254';
+const BUILD = '202608121307';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -113,11 +113,23 @@ const picks = () => st.picks[st.league];
 const byId = (id) => data.players.find((p) => p.id === id);
 
 // ---------------------------------------------------------------- wording
+// Sleeper's own wording. Out / IR / PUP means he is not playing; the rest is a question
+// mark. Either way it belongs on the row, not buried.
+const INJ_BAD = ['Out', 'IR', 'PUP', 'NA', 'Sus', 'DNR'];
+const injBadge = (p) => (p.inj
+  ? `<span class="inj ${INJ_BAD.includes(p.inj) ? 'bad' : 'warn'}" title="${p.inj}${p.injPart ? ` — ${p.injPart}` : ''}">${p.inj.slice(0, 3).toUpperCase()}</span>`
+  : '');
+
 const styleWord = (v) => (v <= 15 ? 'safest floor' : v <= 40 ? 'leaning safe'
   : v < 60 ? 'balanced' : v < 85 ? 'leaning upside' : 'highest ceiling');
 
 function riskOf(r) {
   const f = r.scores.floor ?? 50;
+  if (r.p.inj) {
+    const bad = INJ_BAD.includes(r.p.inj);
+    return `${bad ? 'Not playing' : 'Injury question'} — ${r.p.inj}`
+      + `${r.p.injPart ? ` (${r.p.injPart})` : ''}`;
+  }
   if (r.p.rookie) return `Rookie — ${f >= 55 ? 'good landing spot' : 'dart throw'}`;
   if (f >= 70) return 'Safe — locked-in role';
   if (f >= 50) return 'Solid — real workload';
@@ -323,8 +335,13 @@ function renderAll() {
   if (view === 'roster') renderRoster();
   if (view === 'ratings') renderRatings();
   if (view === 'setup') renderSetup();
-  $('#meta').textContent = `${board.rows.length} players · ${board.league.name} · `
-    + `${picks().mine.length} on your roster · data ${data.generated} · build ${BUILD}`;
+  const age = Math.floor((Date.now() - new Date(data.generated).getTime()) / 86400000);
+  const stale = age > 7;
+  $('#meta').innerHTML = `${board.rows.length} players · ${board.league.name} · `
+    + `${picks().mine.length} on your roster · build ${BUILD} · `
+    + `<span class="age${stale ? ' stale' : ''}" data-tip="age" tabindex="0">`
+    + `data ${age <= 0 ? 'from today' : age === 1 ? '1 day old' : `${age} days old`}`
+    + `${stale ? ' — ADP moves fast in August' : ''}</span>`;
 }
 
 // Rebuilding the whole list with innerHTML meant discarding and re-parsing roughly two
@@ -338,7 +355,7 @@ function rowHTML(r, cols, d, m) {
   return `<span class="rk">${r.rank}</span>
 <span class="who">${posTag(r.p.pos)}
 <button class="nm" data-open="${r.p.id}" title="Show detail">${r.p.name} <span class="tm">${r.p.team || ''}</span></button>
-${r.p.rookie ? '<span class="rook">R</span>' : ''}</span>
+${r.p.rookie ? '<span class="rook">R</span>' : ''}${injBadge(r.p)}</span>
 ${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
 <button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
