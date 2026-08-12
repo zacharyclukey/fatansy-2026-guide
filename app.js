@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121327';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121327';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121327';
-import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121327';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121334';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121334';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121334';
+import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121334';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121327';
+const BUILD = '202608121334';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -569,9 +569,16 @@ function renderAdvice2() {
     + 'recommendation for your next pick appears here too.</p>';
 }
 
+let infl = null;
+let inflKey = '';
+
 function renderRatings() {
   const cw = board.weights;
   const maxW = Math.max(...Object.values(cw), 1);
+
+  // eleven extra board builds, about 25ms, and only when this tab is on screen
+  const key = `${JSON.stringify(st.comp)}|${st.style}|${st.tilt}|${subVersion}`;
+  if (key !== inflKey) { infl = influence(data, st, cache); inflKey = key; }
 
   // one place to add a stat. It only ever offers things the rating is genuinely not
   // using: built-in stats you have switched off, and raw fields with no built-in at all.
@@ -592,6 +599,16 @@ ${(st.customs || []).length ? `<p class="hint">Added: ${(st.customs || [])
     .map((c) => `<b>${c.label}</b> in ${label(c.comp)}`).join(', ')}.</p>` : ''}`;
   $('#priority2').textContent = priorityOrder(data, st).slice(0, 4)
     .map((c) => c.label.toLowerCase()).join(' › ');
+  const biggest = Object.entries(infl).sort((a2, b2) => b2[1].mean - a2[1].mean)[0];
+  const lab = (k) => data.components.find((c) => c.key === k)?.label || k;
+  const churn = Object.values(infl).reduce((a2, x) => a2 + x.top50, 0);
+  $('#inflNote').innerHTML = `The <b>±</b> column is how far the board moves if you switch a `
+    + `component off — measured, not guessed. <b>${lab(biggest[0])}</b> moves it most `
+    + `(±${biggest[1].mean.toFixed(1)} places). ${churn === 0
+      ? 'Switching any single one off changes <b>nobody</b> in your top 50: the components '
+        + 'overlap heavily, so the others cover for whichever you drop.'
+      : `Switching one off moves ${churn} player${churn === 1 ? '' : 's'} in or out of your top 50.`}
+    To make your ratings matter more overall, raise <b>Trust my ratings</b> on the board.`;
   $('#comps').innerHTML = data.components.map((c) => {
     const locked = c.key === 'floor' || c.key === 'ceiling';
     const subs = c.subs.map((sm) => {
@@ -611,6 +628,8 @@ ${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}" data-ti
 <summary><span class="cName" data-tip="${c.key}" tabindex="0">${c.label}</span>
 <span class="cDesc">${c.desc}</span>
 <span class="cMeter"><b style="width:${Math.round(((cw[c.key] ?? 0) / maxW) * 100)}%"></b></span>
+<span class="cMove" data-tip="move" tabindex="0">${infl[c.key]
+    ? `±${infl[c.key].mean.toFixed(1)}` : '—'}</span>
 <span class="cW">${cw[c.key] ?? 0}</span></summary>
 <div class="cBody">
 ${locked

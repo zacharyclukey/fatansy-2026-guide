@@ -67,6 +67,30 @@ the result, so the board is current on draft day without anyone doing anything. 
 Workflow permissions → **Read and write permissions**. Without it the Action can rebuild
 the data but not commit it.
 
+## An honest note on how much the ratings move anything
+
+The Ratings Lab shows a **±** figure per component: how far the board moves if you switch
+that component off. It is measured by rebuilding the board, not estimated.
+
+The numbers are smaller than the size of the interface suggests. At the default settings,
+switching off any single component moves players about **1-3 places on average** and
+changes almost nobody in the top 50. Two reasons:
+
+1. **The components overlap.** They are percentiles within position and they agree with
+   each other — volume and production correlate at r = 0.83, role and floor at 0.83. Drop
+   one and the others carry the same signal.
+2. **Value over replacement dominates the draft score.** The rating is a tilt on top of
+   real projected points, and at the default `Trust my ratings = 50` it can move a player
+   by at most about 20 points of score.
+
+The one component that genuinely moves the board is the **2026 projection** (±12 places),
+because it is the only one measuring this season rather than last.
+
+None of that makes the ratings pointless — they decide the order *within* a tier and they
+are what makes "your guy" differ from the room. But if you want them to change who you
+draft rather than just the order you rank them, the lever is **Trust my ratings**, not the
+component weights.
+
 ## How the rating works
 
 Two levels. Each **component** (volume, red zone, efficiency, …) is a weighted blend of

@@ -506,3 +506,15 @@ span.nm:hover { text-decoration: none; }
 .inj.bad { color: #fff; background: var(--bad); border: 1px solid var(--bad); }
 .age { color: var(--ink3); }
 .age.stale { color: var(--bad); font-weight: 500; }
+
+.comp summary { grid-template-columns: 118px minmax(0, 1fr) 96px 52px 40px; }
+.cMove {
+  font-family: var(--num); font-size: 11px; text-align: center; color: var(--ink2);
+  background: var(--panel); border-radius: 4px; padding: 3px 0; cursor: help;
+}
+.inflNote {
+  font-size: 13px; color: var(--ink2); background: var(--panel);
+  border-left: 3px solid var(--line2); border-radius: 0 var(--r) var(--r) 0;
+  padding: 11px 13px; margin: 0 0 18px; max-width: 90ch; line-height: 1.55;
+}
+.inflNote b { color: var(--ink); font-weight: 600; }

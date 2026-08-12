@@ -72,6 +72,9 @@ export const TIPS = {
   cliff: ['The last player of his tier.',
     'The next one at his position is a clear step down, not a small one.'],
 
+  move: ['How far the board moves without this component.',
+    'Measured by rebuilding with it switched off. Small means the other components cover for it.'],
+
   advice: ['What to do with this pick.',
     'Compares the best man at each position now against the best you could still expect next turn.'],
 

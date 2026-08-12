@@ -250,6 +250,12 @@ const fire = (el, type) => {
   fire(menu2, 'change');
   await settle();
   d.querySelector('[data-v="ratings"]').click();
+  // the influence readout - it is measured, so it must actually be there and be numeric
+  const moves = [...d.querySelectorAll('#comps .cMove')].map((x) => x.textContent.trim());
+  ok('every component reports its influence', moves.length === 11 && moves.every((x) => /^±\d/.test(x)),
+    moves.join(' '));
+  ok('the influence note explains itself', /switch a component off|switch/.test(d.querySelector('#inflNote').textContent));
+
   ok('an unused stat can be added',
     d.querySelectorAll('#comps .statRow:not(.hdr)').length === before + 1);
 
