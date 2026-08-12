@@ -19,6 +19,20 @@ set what you care about, and the board re-scores as you type.
 After that, every change is: open GitHub Desktop → **Push origin**. The site updates in
 under a minute.
 
+### "I pushed but the site looks the same"
+
+Almost always the browser, not the deploy. GitHub Pages serves css and js with a long
+cache, so Chrome keeps the old copies. Three things to check, in order:
+
+1. **Hard refresh** — Ctrl+Shift+R (or open the URL in an incognito window).
+2. **Check the build stamp** in the footer of the page. It changes with every release, so
+   if it matches the newest one you are looking at current code.
+3. Only then look at the repo's **Actions** tab for a failed `pages build and deployment`.
+
+Every asset URL carries a `?v=` stamp to defeat that caching. Run `./bump.sh` before
+committing any change to css or js — it rewrites the stamp everywhere and updates the
+build number shown in the footer.
+
 ## What is in here
 
 | File | What it does |

@@ -1,8 +1,9 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats } from './engine.js?v=202608121152';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121152';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
+const BUILD = '202608121152';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -137,7 +138,7 @@ function renderAll() {
   if (view === 'ratings') renderRatings();
   if (view === 'setup') renderSetup();
   $('#meta').textContent = `${board.rows.length} players · ${board.league.name} · `
-    + `${picks().mine.length} on your roster · data ${data.generated}`;
+    + `${picks().mine.length} on your roster · data ${data.generated} · build ${BUILD}`;
 }
 
 function renderBoard() {
