@@ -9,3 +9,17 @@
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Never re-commit the innards of a .git folder as if they were website files
+/objects/
+/refs/
+/hooks/
+/logs/
+/info/
+/branches/
+/HEAD
+/ORIG_HEAD
+/COMMIT_EDITMSG
+/config
+/description
+/index

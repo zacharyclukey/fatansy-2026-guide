@@ -222,3 +222,22 @@ main { padding: 12px 20px 40px; }
   background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 3px;
 }
 .subs input.w.zero { color: var(--ink3); background: var(--panel); }
+
+/* ---------------------------------------------------------------- setup */
+input[type="text"] {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 7px 10px; min-height: 36px;
+}
+#user { width: 190px; }
+.setupMsg {
+  font-size: 14px; border-radius: var(--radius); padding: 10px 12px; margin: 4px 0 16px;
+  border: 1px solid var(--line); background: var(--panel);
+}
+.setupMsg.bad { border-color: var(--bad); color: var(--bad); }
+.setupMsg.good { border-color: var(--good); color: var(--good); }
+.lgCard {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 8px;
+}
+.lgCard b { font-weight: 500; }
+.lgCard .hint { margin-top: 3px; }

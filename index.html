@@ -17,6 +17,7 @@
     <button data-v="board" aria-pressed="true">Board</button>
     <button data-v="roster" aria-pressed="false">My team</button>
     <button data-v="ratings" aria-pressed="false">Ratings</button>
+    <button data-v="setup" aria-pressed="false">Setup</button>
   </nav>
 </header>
 
@@ -100,6 +101,31 @@
     </div>
     <p class="priority big">You are drafting for <span id="priority2"></span></p>
     <div id="comps"></div>
+  </main>
+</section>
+
+<section id="v-setup" hidden>
+  <main>
+    <p class="lede">Pull your leagues straight from Sleeper - scoring, roster slots and
+      draft date come across, and the board re-scores itself for each one. During the draft
+      it can follow the picks live.</p>
+    <div class="rowbtns">
+      <input id="user" type="text" placeholder="Sleeper username" aria-label="Sleeper username" />
+      <input id="season" type="text" value="2026" size="4" aria-label="Season" />
+      <button id="importL">Import my leagues</button>
+    </div>
+    <p id="setupMsg" class="setupMsg" hidden></p>
+    <div id="leagueList"></div>
+
+    <h2 class="h2">Live draft</h2>
+    <p class="lede">When your draft starts this reads the picks as they happen and ticks
+      them off the board. Yours are decided by who actually made the pick, not by guessing
+      from your draft slot.</p>
+    <div class="rowbtns">
+      <button id="syncOnce">Sync picks now</button>
+      <button id="syncAuto">Start auto-sync</button>
+    </div>
+    <p id="syncMsg" class="setupMsg" hidden></p>
   </main>
 </section>
 

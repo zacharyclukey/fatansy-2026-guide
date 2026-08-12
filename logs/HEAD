@@ -1,6 +1,0 @@
-0000000000000000000000000000000000000000 e8ff5dc7ab8e6406d86cbcc773a996f1160cc171 Zach <z@local> 1786541412 -0400	commit (initial): Start the 2026 draft guide web app: player data + rating engine
-e8ff5dc7ab8e6406d86cbcc773a996f1160cc171 1ba77b5b28accf49447b4be8aaa11573147bbb54 Zach <z@local> 1786541418 -0400	commit: probe
-1ba77b5b28accf49447b4be8aaa11573147bbb54 8e59154fadabd60627f3ee5831733f279a413149 Zach <z@local> 1786541418 -0400	commit: undo probe
-8e59154fadabd60627f3ee5831733f279a413149 e8ff5dc7ab8e6406d86cbcc773a996f1160cc171 Zach <z@local> 1786541419 -0400	reset: moving to HEAD~2
-e8ff5dc7ab8e6406d86cbcc773a996f1160cc171 b9687937a0720c73f506e4b4679af02487425929 Zach <z@local> 1786541737 -0400	commit: Board view: player table, filters, search, settings, expandable detail
-b9687937a0720c73f506e4b4679af02487425929 4253e04c1d4fb3c0c316a26324b67d68808d91ee Zach <z@local> 1786544519 -0400	commit: Move site to repo root; add My team and Ratings views, profile export/import, README

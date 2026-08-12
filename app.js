@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, buildBoard, priorityOrder } from './engine.js';
+import { importLeagues, draftPicks, SleeperError } from './sleeper.js';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
@@ -11,6 +12,7 @@ let view = 'board';
 let filter = 'ALL';
 let query = '';
 let open = null;
+let timer = null;
 
 // ---------------------------------------------------------------- state
 function load() {
@@ -21,6 +23,8 @@ function load() {
   // a saved profile from an older build may not know about newer stats
   st.comp = { ...base.comp, ...(st.comp || {}) };
   for (const [k, v] of Object.entries(base.sub)) st.sub[k] = st.sub[k] || v;
+  if (st.imported?.length) data.leagues = [...data.leagues, ...st.imported];
+  if (st.league >= data.leagues.length) st.league = 0;
   st.picks ||= {};
   for (let i = 0; i < data.leagues.length; i++) st.picks[i] ||= { drafted: [], mine: [] };
 }
@@ -82,6 +86,7 @@ function renderAll() {
   if (view === 'board') renderBoard();
   if (view === 'roster') renderRoster();
   if (view === 'ratings') renderRatings();
+  if (view === 'setup') renderSetup();
   $('#meta').textContent = `${board.rows.length} players · ${board.league.name} · `
     + `${picks().mine.length} on your roster · data ${data.generated}`;
 }
@@ -248,6 +253,83 @@ ${c.subs.length ? `<table class="subs"><thead><tr><th>Stat</th>${data.ratePos.ma
   }).join('');
 }
 
+// ---------------------------------------------------------------- sleeper
+function msg(el, text, kind) {
+  const n = $(el);
+  n.hidden = !text;
+  n.textContent = text || '';
+  n.className = `setupMsg${kind ? ` ${kind}` : ''}`;
+}
+
+function renderSetup() {
+  $('#user').value = st.sleeperUser || '';
+  const mine = data.leagues.filter((l) => l.imported);
+  $('#leagueList').innerHTML = mine.length ? mine.map((l) => `<div class="lgCard">
+<b>${l.name}</b> — ${l.teams} teams${l.rounds ? `, ${l.rounds} rounds` : ''}
+<span class="hint">${Object.entries(l.starters).map(([k, v]) => `${v}${k}`).join(' · ')}${l.draft ? ` · drafts ${l.draft}` : ''}${l.slot ? ` · you pick ${l.slot}` : ''}</span>
+${l.ignored?.length ? `<span class="hint">Not scored: ${l.ignored.join(', ')} — no projection exists for these.</span>` : ''}
+</div>`).join('') : '';
+}
+
+async function doImport() {
+  const name = $('#user').value.trim();
+  if (!name) return msg('#setupMsg', 'Type your Sleeper username first.', 'bad');
+  msg('#setupMsg', 'Asking Sleeper…');
+  try {
+    const { userId, leagues } = await importLeagues(name, $('#season').value.trim(), data.scoreKeys);
+    st.sleeperUser = name;
+    st.sleeperId = userId;
+    st.imported = leagues;
+    // a fresh import replaces the old imported set, so pick logs are rebuilt to match
+    data.leagues = data.leagues.filter((l) => !l.imported).concat(leagues);
+    for (let i = 0; i < data.leagues.length; i++) st.picks[i] ||= { drafted: [], mine: [] };
+    save();
+    renderChrome();
+    rebuild();
+    msg('#setupMsg', `Imported ${leagues.length} league${leagues.length === 1 ? '' : 's'}. `
+      + 'Pick one from the dropdown at the top.', 'good');
+  } catch (e) {
+    msg('#setupMsg', e instanceof SleeperError ? e.message : `Something went wrong: ${e.message}`, 'bad');
+  }
+}
+
+async function doSync() {
+  const lg = data.leagues[st.league];
+  if (!lg.draft_id) return msg('#syncMsg', 'This league has no draft on Sleeper yet.', 'bad');
+  try {
+    const list = await draftPicks(lg.draft_id, st.sleeperId);
+    if (!list.length) return msg('#syncMsg', 'The draft has not started — no picks yet.');
+    const known = new Set(data.players.map((p) => p.id));
+    const pk = picks();
+    let added = 0;
+    let skipped = 0;
+    for (const p of list) {
+      if (!known.has(p.playerId)) { skipped += 1; continue; }
+      if (!pk.drafted.includes(p.playerId)) { pk.drafted.push(p.playerId); added += 1; }
+      if (p.mine && !pk.mine.includes(p.playerId)) pk.mine.push(p.playerId);
+    }
+    save();
+    rebuild();
+    msg('#syncMsg', `${list.length} picks made, ${added} new.`
+      + (skipped ? ` ${skipped} not in the player pool — deep bench, safe to ignore.` : ''), 'good');
+  } catch (e) {
+    msg('#syncMsg', e instanceof SleeperError ? e.message : `Sync failed: ${e.message}`, 'bad');
+  }
+}
+
+function toggleAuto() {
+  const b = $('#syncAuto');
+  if (timer) {
+    clearInterval(timer);
+    timer = null;
+    b.textContent = 'Start auto-sync';
+    return msg('#syncMsg', 'Auto-sync stopped.');
+  }
+  timer = setInterval(doSync, 8000);
+  b.textContent = 'Stop auto-sync';
+  doSync();
+}
+
 // ---------------------------------------------------------------- chrome
 function renderChrome() {
   $('#league').innerHTML = data.leagues
@@ -272,7 +354,7 @@ function readouts() {
 
 function show(v) {
   view = v;
-  for (const s of ['board', 'roster', 'ratings']) $(`#v-${s}`).hidden = s !== v;
+  for (const s of ['board', 'roster', 'ratings', 'setup']) $(`#v-${s}`).hidden = s !== v;
   document.querySelectorAll('[data-v]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
   renderAll();
 }
@@ -292,6 +374,9 @@ function wire() {
     $(`#${id}`).oninput = (e) => { fn(e.target.value); readouts(); save(); rebuild(); };
   }
   $('#rookie').onchange = (e) => { st.rookie = e.target.checked; save(); rebuild(); };
+  $('#importL').onclick = doImport;
+  $('#syncOnce').onclick = doSync;
+  $('#syncAuto').onclick = toggleAuto;
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };
 
   // ratings profile as a file, so you and someone else can keep different ones
