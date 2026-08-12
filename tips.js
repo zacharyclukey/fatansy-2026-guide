@@ -51,6 +51,24 @@ export const TIPS = {
   'Back?': ['Chance he is still there at your next pick.',
     'Estimated from ADP spread — a guide, not a guarantee.'],
 
+  call: ['Is he worth this pick, to YOU.',
+    'Your board rank vs the live pick, and his ADP vs the live pick. Both have to agree for a steal.'],
+  wait: ['Whether he comes back to you next turn.',
+    'Odds from ADP, plus how many similar players are left.'],
+
+  'card:gp': ['Games played in 2025.', 'Out of 17.'],
+  'card:rush_att': ['Carries in 2025.', ''],
+  'card:rec_tgt': ['Times he was thrown at in 2025.', ''],
+  'card:rec': ['Catches in 2025.', ''],
+  'card:rush_rec_yd': ['Yards from scrimmage.', 'Rushing plus receiving.'],
+  'card:anytime_tds': ['Touchdowns scored in 2025.', ''],
+  'card:rush_rz_att': ['Carries inside the opponent 20.', 'Where touchdowns come from.'],
+  'card:rec_rz_tgt': ['Targets inside the opponent 20.', ''],
+  'card:rush_ypa': ['Yards per carry.', 'Rushing yards / carries.'],
+  'card:rec_ypt': ['Yards per target.', 'Receiving yards / times thrown at.'],
+  'card:ppg': ['PPR points per game.', 'Total points / games played.'],
+  'card:finish': ['Where he finished at his position in 2025.', ''],
+
   posW: ['What this stat counts for at this position.', 'Zero means it says nothing there.'],
 };
 

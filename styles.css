@@ -139,6 +139,10 @@ input[type="checkbox"] { accent-color: var(--field); width: 15px; height: 15px; 
 .filters button { padding: 0 11px; height: 30px; font-size: 13px; }
 .spacer { flex: 1; }
 main { padding: 16px 22px 46px; max-width: 1200px; }
+/* the board view gets the full width - extra stat columns should use the empty space on
+   the right rather than squeezing the player names */
+#v-board main { max-width: none; overflow-x: auto; }
+#v-board .board { min-width: min-content; }
 
 /* ---------------------------------------------------------------- settings */
 .panel {
@@ -225,6 +229,8 @@ span.nm:hover { text-decoration: none; }
 .bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(172px, 1fr)); gap: 6px 24px; }
 .bar { display: grid; grid-template-columns: 94px 1fr 24px; gap: 9px; align-items: center; font-size: 12px; }
 .bar > span:first-child { color: var(--ink2); }
+.bar { cursor: help; }
+.bar:hover > span:first-child, .bar:focus-visible > span:first-child { color: var(--ink); }
 .bar i { display: block; height: 4px; border-radius: 2px; background: var(--line2); }
 .bar i b { display: block; height: 100%; border-radius: 2px; background: var(--field); }
 .bar u { text-decoration: none; text-align: right; font-family: var(--num); color: var(--ink2); }
@@ -234,7 +240,9 @@ span.nm:hover { text-decoration: none; }
 }
 .stat {
   background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px;
+  cursor: help;
 }
+.stat:hover { border-color: var(--line2); }
 .stat span { display: block; font-size: 11px; color: var(--ink3); }
 .stat b { display: block; font-family: var(--num); font-size: 15px; font-weight: 600; }
 .facts { margin: 13px 0 0; font-size: 12px; color: var(--ink2); line-height: 1.6; }

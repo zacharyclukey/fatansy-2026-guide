@@ -72,21 +72,30 @@ export async function importLeagues(username, season, scoreKeys) {
   for (const L of raw) {
     const { starters: s, bench } = starters(L.roster_positions);
     const { scoring, ignored } = scoringFor(L.scoring_settings, scoreKeys);
+    // Which roster is yours. Needed because an AUTODRAFTED pick can come back with an
+    // empty picked_by - if we only matched on that, every pick made while you were on
+    // autopick would look like somebody else's. It also gives a second route to your slot.
     let rounds = null;
     let slot = null;
     let when = null;
-    // Which roster is yours. Needed because an AUTODRAFTED pick can come back with an
-    // empty picked_by - if we only matched on that, every pick made while you were on
-    // autopick would look like somebody else's.
     let rosterId = null;
     try {
       const rosters = await getRosters(L.league_id);
       rosterId = (rosters || []).find((r) => r.owner_id === user.user_id)?.roster_id ?? null;
     } catch { /* not fatal - picked_by still covers manual picks */ }
+
     try {
       const d = await getDraft(L.draft_id);
       rounds = d?.settings?.rounds ?? null;
+      // draft_order only exists once the commissioner has actually set the order. Before
+      // that Sleeper genuinely does not know where you are picking, so neither can we.
       slot = d?.draft_order?.[user.user_id] ?? null;
+      if (!slot && d?.slot_to_roster_id) {
+        // some drafts publish the slot->roster mapping first; that is enough to find yours
+        const mine = Object.entries(d.slot_to_roster_id)
+          .find(([, rid]) => rid === rosterId);
+        slot = mine ? Number(mine[0]) : null;
+      }
       when = d?.start_time ? new Date(d.start_time).toLocaleString() : null;
     } catch { /* the draft may not exist yet - that is fine, the league still imports */ }
     leagues.push({

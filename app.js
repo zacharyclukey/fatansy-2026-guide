@@ -1,10 +1,10 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121221';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121221';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121221';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround } from './engine.js?v=202608121233';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121233';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121233';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121221';
+const BUILD = '202608121233';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -90,6 +90,7 @@ function load() {
   // leagues baked into it are never shown. You get a neutral league until you import.
   data.leagues = st.imported?.length ? [...st.imported] : [SAMPLE_LEAGUE];
   if (st.league >= data.leagues.length) st.league = 0;
+  st.slots ||= {};
   st.picks ||= {};
   for (let i = 0; i < data.leagues.length; i++) st.picks[i] ||= { drafted: [], mine: [] };
 }
@@ -218,7 +219,8 @@ function syncCustoms() {
 
 function tickClock() {
   const lg = board?.league || data.leagues[st.league];
-  const slot = st.slot || lg?.slot || null;
+  // per league: slot 4 in one is not slot 4 in another
+  const slot = st.slots?.[st.league] ?? lg?.slot ?? null;
   // the pick on the clock is simply however many are already off the board, plus one
   const now = picks().drafted.length + 1;
   clock = draftContext(lg, slot, now);
@@ -230,7 +232,7 @@ function tickClock() {
   } else if (clock?.onClock) {
     $('#clockNext').innerHTML = `<b class="good">You are on the clock.</b> Then pick ${clock.target} — ${clock.gap} away.`;
   } else if (clock?.target) {
-    $('#clockNext').innerHTML = `Your next pick is <b>${clock.next}</b>, then <b>${clock.after ?? '—'}</b>. Waiting costs ${clock.gap} picks.`;
+    $('#clockNext').innerHTML = `Your next pick is <b>${clock.next}</b>, then <b>${clock.after ?? '—'}</b>. Waiting costs ${clock.gap} pick${clock.gap === 1 ? '' : 's'}.`;
   } else {
     $('#clockNext').innerHTML = '<span class="hint">Draft finished.</span>';
   }
@@ -269,8 +271,10 @@ function renderBoard() {
     && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
 
   const cols = activeCols();
+  // minmax with a real floor: extra columns extend the table rightwards into the empty
+  // space instead of eating the player-name column, which was truncating names.
   $('#board').style.setProperty('--cols',
-    `34px minmax(0, 1fr) ${cols.map((c) => `${c[2]}px`).join(' ')} 102px`);
+    `34px minmax(190px, 1fr) ${cols.map((c) => `${c[2]}px`).join(' ')} 102px`);
   $('#colHeads').innerHTML = cols
     .map((c) => `<span data-tip="${c[0]}" tabindex="0">${c[0]}</span>`).join('');
 
@@ -303,7 +307,8 @@ function detail(r) {
   const bars = data.components.map((c) => {
     const v = r.scores[c.key];
     if (v == null) return '';
-    return `<span class="bar"><span>${c.label}</span><i><b style="width:${Math.max(2, Math.round(v))}%"></b></i><u>${Math.round(v)}</u></span>`;
+    return `<span class="bar" data-tip="${c.key}" tabindex="0"><span>${c.label}</span>`
+      + `<i><b style="width:${Math.max(2, Math.round(v))}%"></b></i><u>${Math.round(v)}</u></span>`;
   }).join('');
   const m = r.p.m || {};
   const facts = [
@@ -318,8 +323,8 @@ function detail(r) {
   const drafted = new Set(picks().drafted);
   const wait = waitAdvice(r, drafted);
   return `<div class="detail">
-<p class="call"><span class="callTag ${call.replace(/\s+/g, '')}">${call}</span> ${why}</p>
-${wait ? `<p class="wait">${wait}</p>` : ''}
+<p class="call"><span class="callTag ${call.replace(/\s+/g, '')}" data-tip="call" tabindex="0">${call}</span> ${why}</p>
+${wait ? `<p class="wait" data-tip="wait" tabindex="0">${wait}</p>` : ''}
 <p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}</p>
 <div class="bars">${bars}</div>
 ${statCards(r)}
@@ -559,16 +564,19 @@ function statCards(r) {
   const a = r.p.a || {};
   const g = Math.max(a.gp || 0, 1);
   const cells = [
-    ['Games', a.gp], ['Carries', a.rush_att], ['Targets', a.rec_tgt],
-    ['Catches', a.rec], ['Scrim. yds', a.rush_rec_yd], ['TDs', a.anytime_tds],
-    ['RZ carries', a.rush_rz_att], ['RZ targets', a.rec_rz_tgt],
-    ['Yds/carry', a.rush_ypa?.toFixed(1)], ['Yds/target', a.rec_ypt?.toFixed(1)],
-    ['Pts/game', a.pts_ppr ? (a.pts_ppr / g).toFixed(1) : null],
-    ['2025 finish', a.pos_rank_ppr ? `${r.p.pos}${a.pos_rank_ppr}` : null],
+    ['Games', a.gp, 'card:gp'], ['Carries', a.rush_att, 'card:rush_att'],
+    ['Targets', a.rec_tgt, 'card:rec_tgt'], ['Catches', a.rec, 'card:rec'],
+    ['Scrim. yds', a.rush_rec_yd, 'card:rush_rec_yd'], ['TDs', a.anytime_tds, 'card:anytime_tds'],
+    ['RZ carries', a.rush_rz_att, 'card:rush_rz_att'], ['RZ targets', a.rec_rz_tgt, 'card:rec_rz_tgt'],
+    ['Yds/carry', a.rush_ypa?.toFixed(1), 'card:rush_ypa'],
+    ['Yds/target', a.rec_ypt?.toFixed(1), 'card:rec_ypt'],
+    ['Pts/game', a.pts_ppr ? (a.pts_ppr / g).toFixed(1) : null, 'card:ppg'],
+    ['2025 finish', a.pos_rank_ppr ? `${r.p.pos}${a.pos_rank_ppr}` : null, 'card:finish'],
   ].filter(([, v]) => v != null && v !== '');
   if (!cells.length) return '';
   return `<div class="statGrid">${cells
-    .map(([l, v]) => `<span class="stat"><span>${l}</span><b>${v}</b></span>`).join('')}</div>`;
+    .map(([l, v, tip]) => `<span class="stat" data-tip="${tip}" tabindex="0">`
+      + `<span>${l}</span><b>${v}</b></span>`).join('')}</div>`;
 }
 
 function renderChrome() {
@@ -583,7 +591,7 @@ function renderChrome() {
   $('#colToggles').innerHTML = GROUPS.map(([k, label]) => `<label class="chip">
 <input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`).join('');
   $('#rookie').checked = st.rookie;
-  $('#slot').value = st.slot || data.leagues[st.league]?.slot || '';
+  $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
   $('#hideGone').checked = !!st.hideGone;
   readouts();
 }
@@ -655,7 +663,13 @@ function wire() {
     p.hidden = !p.hidden;
     e.target.setAttribute('aria-expanded', String(!p.hidden));
   };
-  $('#league').onchange = (e) => { st.league = +e.target.value; open = null; save(); rebuild(); };
+  $('#league').onchange = (e) => {
+    st.league = +e.target.value;
+    open = null;
+    save();
+    renderChrome();   // slot, toggles and filters all belong to the league you just chose
+    rebuild();
+  };
   $('#search').oninput = (e) => { query = e.target.value; limit = 100; renderBoard(); };
   document.body.addEventListener('change', (e) => {
     if (!e.target.dataset.col) return;
@@ -668,7 +682,11 @@ function wire() {
     $(`#${id}`).oninput = (e) => { fn(e.target.value); readouts(); save(); scheduleRebuild(); };
   }
   $('#rookie').onchange = (e) => { st.rookie = e.target.checked; save(); rebuild(); };
-  $('#slot').oninput = (e) => { st.slot = +e.target.value || null; save(); rebuild(); };
+  $('#slot').oninput = (e) => {
+    st.slots ||= {};
+    st.slots[st.league] = +e.target.value || null;
+    save(); rebuild();
+  };
   if (window.ResizeObserver) new ResizeObserver(measure).observe(document.querySelector('.top'));
   window.addEventListener('resize', measure);
   $('#importL').onclick = doImport;
