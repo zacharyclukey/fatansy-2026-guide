@@ -9,8 +9,12 @@
 // Everything a user can change lives in one `settings` object, so it saves, loads and
 // exports as a single file.
 
+export const STAR_BAND = 5;   // how close two players must be for a star to break the tie
+
 export const DEFAULT_SETTINGS = (data) => ({
   league: 0,
+  stars: [],          // players you rate above what the numbers say. Not league-specific.
+  fades: [],          // and the ones you trust less than the numbers do.
   tilt: 0.5,          // 0 = pure value, 1 = trust the rating
   need: 8,            // draft-score bonus for a position you still need
   style: 50,          // 0 = safest floor, 100 = highest ceiling
@@ -333,10 +337,21 @@ export function buildBoard(data, st, cache) {
     r.score = s;
   }
 
-  rows.sort((a, b) => b.score - a.score);
+  // A star or a fade is a preference, not an override. It moves a player past anyone
+  // within STAR_BAND points of him and no further, so it only ever decides calls the
+  // numbers were close to indifferent about. Nobody's score changes.
+  const starred = new Set(st.stars || []);
+  const faded = new Set(st.fades || []);
+  for (const r of rows) {
+    r.star = starred.has(r.p.id);
+    r.fade = faded.has(r.p.id);
+    r.sortKey = r.score + (r.star ? STAR_BAND : 0) - (r.fade ? STAR_BAND : 0);
+  }
+  rows.sort((a, b) => b.sortKey - a.sortKey);
   rows.forEach((r, i) => { r.rank = i + 1; });
 
   markTiers(rows);
+  for (const r of rows) r.kind = pickType(r);
 
   const adpOrder = [...rows].sort((a, b) => a.p.adp - b.p.adp);
   adpOrder.forEach((r, i) => { r.adpRank = i + 1; });
@@ -408,6 +423,22 @@ export function availability(adp, atPick, fromPick = 0) {
 export function poolAround(rows, r, drafted, band = 6) {
   return rows.filter((x) => !drafted.has(x.p.id)
     && x.p.id !== r.p.id && Math.abs(x.score - r.score) <= band).length;
+}
+
+// What KIND of pick is this, right now?
+//
+// Three numbers already exist for every player - his floor, his upside, and how his rank
+// on your board compares with where the room takes him. Read together they say something
+// the score alone does not: whether this is the boring correct pick, a swing, or a player
+// the market simply values more than you do.
+export function pickType(r) {
+  const floor = r.scores.floorish ?? 50;
+  const up = r.scores.upside ?? 50;
+  const gap = r.adpRank - r.rank;          // + = your board likes him more than the room
+  if (gap <= -20) return 'skip';           // he goes 20+ spots before you would take him
+  if (floor >= 62 && up < 58) return 'safe';
+  if (up >= 60 && floor < 58) return 'swing';
+  return null;
 }
 
 // ---------------------------------------------------------------- tiers

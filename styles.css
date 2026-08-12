@@ -536,3 +536,24 @@ span.nm:hover { text-decoration: none; }
 .leanBtns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .leanBtns .hint { flex-basis: 100%; margin-top: 2px; }
 .labKnobs { margin: 0 0 20px; max-width: 620px; }
+
+/* ---------------------------------------------------------------- pick type + stars */
+.kind {
+  font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+  border-radius: 3px; padding: 2px 6px;
+}
+.kind.safe { background: var(--goodSoft); color: var(--good); }
+.kind.swing { background: var(--accentSoft); color: var(--accent); }
+.kind.skip { background: var(--panel2); color: var(--ink3); }
+.kindLine { margin: 0 0 8px; font-size: 13px; color: var(--ink2); display: flex; align-items: center; gap: 9px; }
+
+.starBtn {
+  width: 26px; padding: 0; font-size: 13px; line-height: 1; color: var(--ink3);
+  border-color: var(--line);
+}
+.starBtn:hover { color: var(--pigskin); border-color: var(--pigskin); }
+.starBtn.on { color: var(--pigskin); border-color: var(--pigskin); background: var(--card); }
+.starBtn.off { color: var(--bad); border-color: var(--bad); background: var(--card); }
+.row.starred { box-shadow: inset 3px 0 0 var(--pigskin); }
+.row.faded .nm, .row.faded .sc { color: var(--ink3); text-decoration: line-through; text-decoration-thickness: 1px; }
+.chip.mineOnly:has(input:checked) { background: var(--card); border-color: var(--pigskin); color: var(--pigskin); }

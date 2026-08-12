@@ -70,6 +70,11 @@ export const TIPS = {
   'card:ppg': ['PPR points per game.', 'Total points / games played.'],
   'card:finish': ['Where he finished at his position in 2025.', ''],
 
+  Type: ['What kind of pick he is right now.',
+    'Read from his floor, his upside, and how your rank compares with the room.'],
+  star: ['Your own view of him. Click to cycle.',
+    'Liked lifts him above anyone within 5 points, faded drops him below. Never further.'],
+
   cliff: ['The last player of his tier.',
     'The next one at his position is a clear step down, not a small one.'],
 

@@ -134,8 +134,9 @@ const fire = (el, type) => {
   d.querySelector('[data-v="board"]').click();
   await settle();
   ok('rows render', d.querySelectorAll('.row.player').length === 100);
-  ok('rating and ADP are always shown',
-    [...d.querySelectorAll('#colHeads span')].slice(0, 3).map((x) => x.textContent).join(',') === 'Rating,ADP,Score');
+  ok('the four fixed columns are always shown',
+    [...d.querySelectorAll('#colHeads span')].slice(0, 4).map((x) => x.textContent).join(',')
+      === 'Type,Rating,ADP,Score');
 
   // stat groups are additive and must not squeeze the name column
   for (const k of ['pg', 'tot', 'proj', 'rz', 'back']) {
@@ -145,8 +146,8 @@ const fire = (el, type) => {
   await settle();
   const tpl = d.querySelector('#board').style.getPropertyValue('--cols');
   ok('columns grow rightwards', tpl.includes('minmax(190px, 1fr)'));
-  // 3 fixed + bye 2 + per-game 3 + totals 3 + projection 3 + back 1 + red zone 2
-  ok('all groups on', d.querySelectorAll('#colHeads span').length === 17,
+  // 4 fixed + bye 2 + per-game 3 + totals 3 + projection 3 + back 1 + red zone 2
+  ok('all groups on', d.querySelectorAll('#colHeads span').length === 18,
     `${d.querySelectorAll('#colHeads span').length} columns`);
 
   // the expensive one: dragging a slider must not rebuild the list
@@ -187,6 +188,68 @@ const fire = (el, type) => {
 
   ok('data age is shown', /data .*(today|day)/.test(d.querySelector('#meta').textContent),
     d.querySelector('#meta').textContent.slice(-60));
+}
+
+// ------------------------------------------- 2b. pick type, stars, positional detail
+{
+  const { d } = await boot();
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+
+  const kinds = [...d.querySelectorAll('.row.player .kind')].map((x) => x.textContent);
+  ok('pick types are labelled', kinds.length > 10, `${kinds.length} in the top 100`);
+  ok('only the three known types appear',
+    kinds.every((k) => ['Safe', 'Swing', 'Skip'].includes(k)), [...new Set(kinds)].join(','));
+
+  // position detail only offered once you have filtered to one position
+  ok('no position detail chip on the full board', !d.querySelector('[data-col="posdetail"]'));
+  d.querySelector('[data-f="WR"]').click();
+  await settle();
+  const pd = d.querySelector('[data-col="posdetail"]');
+  ok('a position filter offers its own stats', !!pd);
+  pd.checked = true; fire(pd, 'change');
+  await settle();
+  const heads = [...d.querySelectorAll('#colHeads span')].map((x) => x.textContent);
+  ok('receiver columns are receiver stats', heads.includes('Catch%') && heads.includes('RZ tgt'),
+    heads.join(' '));
+  ok('and not carries', !heads.includes('Carries'));
+  d.querySelector('[data-f="RB"]').click();
+  await settle();
+  const rbHeads = [...d.querySelectorAll('#colHeads span')].map((x) => x.textContent);
+  ok('backs get carries instead', rbHeads.includes('Carries') && !rbHeads.includes('Catch%'),
+    rbHeads.join(' '));
+  d.querySelector('[data-f="ALL"]').click();
+  await settle();
+
+  // star / fade / clear on one button
+  const rowOf = (i) => [...d.querySelectorAll('.row.player')][i];
+  const nameAt = (i) => rowOf(i).querySelector('.nm').textContent.trim();
+  const target = nameAt(14);
+  const before = 15;
+  rowOf(14).querySelector('[data-star]').click();
+  await settle();
+  const after = [...d.querySelectorAll('.row.player .nm')].findIndex((x) => x.textContent.trim() === target) + 1;
+  ok('a star lifts a player', after < before, `${target} ${before} -> ${after}`);
+  ok('but not past anyone much better', after >= before - 12, `moved ${before - after} places`);
+  ok('the row is marked', !!d.querySelector('.row.starred'));
+
+  const starEl = () => [...d.querySelectorAll('.row.player')]
+    .find((r) => r.querySelector('.nm').textContent.trim() === target).querySelector('[data-star]');
+  ok('one click means liked', starEl().textContent === '★');
+  starEl().click(); await settle();
+  ok('two clicks means faded', starEl().textContent === '✕');
+  const faded = [...d.querySelectorAll('.row.player .nm')].findIndex((x) => x.textContent.trim() === target) + 1;
+  ok('a fade drops him', faded > after, `${after} -> ${faded}`);
+  starEl().click(); await settle();
+  ok('three clicks clears it', starEl().textContent === '☆');
+
+  // and your list can be viewed on its own
+  starEl().click(); await settle();
+  const only = d.querySelector('[data-col="starsonly"]');
+  only.checked = true; fire(only, 'change');
+  await settle();
+  ok('My list only filters to your picks', d.querySelectorAll('.row.player').length === 1,
+    `${d.querySelectorAll('.row.player').length} rows`);
 }
 
 // ---------------------------------------------------------------- 3. the call

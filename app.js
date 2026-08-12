@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore } from './engine.js?v=202608121354';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121354';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121354';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608121354';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608121410';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121410';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121410';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608121410';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121354';
+const BUILD = '202608121410';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -26,11 +26,36 @@ let clock = null;
 // The board always shows your rating and the room's ADP - those two are the whole
 // argument for or against a pick, so they are never behind a toggle. Everything else is
 // a group you can switch on, and several can be on at once.
+const KINDS = {
+  safe: ['Safe', 'High floor, priced about right. The boring correct pick.'],
+  swing: ['Swing', 'Real upside, shakier floor. Wins weeks, loses some too.'],
+  skip: ['Skip', 'The room takes him 20+ spots before your board would.'],
+};
 const FIXED = [
+  ['Type', (r) => (r.kind
+    ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>` : '<em class="soft">—</em>'), 58, ''],
   ['Rating', (r) => Math.round(r.rating), 54, 'rt'],
   ['ADP', (r) => (r.p.adp ? r.p.adp.toFixed(1) : '—'), 52, ''],
   ['Score', (r) => r.score.toFixed(1), 58, 'sc'],
 ];
+// The stats worth seeing differ by position - a receiver's carries tell you nothing. This
+// group only appears when you have filtered to one position, and it changes with it.
+const POS_COLS = {
+  QB: [['Pa yds', (r) => r.p.a?.pass_yd ?? '—', 58], ['Ru yds', (r) => r.p.a?.rush_yd ?? '—', 58],
+    ['TDs', (r) => r.p.a?.anytime_tds ?? '—', 46]],
+  RB: [['Carries', (r) => r.p.a?.rush_att ?? '—', 60], ['Y/carry', (r) => one(r.p.a?.rush_ypa), 58],
+    ['Targets', (r) => r.p.a?.rec_tgt ?? '—', 60], ['RZ car', (r) => r.p.a?.rush_rz_att ?? '—', 56]],
+  WR: [['Targets', (r) => r.p.a?.rec_tgt ?? '—', 60], ['Catch%', (r) => pct(catchRate(r)), 58],
+    ['Y/tgt', (r) => one(r.p.a?.rec_ypt), 52], ['RZ tgt', (r) => r.p.a?.rec_rz_tgt ?? '—', 56],
+    ['Drops', (r) => r.p.a?.rec_drop ?? '—', 52]],
+  TE: [['Targets', (r) => r.p.a?.rec_tgt ?? '—', 60], ['Catch%', (r) => pct(catchRate(r)), 58],
+    ['Y/tgt', (r) => one(r.p.a?.rec_ypt), 52], ['RZ tgt', (r) => r.p.a?.rec_rz_tgt ?? '—', 56]],
+};
+// one button, three states: no view -> I like him more -> I trust him less
+const starMark = (r) => (r.star ? '★' : r.fade ? '✕' : '☆');
+
+const catchRate = (r) => (r.p.a?.rec_tgt ? (r.p.a.rec / r.p.a.rec_tgt) * 100 : null);
+
 const GROUPS = [
   ['bye', 'Bye + value', [
     ['Bye', (r) => r.p.bye || '—', 42, ''],
@@ -77,6 +102,9 @@ function gapCell(r) {
 const activeCols = () => [
   ...FIXED,
   ...GROUPS.filter(([k]) => st.cols?.[k]).flatMap(([, , cols]) => cols),
+  ...(st.cols?.posdetail && POS_COLS[filter]
+    ? POS_COLS[filter].map(([n, f, w]) => [n, f, w, ''])
+    : []),
 ];
 
 // ---------------------------------------------------------------- state
@@ -263,6 +291,17 @@ function renderAdvice() {
   if (!ranked.length) { box.innerHTML = ''; return; }
 
   const top = ranked[0];
+  // if you have starred someone at this position who is within touching distance of the
+  // best available, recommend YOUR man - that is the whole point of the star
+  const near = board.rows.find((r) => r.p.pos === top.pos && r.star && !drafted.has(r.p.id)
+    && r.score >= top.best.score - STAR_BAND && r.p.id !== top.best.p.id);
+  if (near) top.best = near;
+  // and never lead with someone you have said you do not trust, if there is an alternative
+  if (top.best.fade) {
+    const alt = board.rows.find((r) => r.p.pos === top.pos && !r.fade && !drafted.has(r.p.id)
+      && r.score >= top.best.score - STAR_BAND * 2);
+    if (alt) top.best = alt;
+  }
   const cliff = top.best.lastOfTier;
   // kickers and defences always "can wait" - saying so is noise
   const cheap = ranked.filter((x) => x.cost < top.cost * 0.55 && x.pos !== top.pos
@@ -272,7 +311,7 @@ function renderAdvice() {
   box.innerHTML = `<div class="advHead">
 <span class="advTag">${when} ${top.pos}</span>
 <b>${top.best.p.name}</b> <span class="tm">${top.best.p.team || ''}</span>
-<span class="hint">score ${top.best.score.toFixed(1)}${top.shortfall ? ` · you still need ${top.shortfall}` : ''}</span>
+<span class="hint">score ${top.best.score.toFixed(1)}${top.shortfall ? ` · you still need ${top.shortfall}` : ''}${near ? ' · your pick, and close enough to take' : ''}</span>
 ${cliff ? `<span class="cliffTag">last of ${top.pos} tier ${top.best.tier}</span>` : ''}
 </div>
 <p class="advWhy">${top.cost < 1
@@ -361,6 +400,8 @@ ${r.p.rookie ? '<span class="rook">R</span>' : ''}${injBadge(r.p)}
 ${r.lastOfTier ? `<span class="tierEnd" data-tip="cliff">last ${r.p.pos}${r.tier}</span>` : ''}</span>
 ${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
+<button class="starBtn ${r.star ? 'on' : ''}${r.fade ? ' off' : ''}" data-star="${r.p.id}"
+ aria-label="Your view of ${r.p.name}" data-tip="star">${starMark(r)}</button>
 <button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
 <button data-m="${r.p.id}" aria-pressed="${m}">Mine</button></span>`;
 }
@@ -384,6 +425,7 @@ function renderBoard() {
 
   const rows = board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
     && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
+    && (!st.cols?.starsonly || r.star || r.fade)
     && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q))
     .slice(0, limit);
 
@@ -417,12 +459,17 @@ function renderBoard() {
       } else if (r.lastOfTier && badge) {
         badge.textContent = `last ${r.p.pos}${r.tier}`;
       } else if (badge) { badge.remove(); }
-      const [gb, mb] = el.querySelectorAll('.acts button');
+      const [sb, gb, mb] = el.querySelectorAll('.acts button');
+      const mark = starMark(r);
+      if (sb.textContent !== mark) {
+        sb.textContent = mark;
+        sb.className = `starBtn ${r.star ? 'on' : ''}${r.fade ? ' off' : ''}`;
+      }
       if (gb.getAttribute('aria-pressed') !== String(d)) gb.setAttribute('aria-pressed', String(d));
       if (mb.getAttribute('aria-pressed') !== String(m)) mb.setAttribute('aria-pressed', String(m));
     }
     const cls = `row player${d ? ' drafted' : ''}${m ? ' mine' : ''}`
-      + `${r.lastOfTier && !d ? ' cliff' : ''}`;
+      + `${r.lastOfTier && !d ? ' cliff' : ''}${r.star ? ' starred' : ''}${r.fade ? ' faded' : ''}`;
     if (el.className !== cls) el.className = cls;
     keep.add(r.p.id);
     frag.appendChild(el);          // appendChild MOVES an existing node, it does not clone
@@ -466,6 +513,7 @@ function detail(r) {
   const drafted = new Set(picks().drafted);
   const wait = waitAdvice(r, drafted);
   return `<div class="detail">
+${r.kind ? `<p class="kindLine"><em class="kind ${r.kind}">${KINDS[r.kind][0]}</em> ${KINDS[r.kind][1]}</p>` : ''}
 <p class="call"><span class="callTag ${call.replace(/\s+/g, '')}" data-tip="call" tabindex="0">${call}</span> ${why}</p>
 ${wait ? `<p class="wait" data-tip="wait" tabindex="0">${wait}</p>` : ''}
 <p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}
@@ -777,8 +825,16 @@ function renderChrome() {
   $('#tilt').value = Math.round(st.tilt * 100);
   $('#need').value = st.need;
   st.cols ||= { bye: true };
-  $('#colToggles').innerHTML = GROUPS.map(([k, label]) => `<label class="chip">
-<input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`).join('');
+  const groups = GROUPS.map(([k, label]) => `<label class="chip">
+<input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`);
+  // only offered when you have picked one position, because that is when it means anything
+  if (POS_COLS[filter]) {
+    groups.push(`<label class="chip"><input type="checkbox" data-col="posdetail"${
+      st.cols.posdetail ? ' checked' : ''} />${filter} detail</label>`);
+  }
+  groups.push(`<label class="chip mineOnly"><input type="checkbox" data-col="starsonly"${
+    st.cols.starsonly ? ' checked' : ''} />My list only</label>`);
+  $('#colToggles').innerHTML = groups.join('');
   $('#rookie').checked = st.rookie;
   $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
   if ($('#tilt2')) $('#tilt2').value = Math.round(st.tilt * 100);
@@ -912,7 +968,9 @@ function wire() {
   document.body.addEventListener('change', (e) => {
     if (!e.target.dataset.col) return;
     st.cols[e.target.dataset.col] = e.target.checked;
-    save(); renderBoard();
+    save();
+    if (e.target.dataset.col === 'starsonly') renderChrome();
+    renderBoard();
   });
   $('#reset').onclick = () => { st.picks[st.league] = { drafted: [], mine: [] }; save(); rebuild(); };
   for (const [id, fn] of [['style', (v) => { st.style = +v; }],
@@ -1039,10 +1097,22 @@ function wire() {
     else if (b.dataset.f) {
       filter = b.dataset.f;
       limit = 100;
+      renderChrome();
       document.querySelectorAll('[data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === filter)));
       renderBoard();
     } else if (b.dataset.open) { open = open === b.dataset.open ? null : b.dataset.open; renderBoard(); }
-    else if (b.dataset.d) toggle('drafted', b.dataset.d);
+    else if (b.dataset.star) {
+      const id = b.dataset.star;
+      st.stars ||= []; st.fades ||= [];
+      const liked = st.stars.includes(id);
+      const faded = st.fades.includes(id);
+      st.stars = st.stars.filter((x) => x !== id);
+      st.fades = st.fades.filter((x) => x !== id);
+      if (!liked && !faded) st.stars.push(id);      // none -> like
+      else if (liked) st.fades.push(id);            // like -> fade
+      // fade -> none, so a third click clears it
+      save(); rebuild();
+    } else if (b.dataset.d) toggle('drafted', b.dataset.d);
     else if (b.dataset.m) {
       const on = toggle('mine', b.dataset.m);
       const dl = picks().drafted;

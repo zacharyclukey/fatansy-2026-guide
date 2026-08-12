@@ -97,6 +97,32 @@ information. Safe ↔ Upside now moves weight between the steady components and 
 
 No stat appears in two components any more, and the test suite fails if one ever does.
 
+## Your own view of a player
+
+The star button on each row cycles: **☆ no view → ★ you rate him → ✕ you trust him less**.
+
+It is deliberately not a score override. A liked player is lifted above anyone within
+**5 points of score** of him and no further; a faded one drops below the same band. So it
+only ever settles calls the numbers were close to indifferent about, and nobody's score
+changes. The recommendation follows the same rule — if you have starred someone at the
+position it is recommending and he is within that band, it names your man instead.
+
+**My list only** filters the board to players you have an opinion about.
+
+## Pick type
+
+A small tag on every row saying what kind of pick he is *right now*, read from three
+numbers that already existed: his floor, his upside, and how your rank compares with the
+room's.
+
+| Tag | Means |
+|---|---|
+| **Safe** | High floor, priced about right. The boring correct pick. |
+| **Swing** | Real upside, shakier floor. Wins weeks, loses some too. |
+| **Skip** | The room takes him 20+ spots before your board would. |
+
+No tag means he is none of those three, which is most players.
+
 ## How the rating works
 
 Two levels. Each **component** (volume, red zone, efficiency, …) is a weighted blend of
