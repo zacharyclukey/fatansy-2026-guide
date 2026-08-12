@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder } from './engine.js';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE } from './engine.js';
 import { importLeagues, draftPicks, SleeperError } from './sleeper.js';
 
 const $ = (s) => document.querySelector(s);
@@ -13,6 +13,10 @@ let filter = 'ALL';
 let query = '';
 let open = null;
 let timer = null;
+let cache = null;
+let cacheKey = '';
+let frame = null;
+let limit = 100;
 
 // ---------------------------------------------------------------- state
 function load() {
@@ -23,7 +27,9 @@ function load() {
   // a saved profile from an older build may not know about newer stats
   st.comp = { ...base.comp, ...(st.comp || {}) };
   for (const [k, v] of Object.entries(base.sub)) st.sub[k] = st.sub[k] || v;
-  if (st.imported?.length) data.leagues = [...data.leagues, ...st.imported];
+  // Whoever opens this link is not necessarily whoever generated the data file, so the
+  // leagues baked into it are never shown. You get a neutral league until you import.
+  data.leagues = st.imported?.length ? [...st.imported] : [SAMPLE_LEAGUE];
   if (st.league >= data.leagues.length) st.league = 0;
   st.picks ||= {};
   for (let i = 0; i < data.leagues.length; i++) st.picks[i] ||= { drafted: [], mine: [] };
@@ -78,8 +84,17 @@ function verdict(r) {
 
 // ---------------------------------------------------------------- board
 function rebuild() {
-  board = buildBoard(data, { ...st, mine: picks().mine.map((id) => byId(id)?.pos) });
+  const key = JSON.stringify(st.sub);
+  if (key !== cacheKey) { cache = subScores(data, st); cacheKey = key; }
+  board = buildBoard(data, { ...st, mine: picks().mine.map((id) => byId(id)?.pos) }, cache);
   renderAll();
+}
+
+// Sliders fire an input event per pixel. Coalescing to one rebuild per animation frame
+// keeps the drag smooth instead of queueing a full re-render behind every event.
+function scheduleRebuild() {
+  if (frame) return;
+  frame = requestAnimationFrame(() => { frame = null; rebuild(); });
 }
 
 function renderAll() {
@@ -100,7 +115,7 @@ function renderBoard() {
     && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
 
   const out = [];
-  for (const r of rows.slice(0, 300)) {
+  for (const r of rows.slice(0, limit)) {
     const d = drafted.has(r.p.id);
     const m = mine.has(r.p.id);
     const gap = r.adpRank - r.rank;
@@ -116,6 +131,10 @@ ${r.p.rookie ? '<span class="rook">R</span>' : ''}</span>
 <button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
 <button data-m="${r.p.id}" aria-pressed="${m}">Mine</button></span></div>`);
     if (open === r.p.id) out.push(detail(r));
+  }
+  if (rows.length > limit) {
+    out.push(`<div class="more"><button id="more">Show ${Math.min(100, rows.length - limit)} more`
+      + ` <span class="hint">(${limit} of ${rows.length})</span></button></div>`);
   }
   $('#rows').innerHTML = out.join('');
   $('#empty').hidden = rows.length > 0;
@@ -280,8 +299,9 @@ async function doImport() {
     st.sleeperUser = name;
     st.sleeperId = userId;
     st.imported = leagues;
-    // a fresh import replaces the old imported set, so pick logs are rebuilt to match
-    data.leagues = data.leagues.filter((l) => !l.imported).concat(leagues);
+    // a fresh import replaces everything, sample league included
+    data.leagues = leagues;
+    st.league = 0;
     for (let i = 0; i < data.leagues.length; i++) st.picks[i] ||= { drafted: [], mine: [] };
     save();
     renderChrome();
@@ -359,6 +379,11 @@ function show(v) {
   renderAll();
 }
 
+function measure() {
+  const h = document.querySelector('.top')?.offsetHeight || 60;
+  document.documentElement.style.setProperty('--stick', `${h}px`);
+}
+
 // ---------------------------------------------------------------- events
 function wire() {
   $('#settingsBtn').onclick = (e) => {
@@ -367,13 +392,15 @@ function wire() {
     e.target.setAttribute('aria-expanded', String(!p.hidden));
   };
   $('#league').onchange = (e) => { st.league = +e.target.value; open = null; save(); rebuild(); };
-  $('#search').oninput = (e) => { query = e.target.value; renderBoard(); };
+  $('#search').oninput = (e) => { query = e.target.value; limit = 100; renderBoard(); };
   $('#reset').onclick = () => { st.picks[st.league] = { drafted: [], mine: [] }; save(); rebuild(); };
   for (const [id, fn] of [['style', (v) => { st.style = +v; }],
     ['tilt', (v) => { st.tilt = +v / 100; }], ['need', (v) => { st.need = +v; }]]) {
-    $(`#${id}`).oninput = (e) => { fn(e.target.value); readouts(); save(); rebuild(); };
+    $(`#${id}`).oninput = (e) => { fn(e.target.value); readouts(); save(); scheduleRebuild(); };
   }
   $('#rookie').onchange = (e) => { st.rookie = e.target.checked; save(); rebuild(); };
+  if (window.ResizeObserver) new ResizeObserver(measure).observe(document.querySelector('.top'));
+  window.addEventListener('resize', measure);
   $('#importL').onclick = doImport;
   $('#syncOnce').onclick = doSync;
   $('#syncAuto').onclick = toggleAuto;
@@ -406,11 +433,11 @@ function wire() {
 
   document.body.addEventListener('input', (e) => {
     const t = e.target;
-    if (t.dataset.cw) { st.comp[t.dataset.cw] = +t.value; save(); rebuild(); }
+    if (t.dataset.cw) { st.comp[t.dataset.cw] = +t.value; save(); scheduleRebuild(); }
     else if (t.dataset.sw) {
       st.sub[t.dataset.sw].w[t.dataset.q] = +t.value || 0;
       t.classList.toggle('zero', !+t.value);
-      save(); rebuild();
+      save(); scheduleRebuild();
     }
   });
   document.body.addEventListener('change', (e) => {
@@ -423,9 +450,11 @@ function wire() {
   document.body.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
-    if (b.dataset.v) show(b.dataset.v);
+    if (b.id === 'more') { limit += 100; renderBoard(); }
+    else if (b.dataset.v) show(b.dataset.v);
     else if (b.dataset.f) {
       filter = b.dataset.f;
+      limit = 100;
       document.querySelectorAll('[data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === filter)));
       renderBoard();
     } else if (b.dataset.open) { open = open === b.dataset.open ? null : b.dataset.open; renderBoard(); }

@@ -92,8 +92,40 @@ export function replacementLevels(players, league) {
   return out;
 }
 
+// Any account can open this page, so nobody else's leagues are assumed. Until you import
+// from Sleeper you get one neutral league, and importing replaces it with your own.
+export const SAMPLE_LEAGUE = {
+  name: 'Standard 12-team PPR',
+  teams: 12,
+  rounds: 15,
+  sample: true,
+  starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DEF: 1 },
+  bench: 6,
+  scoring: {
+    pass_yd: 0.04, pass_td: 4, pass_int: -1, pass_2pt: 2,
+    rush_yd: 0.1, rush_td: 6, rush_2pt: 2,
+    rec: 1, rec_yd: 0.1, rec_td: 6, rec_2pt: 2, fum_lost: -2,
+  },
+};
+
+// The expensive half: a player's component scores depend only on which stats are switched
+// on and their per-position weights. Dragging Safe/Upside or Trust-my-ratings does not
+// touch them, so they are computed once and reused - without this, every pixel of slider
+// movement re-blended 50 stats across 259 players and the sliders stuttered.
+export function subScores(data, st) {
+  const out = new Map();
+  for (const p of data.players) {
+    const s = {};
+    for (const c of data.components) {
+      s[c.key] = c.key === 'projection' ? null : componentScore(p, c, st);
+    }
+    out.set(p.id, s);
+  }
+  return out;
+}
+
 // ---------------------------------------------------------------- the board
-export function buildBoard(data, st) {
+export function buildBoard(data, st, cache) {
   const league = data.leagues[st.league];
   const comps = data.components;
   const cw = componentWeights(st);
@@ -105,10 +137,14 @@ export function buildBoard(data, st) {
     .map((p) => {
       const pts = projectedPoints(p, league);
       const vor = pts - (repl[p.pos] || 0);
-      const scores = {};
-      for (const c of comps) {
-        scores[c.key] = c.key === 'projection' ? null : componentScore(p, c, st);
-      }
+      const cached = cache?.get(p.id);
+      const scores = cached ? { ...cached } : (() => {
+        const s = {};
+        for (const c of comps) {
+          s[c.key] = c.key === 'projection' ? null : componentScore(p, c, st);
+        }
+        return s;
+      })();
       return { p, pts, vor, scores };
     });
 
