@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121307';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121307';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121307';
-import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121307';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting } from './engine.js?v=202608121316';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121316';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608121316';
+import { STRATEGIES, activeStrategy } from './strategies.js?v=202608121316';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121307';
+const BUILD = '202608121316';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -560,16 +560,20 @@ function renderRatings() {
   const cw = board.weights;
   const maxW = Math.max(...Object.values(cw), 1);
 
-  // one place to add a stat, for the whole page. It files itself under the component it
-  // belongs to rather than making you decide.
-  const taken = new Set((st.customs || []).map((c) => c.field));
-  const free = RAW_FIELDS.filter(([f]) => !taken.has(f));
+  // one place to add a stat. It only ever offers things the rating is genuinely not
+  // using: built-in stats you have switched off, and raw fields with no built-in at all.
   const label = (k) => data.components.find((c) => c.key === k)?.label || k;
+  const free = unusedStats(data, st);
   $('#addStat').innerHTML = `<label class="addLine">
 <span class="stratLabel" data-tip="addstat" tabindex="0">Add a stat</span>
-<select id="addPick"><option value="">Choose a 2025 stat the rating is not using…</option>
-${free.map(([f, lbl, hi, pg, comp]) => `<option value="${f}|${hi}|${pg}|${comp}">`
-    + `${lbl}${pg ? ' per game' : ''} — goes into ${label(comp)}</option>`).join('')}</select>
+<select id="addPick"${free.length ? '' : ' disabled'}>
+<option value="">${free.length
+    ? `Choose one of the ${free.length} stats not currently in use…`
+    : 'Every available stat is already in use'}</option>
+${free.map((x) => (x.kind === 'builtin'
+    ? `<option value="on|${x.key}">${x.label} — switch on in ${x.compLabel}</option>`
+    : `<option value="new|${x.field}|${x.hi}|${x.pg}|${x.comp}">`
+      + `${x.label}${x.pg ? ' per game' : ''} — add to ${x.compLabel}</option>`)).join('')}</select>
 </label>
 ${(st.customs || []).length ? `<p class="hint">Added: ${(st.customs || [])
     .map((c) => `<b>${c.label}</b> in ${label(c.comp)}`).join(', ')}.</p>` : ''}`;
@@ -909,7 +913,16 @@ function wire() {
   });
   document.body.addEventListener('change', (e) => {
     if (e.target.id === 'addPick' && e.target.value) {
-      const [field, hi, pg, comp] = e.target.value.split('|');
+      const parts = e.target.value.split('|');
+      if (parts[0] === 'on') {
+        // it already exists in the rating, it was just switched off - turn it back on
+        // rather than creating a duplicate copy of the same number
+        st.sub[parts[1]].on = true;
+        subVersion += 1;
+        save(); rebuild();
+        return;
+      }
+      const [, field, hi, pg, comp] = parts;
       const meta = RAW_FIELDS.find((f) => f[0] === field);
       st.customs ||= [];
       st.customs.push({

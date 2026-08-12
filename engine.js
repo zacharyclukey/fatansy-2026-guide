@@ -157,33 +157,62 @@ export function subScores(data, st) {
 // Every 2025 field carried in the data file, whether or not the built-in rating uses it.
 // Anything here can be switched on as a stat in any component - "available but unused"
 // should mean one click, not a rebuild.
-// field, label, higher-is-better, per-game option, and the component it naturally
-// belongs to - you should choose a stat, not have to decide where to file it.
+// Raw 2025 fields that can be brought in as a stat.
+//
+// The catch: almost every one of these ALREADY backs a built-in stat in some form, so a
+// menu of "stats the rating is not using" that listed all of them was simply wrong. Each
+// entry therefore names the built-in it duplicates. If that built-in exists, the right
+// way to "add" the stat is to switch the built-in on, not to create a second copy of it.
+//
+// field, label, higher-is-better, per-game, component, the built-in it duplicates
 export const RAW_FIELDS = [
-  ['off_snp', 'Snaps', true, true, 'volume'],
-  ['rush_att', 'Carries', true, true, 'volume'],
-  ['rec_tgt', 'Targets', true, true, 'volume'],
-  ['rec', 'Receptions', true, true, 'volume'],
-  ['rush_ypa', 'Yards per carry', true, false, 'efficiency'],
-  ['rec_ypt', 'Yards per target', true, false, 'efficiency'],
-  ['rec_ypr', 'Yards per catch', true, false, 'efficiency'],
-  ['rush_rz_att', 'Red-zone carries', true, true, 'redzone'],
-  ['rec_rz_tgt', 'Red-zone targets', true, true, 'redzone'],
-  ['anytime_tds', 'Touchdowns', true, true, 'redzone'],
-  ['rec_40p', '40+ yard catches', true, true, 'explosive'],
-  ['rush_40p', '40+ yard runs', true, true, 'explosive'],
-  ['bonus_rush_rec_yd_100', '100-yard games', true, false, 'explosive'],
-  ['pts_ppr', 'Fantasy points', true, true, 'production'],
-  ['rush_yd', 'Rushing yards', true, true, 'production'],
-  ['rec_yd', 'Receiving yards', true, true, 'production'],
-  ['rush_rec_yd', 'Yards from scrimmage', true, true, 'production'],
-  ['pos_rank_ppr', 'Finish at his position', false, false, 'production'],
-  ['gp', 'Games played', true, false, 'reliability'],
-  ['gs', 'Games started', true, false, 'reliability'],
-  ['rec_drop', 'Drops', false, true, 'reliability'],
-  ['fum', 'Fumbles', false, true, 'reliability'],
-  ['fum_lost', 'Fumbles lost', false, true, 'reliability'],
+  ['off_snp', 'Snaps', true, true, 'volume', 'snaps_pg'],
+  ['rush_att', 'Carries', true, true, 'volume', 'carries_pg'],
+  ['rec_tgt', 'Targets', true, true, 'volume', 'targets_pg'],
+  ['rec', 'Receptions', true, true, 'volume', 'rec_pg'],
+  ['rush_ypa', 'Yards per carry', true, false, 'efficiency', 'ypc'],
+  ['rec_ypt', 'Yards per target', true, false, 'efficiency', 'yptgt'],
+  ['rec_ypr', 'Yards per catch', true, false, 'efficiency', 'ypr'],
+  ['rush_rz_att', 'Red-zone carries', true, true, 'redzone', 'rz_carries_pg'],
+  ['rec_rz_tgt', 'Red-zone targets', true, true, 'redzone', 'rz_targets_pg'],
+  ['anytime_tds', 'Touchdowns', true, true, 'redzone', 'td_pg'],
+  ['bonus_rush_rec_yd_100', '100-yard games', true, false, 'explosive', 'hundred'],
+  ['pts_ppr', 'Fantasy points', true, true, 'production', 'ppg'],
+  ['pos_rank_ppr', 'Finish at his position', false, false, 'production', 'finish'],
+  ['gp', 'Games played', true, false, 'reliability', 'games'],
+  ['gs', 'Games started', true, false, 'reliability', 'starts'],
+  ['rec_drop', 'Drops', false, true, 'reliability', 'drop_rate'],
+  ['fum', 'Fumbles', false, true, 'reliability', 'fum_pg'],
+
+  // these genuinely have no built-in equivalent
+  ['rush_yd', 'Rushing yards', true, true, 'production', null],
+  ['rec_yd', 'Receiving yards', true, true, 'production', null],
+  ['rush_rec_yd', 'Yards from scrimmage', true, true, 'production', null],
+  ['fum_lost', 'Fumbles lost', false, true, 'reliability', null],
+  ['rec_40p', '40+ yard catches', true, true, 'explosive', null],
+  ['rush_40p', '40+ yard runs', true, true, 'explosive', null],
 ];
+
+// Everything the rating is genuinely NOT using right now: built-in stats that are switched
+// off, plus raw fields with no built-in equivalent that have not already been added.
+export function unusedStats(data, st) {
+  const out = [];
+  for (const c of data.components) {
+    for (const sm of c.subs) {
+      if (sm.custom) continue;
+      if (!st.sub[sm.key]?.on) {
+        out.push({ kind: 'builtin', key: sm.key, label: sm.label, comp: c.key, compLabel: c.label });
+      }
+    }
+  }
+  const added = new Set((st.customs || []).map((x) => x.field));
+  for (const [field, label, hi, pg, comp, dupe] of RAW_FIELDS) {
+    if (dupe || added.has(field)) continue;
+    const cl = data.components.find((c) => c.key === comp)?.label || comp;
+    out.push({ kind: 'raw', field, label, hi, pg, comp, compLabel: cl });
+  }
+  return out;
+}
 
 // Percentiles for a user-added stat, worked out the same way the built-in ones were:
 // within position, so a back is only ever compared with other backs.

@@ -201,10 +201,30 @@ const fire = (el, type) => {
 
   const before = d.querySelectorAll('#comps .statRow:not(.hdr)').length;
   const menu = d.querySelector('#addPick');
-  const opt = [...menu.options].find((o) => o.text.startsWith('Targets'));
-  ok('the add-stat menu says where it goes', /goes into Volume/.test(opt.text), opt.text);
-  menu.value = opt.value;
+  const offered = [...menu.options].slice(1).map((o) => o.text);
+
+  // the menu must never offer a stat the rating is already using
+  const inUse = [...d.querySelectorAll('#comps .statRow:not(.hdr)')]
+    .filter((r) => !r.classList.contains('off'))
+    .map((r) => r.querySelector('label span').textContent.trim());
+  const clash = offered.filter((o) => inUse.some((u) => o.startsWith(u)));
+  ok('no stat already in use is offered', clash.length === 0, clash.join(', '));
+  ok('switched-off built-ins are offered', offered.some((o) => /switch on in/.test(o)));
+  ok('unmapped raw fields are offered', offered.some((o) => /add to/.test(o)));
+
+  // turning a built-in back on must not create a second copy of it
+  const rows0 = d.querySelectorAll('#comps .statRow:not(.hdr)').length;
+  menu.value = [...menu.options].find((o) => /switch on in/.test(o.text)).value;
   fire(menu, 'change');
+  await settle();
+  d.querySelector('[data-v="ratings"]').click();
+  ok('switching one on adds no duplicate row',
+    d.querySelectorAll('#comps .statRow:not(.hdr)').length === rows0);
+
+  const menu2 = d.querySelector('#addPick');
+  const opt = [...menu2.options].find((o) => /add to/.test(o.text));
+  menu2.value = opt.value;
+  fire(menu2, 'change');
   await settle();
   d.querySelector('[data-v="ratings"]').click();
   ok('an unused stat can be added',

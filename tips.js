@@ -72,8 +72,8 @@ export const TIPS = {
   advice: ['What to do with this pick.',
     'Compares the best man at each position now against the best you could still expect next turn.'],
 
-  addstat: ['Bring in a 2025 stat the rating does not use.',
-    'It is ranked within position like every other stat, and filed under the component it belongs to.'],
+  addstat: ['Only stats the rating is not currently using.',
+    'Built-ins you switched off, plus 2025 fields with no built-in equivalent.'],
 
   age: ['How old the projections and ADP are.',
     'Rebuilt from Sleeper each morning. Over a week old means the refresh has stopped.'],
