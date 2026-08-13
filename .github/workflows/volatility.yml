@@ -1,0 +1,52 @@
+name: Boom, bust, and whether it repeats
+
+# The other tests ask who scores the most, and keep coming back empty. This one asks a
+# different question: who beats their projection, who falls short, and does either
+# repeat the following year? If volatility persists, floor and ceiling become measured
+# rather than invented.
+#
+# It reads weekly data, so it fetches a few hundred pages and takes several minutes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'First season'
+        default: '2020'
+      to:
+        description: 'Last season'
+        default: '2025'
+
+jobs:
+  volatility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Measure the spread
+        working-directory: pipeline
+        run: python volatility.py "${{ inputs.from }}" "${{ inputs.to }}" | tee /tmp/out.txt
+
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "### Boom, bust, and whether it repeats — ${{ inputs.from }} to ${{ inputs.to }}"
+            echo ''
+            echo '```'
+            cat /tmp/out.txt || echo 'the run produced no output'
+            echo '```'
+            echo ''
+            echo '**Persistence** is the first thing to read. A trait that does not repeat'
+            echo 'cannot be drafted on. Above ~0.30 means a player'"'"'s boom/bust profile'
+            echo 'carries into the next season, which would let floor and ceiling be'
+            echo 'measured from real games instead of blended from stats we chose.'
+            echo ''
+            echo '**Lift** is a separate question with a separate answer. Persistence can'
+            echo 'be worth having on its own — it makes the slider honest — even if none of'
+            echo 'it improves the forecast.'
+          } >> $GITHUB_STEP_SUMMARY
