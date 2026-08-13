@@ -1,0 +1,52 @@
+name: What predicts beating your baseline
+
+# The backtest asked whether the rating beats "last year's points per game". It does not.
+# This asks the better question: does anything tell you a player will BEAT last year's
+# points -- which is the same as asking which stats find steals.
+#
+# Run it from the Actions tab. Results land in the run summary. It fetches several
+# seasons, so give it a couple of minutes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'First season to fetch'
+        default: '2020'
+      to:
+        description: 'Last season to fetch'
+        default: '2025'
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Look for signal
+        working-directory: pipeline
+        run: python discover.py "${{ inputs.from }}" "${{ inputs.to }}" | tee /tmp/out.txt
+
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "### What predicts beating your baseline — ${{ inputs.from }} to ${{ inputs.to }}"
+            echo ''
+            echo '```'
+            cat /tmp/out.txt || echo 'the run produced no output'
+            echo '```'
+            echo ''
+            echo 'The first table is each stat against the part of next season that last'
+            echo 'season'"'"'s points could **not** explain. A stat near zero is decoration:'
+            echo 'last year'"'"'s points already told you that much, and the draft room knows it.'
+            echo ''
+            echo 'The second table is the one that decides things. Weights are fitted on the'
+            echo 'early year-pairs and judged on the most recent pair, which the fit has never'
+            echo 'seen. **Lift above +0.03 means the rating can be built on something real.**'
+            echo 'Below that, the sliders are a way to express taste — which is still worth'
+            echo 'having, but should not be presented as a better forecast.'
+          } >> $GITHUB_STEP_SUMMARY
