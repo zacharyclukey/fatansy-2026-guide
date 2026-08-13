@@ -1,0 +1,49 @@
+name: Backtest the ratings
+
+# Does the rating actually predict next season better than "he was good last year"?
+#
+# Run it from the Actions tab. It needs the network, which is why it lives here rather
+# than being something you have to set Python up for. Results land in the run summary.
+
+on:
+  workflow_dispatch:
+    inputs:
+      prior:
+        description: 'Season to build the rating from'
+        default: '2024'
+      target:
+        description: 'Season to predict'
+        default: '2025'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run the backtest
+        working-directory: pipeline
+        run: |
+          python backtest.py "${{ inputs.prior }}" "${{ inputs.target }}" | tee /tmp/backtest.txt
+
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "### Backtest — ${{ inputs.prior }} to ${{ inputs.target }}"
+            echo ''
+            echo '```'
+            cat /tmp/backtest.txt || echo 'the run produced no output'
+            echo '```'
+            echo ''
+            echo 'Spearman is rank correlation with actual points per game the following'
+            echo 'season. Higher is better. The row that matters is whether **the rating**'
+            echo 'beats **last year'"'"'s points/game** — if it does not, the fifty-stat blend'
+            echo 'is re-describing last season rather than forecasting the next one.'
+            echo ''
+            echo '_Historical ADP is not published by Sleeper, so the rating cannot be'
+            echo 'compared against the market here. Naive baselines only._'
+          } >> $GITHUB_STEP_SUMMARY

@@ -44,6 +44,30 @@ Checks that must pass before a commit:
 - the pool has not shrunk by more than 10% versus the committed file
 - fewer than 30% of players moved more than 40 ADP spots overnight
 
+## Does the rating actually work?
+
+```
+python backtest.py 2024 2025
+```
+
+Or run **Actions → Backtest the ratings** on GitHub, which needs no local setup.
+
+It builds the rating from one season using the shipped `submetrics.py` definitions, then
+measures how well it predicts the next season's points per game — against three naive
+baselines. The one that matters is *last year's points per game*: if the fifty-stat blend
+cannot beat that, it is re-describing last season rather than forecasting the next.
+
+Two things it deliberately does:
+
+- **Keeps players who vanished.** No row next season means zero fantasy production, which
+  is a zero, not missing data. Dropping them would delete every bust and flatter the model.
+- **Excludes the projection component**, because no projection exists for a past season.
+  Worth remembering that this is the component with by far the largest influence in the
+  app, so the backtest is testing the *stats* half of the rating, not all of it.
+
+It cannot compare against ADP — Sleeper does not publish historical ADP, so the most
+interesting comparison, "does this beat the market", is not available.
+
 ## Known limits
 
 - **One projection source.** Everything comes from Sleeper. There is no consensus blend.
