@@ -547,6 +547,26 @@ span.nm:hover { text-decoration: none; }
 .kind.skip { background: var(--panel2); color: var(--ink3); }
 .kindLine { margin: 0 0 8px; font-size: 13px; color: var(--ink2); display: flex; align-items: center; gap: 9px; }
 
+/* Fit: four preference sliders, the primary control on the ratings page. */
+.fitAxes { display: grid; gap: 16px; margin: 0 0 20px; }
+.fitAxis .knobLabel em { font-style: normal; color: var(--accent); font-weight: 600; }
+.fitEnds {
+  display: flex; justify-content: space-between; margin-top: 2px;
+  font-size: 11px; color: var(--ink3); text-transform: uppercase; letter-spacing: .05em;
+}
+.fitEnds b { font-weight: 600; }
+.fitNote { margin: 0 0 18px; }
+
+/* The value window. A range of picks, coloured by how it compares with the room's ADP.
+   Tabular figures so the ranges line up down the column and can be scanned. */
+.win {
+  font-style: normal; font-variant-numeric: tabular-nums; font-weight: 600;
+  font-size: 12px; border-radius: 3px; padding: 2px 5px; white-space: nowrap;
+}
+.win.bargain { background: var(--goodSoft); color: var(--good); }
+.win.fair { color: var(--ink2); }
+.win.costly { background: var(--panel2); color: var(--ink3); }
+
 .starBtn {
   width: 26px; padding: 0; font-size: 13px; line-height: 1; color: var(--ink3);
   border-color: var(--line);

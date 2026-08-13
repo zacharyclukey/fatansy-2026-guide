@@ -568,13 +568,17 @@ export function poolAround(rows, r, drafted, band = 6) {
 // on your board compares with where the room takes him. Read together they say something
 // the score alone does not: whether this is the boring correct pick, a swing, or a player
 // the market simply values more than you do.
+// Built from the two traits that survived testing rather than from the component blend
+// that did not. "Swing" is a man whose points arrive in lumps this league pays big for;
+// "Safe" is a steady scorer who was also available. Bust rate repeats year to year at
+// about 0.50, which is why availability is allowed in here and boom rate is not.
 export function pickType(r) {
-  const floor = r.scores.floorish ?? 50;
-  const up = r.scores.upside ?? 50;
   const gap = r.adpRank - r.rank;          // + = your board likes him more than the room
   if (gap <= -20) return 'skip';           // he goes 20+ spots before you would take him
-  if (floor >= 62 && up < 58) return 'safe';
-  if (up >= 60 && floor < 58) return 'swing';
+  const lump = r.traits?.td ?? 50;
+  const avail = r.traits?.dur ?? 50;
+  if (lump >= 68) return 'swing';
+  if (lump <= 40 && avail >= 55) return 'safe';
   return null;
 }
 
@@ -591,8 +595,13 @@ export function pickType(r) {
 // your window he is a bargain; if it sits before the start, the room is paying more than
 // you would and you should let someone else.
 export const WINDOW_BAND = 2.5;   // score points inside which two players are a coin flip
+// Deep in the pool the scores flatten and a run of coin flips can be a hundred players
+// long. That is true - pick 200 and pick 260 really are interchangeable - but a window
+// that wide tells you nothing, and it would let a man 90 picks away read as a bargain.
+// Past this the window is marked open-ended and shown as "180+" instead of pretending.
+export const WINDOW_MAX = 30;
 
-export function valueWindow(rows, band = WINDOW_BAND) {
+export function valueWindow(rows, band = WINDOW_BAND, cap = WINDOW_MAX) {
   // rows arrive sorted best-first. Everyone within a hair of his score is a player you
   // would be equally happy with, so the window runs across that whole run - not across
   // his positional tier, which at the top of the board is often just him on his own.
@@ -608,13 +617,25 @@ export function valueWindow(rows, band = WINDOW_BAND) {
       if (rows[k].p.pos === r.p.pos && rows[k].lastOfTier) { hi = k; break; }
     }
 
+    // Trim around HIM, not from the top of the run. Capping hi at lo+cap would throw the
+    // player out of his own window whenever he sat in the middle of a long flat stretch.
+    r.openEnded = hi - lo > cap;
+    if (r.openEnded) {
+      const half = Math.floor(cap / 2);
+      lo = Math.max(lo, i - half);
+      hi = Math.min(hi, lo + cap);
+    }
+
     r.worthFrom = rows[lo].rank;
     r.worthTo = rows[hi].rank;
     r.equals = hi - lo;                      // how many others are a coin flip with him
     r.edge = r.adpRank - r.rank;             // + = the room lets him fall past your spot
-    r.verdict = r.adpRank > r.worthTo ? 'bargain'
-      : r.adpRank < r.worthFrom ? 'costly'
-        : 'fair';
+    // Once the window is truncated both ends are guesses, so neither verdict is earned.
+    // Deep in the pool the honest answer really is "it does not much matter".
+    r.verdict = r.openEnded ? 'fair'
+      : r.adpRank > r.worthTo ? 'bargain'
+        : r.adpRank < r.worthFrom ? 'costly'
+          : 'fair';
   }
   return rows;
 }

@@ -158,6 +158,45 @@ const fire = (el, type) => {
   const top12 = b.rows.slice(0, 12).filter((r) => r.p.pos === 'RB').length;
   ok('board is not RB-swamped', top12 <= 6, `${top12} backs in the top 12`);
 
+  // ---- Fit: a preference, and provably not more than that ----------------
+  ok('neutral sliders leave every player at 50', b.rows.every((r) => r.fit === 50));
+
+  const before = new Map(b.rows.map((r) => [r.p.id, r.rank]));
+  const hard = m.buildBoard(data, { ...st, fit: { td: 100, asc: 0, dur: 0, pen: 0 } });
+  const moves = hard.rows.slice(0, 80).map((r) => Math.abs(before.get(r.p.id) - r.rank));
+  ok('a slider at its extreme still reorders the board', Math.max(...moves) > 0);
+  // The whole claim of Fit is that it breaks ties. If one slider could move a man forty
+  // places it would be overruling the projections, which measured +0.25 against every
+  // alternative while preferences measured nothing at all.
+  ok('but it can never overrule value', Math.max(...moves) <= 25,
+    `biggest move ${Math.max(...moves)} places`);
+
+  // lumpiness is league-specific: a bonus one league pays and another does not must move
+  const plain = { ...m.SAMPLE_LEAGUE, scoring: { ...m.SAMPLE_LEAGUE.scoring, rec_40p: 0 } };
+  const bonus = { ...m.SAMPLE_LEAGUE, scoring: { ...m.SAMPLE_LEAGUE.scoring, rec_40p: 2 } };
+  const wr = data.players.find((p) => p.pos === 'WR' && (p.proj?.rec_40p || 0) > 0);
+  ok('a league bonus changes who counts as boom-or-bust',
+    !wr || m.swingShare(wr, bonus) > m.swingShare(wr, plain));
+  ok('penalties are detected per league', m.hasPenalties(
+    { scoring: { fum_lost: -2 } }) === true && m.hasPenalties({ scoring: { rec: 1 } }) === false);
+
+  // ---- the value window --------------------------------------------------
+  ok('every player has a window', b.rows.every(
+    (r) => r.worthFrom >= 1 && r.worthTo >= r.worthFrom));
+  ok('the window contains his own rank', b.rows.every(
+    (r) => r.rank >= r.worthFrom && r.rank <= r.worthTo));
+  ok('verdicts agree with the window', b.rows.every((r) => (r.openEnded
+    ? r.verdict === 'fair'
+    : (r.verdict === 'bargain' && r.adpRank > r.worthTo)
+      || (r.verdict === 'costly' && r.adpRank < r.worthFrom)
+      || (r.verdict === 'fair' && r.adpRank >= r.worthFrom && r.adpRank <= r.worthTo))));
+  // a window that swallowed the whole board would make the verdict meaningless
+  const widest = Math.max(...b.rows.map((r) => r.worthTo - r.worthFrom));
+  ok('windows stay narrow enough to mean something', widest <= m.WINDOW_MAX,
+    `widest ${widest}, cap ${m.WINDOW_MAX}`);
+  ok('a truncated window claims nothing either way',
+    b.rows.every((r) => !r.openEnded || r.verdict === 'fair'));
+
   // the snake clock
   ok('snake picks', JSON.stringify(m.myPicks(12, 4, 4)) === '[4,21,28,45]');
   const c = m.draftContext({ teams: 12, rounds: 16 }, 4, 4);
@@ -186,7 +225,16 @@ const fire = (el, type) => {
   ok('rows render', d.querySelectorAll('.row.player').length === 100);
   ok('the four fixed columns are always shown',
     [...d.querySelectorAll('#colHeads span')].slice(0, 4).map((x) => x.textContent).join(',')
-      === 'Type,Rating,ADP,Score');
+      === 'Type,Worth,ADP,Score');
+
+  // Worth is a pick RANGE, not a grade. A 0-100 number here would mean the value window
+  // silently reverted to the rating it replaced.
+  ok('Worth shows a pick range, not a score',
+    [...d.querySelectorAll('.row .win')].slice(0, 30)
+      .every((x) => /^\d+(–\d+|\+)?$/.test(x.textContent.trim())));
+  ok('every row carries a verdict',
+    [...d.querySelectorAll('.row .win')].slice(0, 30)
+      .every((x) => ['bargain', 'fair', 'costly'].some((v) => x.classList.contains(v))));
 
   // stat groups are additive and must not squeeze the name column
   for (const k of ['pg', 'tot', 'proj', 'rz', 'back']) {

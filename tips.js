@@ -4,10 +4,23 @@
 
 export const TIPS = {
   // the two people mix up
+  Worth: ['The picks where taking him costs you nothing.',
+    'Everyone in that range is a coin flip with him. It stops at a tier cliff.'],
   Rating: ['How good he is FOR HIS POSITION, 0-100.',
     'Your weighted components. Cannot compare a QB to an RB.'],
   Score: ['Who to actually draft. Take the highest.',
-    'Points above a replacement starter, tilted by your rating.'],
+    'Points above a replacement starter, nudged by your preferences.'],
+
+  Fit: ['How well he matches what you said you like.',
+    'Only breaks ties. It can never move a player more than a few spots.'],
+  td: ['Steady points, or points that arrive in lumps.',
+    "Share of his projection from touchdowns and any bonus YOUR league pays."],
+  asc: ['Take the proven man, or the one being asked to jump.',
+    "This year's projected points per game against what he actually did."],
+  dur: ['How hard to punish a player who misses games.',
+    'Games available last year. Every projection assumes he plays them all.'],
+  pen: ['How much fumbles and interceptions bother you.',
+    'Priced at what your league actually fines them.'],
 
   ADP: ['Where the wider Sleeper room drafts him.', 'Not your league specifically.'],
   Bye: ['The week his team is off.', ''],

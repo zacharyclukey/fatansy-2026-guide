@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130951';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130951';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608130951';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130951';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints } from './engine.js?v=202608131000';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131000';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131000';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131000';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608130951';
+const BUILD = '202608131000';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -30,14 +30,23 @@ let clock = null;
 // argument for or against a pick, so they are never behind a toggle. Everything else is
 // a group you can switch on, and several can be on at once.
 const KINDS = {
-  safe: ['Safe', 'High floor, priced about right. The boring correct pick.'],
-  swing: ['Swing', 'Real upside, shakier floor. Wins weeks, loses some too.'],
+  safe: ['Safe', 'Steady scorer who stayed on the field. The boring correct pick.'],
+  swing: ['Swing', 'His points arrive in lumps. Wins weeks, blanks others.'],
   skip: ['Skip', 'The room takes him 20+ spots before your board would.'],
+};
+const VERDICTS = {
+  bargain: ['Bargain', 'The room lets him fall past where he stops being worth it.'],
+  fair: ['Fair', 'The room takes him inside the range where he is worth taking.'],
+  costly: ['Costly', 'He goes before your board thinks he is worth a pick.'],
 };
 const FIXED = [
   ['Type', (r) => (r.kind
     ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>` : '<em class="soft">—</em>'), 58, ''],
-  ['Rating', (r) => Math.round(r.rating), 54, 'rt'],
+  // Not a grade. The span of picks where taking him costs you nothing, because everyone
+  // inside it is a player you would be equally happy with.
+  ['Worth', (r) => `<em class="win ${r.verdict}">${r.openEnded ? `${r.worthFrom}+`
+    : r.worthFrom === r.worthTo ? r.worthFrom
+      : `${r.worthFrom}–${r.worthTo}`}</em>`, 66, 'wd'],
   ['ADP', (r) => (r.p.adp ? r.p.adp.toFixed(1) : '—'), 52, ''],
   ['Score', (r) => r.score.toFixed(1), 58, 'sc'],
 ];
@@ -665,7 +674,80 @@ function renderAdvice2() {
 let infl = null;
 let inflKey = '';
 
+// ---------------------------------------------------------------- fit sliders
+// Built once and then left alone. Rebuilding the markup on every input event is what made
+// the old sliders stutter - the element you were dragging got replaced underneath your
+// finger. Only the readout text changes as you drag.
+let fitBuilt = '';
+
+function fitWord(v) {
+  const n = Math.abs(v);
+  if (n < 8) return 'no preference';
+  return n < 35 ? 'slight' : n < 75 ? 'clear' : 'strong';
+}
+
+function renderFit() {
+  const host = $('#fitAxes');
+  if (!host) return;
+  const league = data.leagues[st.league];
+  const axes = FIT_AXES.filter((a) => !a.needsPenalties || hasPenalties(league));
+  const sig = axes.map((a) => a.key).join(',');
+
+  if (fitBuilt !== sig) {
+    host.innerHTML = axes.map((a) => `<label class="knob fitAxis">
+<span class="knobLabel"><span data-tip="${a.key}" tabindex="0">${a.label}</span>
+<em id="fitOut_${a.key}">no preference</em></span>
+<input id="fit_${a.key}" class="fitSlide" type="range" min="-100" max="100" step="5" value="0" />
+<span class="fitEnds"><b>${a.left}</b><b>${a.right}</b></span>
+<span class="hint">${a.hint}</span></label>`).join('');
+    fitBuilt = sig;
+    for (const a of axes) {
+      const el = $(`#fit_${a.key}`);
+      if (!el) continue;
+      el.oninput = (e) => {
+        st.fit = { ...(st.fit || {}), [a.key]: +e.target.value };
+        const out = $(`#fitOut_${a.key}`);
+        const v = +e.target.value;
+        if (out) out.textContent = Math.abs(v) < 8 ? 'no preference'
+          : `${fitWord(v)} — ${v < 0 ? a.left.toLowerCase() : a.right.toLowerCase()}`;
+        save();
+        scheduleRebuild();
+      };
+    }
+    // No wireTips() here on purpose - it is delegated on document.body, so these get
+    // tooltips for free. Calling it again would append a second tip element and a second
+    // set of listeners on every render.
+  }
+
+  // keep the controls honest when settings arrive from a load, an import or a preset
+  for (const a of axes) {
+    const el = $(`#fit_${a.key}`);
+    const v = (st.fit || {})[a.key] || 0;
+    if (el && document.activeElement !== el) el.value = v;
+    const out = $(`#fitOut_${a.key}`);
+    if (out) {
+      out.textContent = Math.abs(v) < 8 ? 'no preference'
+        : `${fitWord(v)} — ${v < 0 ? a.left.toLowerCase() : a.right.toLowerCase()}`;
+    }
+  }
+
+  const on = axes.filter((a) => Math.abs((st.fit || {})[a.key] || 0) >= 8);
+  const note = $('#fitNote');
+  if (!note) return;
+  if (!on.length) {
+    note.innerHTML = 'Every slider is neutral, so the board is pure value right now. '
+      + 'Move one and it will break ties in your favour.';
+    return;
+  }
+  const moved = board.rows.slice(0, 60).filter((r) => Math.abs(r.fit - 50) > 12).length;
+  note.innerHTML = `<b>${on.length}</b> preference${on.length > 1 ? 's' : ''} active. `
+    + `${moved} of your top 60 lean far enough to be reordered — never by more than a few `
+    + `places, because preferences break ties and nothing more.`
+    + (hasPenalties(league) ? '' : ' This league fines nothing, so that slider is hidden.');
+}
+
 function renderRatings() {
+  renderFit();
   // Re-rendering used to slam every panel shut and force Volume open, so ticking a stat
   // in Reliability threw you back to the top of the page. Worse, a stat you added landed
   // in a component that was now collapsed - which looked exactly like the stat had been
