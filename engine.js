@@ -16,6 +16,11 @@ export const DEFAULT_SETTINGS = (data) => ({
   stars: [],          // players you rate above what the numbers say. Not league-specific.
   fades: [],          // and the ones you trust less than the numbers do.
   tilt: 0.5,          // 0 = pure value, 1 = trust the rating
+  // Your three preferences, each -100 (hard left) to +100 (hard right), 0 = no opinion.
+  // They break ties between players you would be roughly equally happy with. They are
+  // not a forecast and the app says so.
+  fit: { td: 0, asc: 0, dur: 0, pen: 0 },
+  fitOn: true,
   need: 8,            // draft-score bonus for a position you still need
   style: 50,          // 0 = safest floor, 100 = highest ceiling
   rookie: true,       // pay up for rookies you trust
@@ -34,6 +39,90 @@ export const DEFAULT_SETTINGS = (data) => ({
 // It used to inflate two components, Floor and Ceiling, that were built almost entirely
 // from formulas copied out of the others - Floor was 100% copies. Sliding it was secretly
 // re-weighting volume and role under a different name. Now it shifts the real weights.
+// ---------------------------------------------------------------- fit
+// Three preferences, not fifty stats. Each is computed from the projection itself rather
+// than from a blend we invented, and each answers a question a person can actually hold
+// an opinion about.
+//
+// Measured over 2020-2025 before any of this was written: the projections beat "last
+// year's points" by about +0.25 at every position, no arrangement of historical stats
+// added anything to them, bust rate repeats year to year (~0.50) while boom rate does
+// not (~0.05). So Fit does not try to forecast. It sorts players you would be equally
+// happy with into the order YOU would pick them, and nothing more.
+export const FIT_BAND = 8;        // most Fit can move a score. Deliberately small.
+
+export const FIT_AXES = [
+  { key: 'td', label: 'Steady points vs big plays', left: 'Steady', right: 'Big plays',
+    hint: 'How much of his projection arrives in lumps - touchdowns, long catches, any '
+        + 'bonus THIS league pays. Lumps are where the big weeks and the empty ones '
+        + 'both come from.' },
+  { key: 'asc', label: 'Proven vs ascending', left: 'Proven', right: 'Ascending',
+    hint: 'How big a leap the 2026 projection is asking for, against what he actually did.' },
+  { key: 'dur', label: 'Punish injury risk', left: 'Ignore it', right: 'Punish it',
+    hint: 'Games he was available for. The only one of these with hard evidence behind '
+        + 'it: every projection overshoots, and the whole gap is games missed.' },
+  { key: 'pen', label: 'Avoid mistakes', left: 'Do not care', right: 'Avoid them',
+    hint: 'Fumbles and interceptions, priced at what YOUR league fines them. Hidden in a '
+        + 'league that does not punish them.', needsPenalties: true },
+];
+
+// Points that arrive in lumps, under YOUR league's rules.
+//
+// Base scoring is a steady drip: a yard is a yard. What actually moves a week is the
+// lumpy stuff - a touchdown, a forty-yard catch, a two-point conversion - and which
+// lumps exist depends entirely on the league. Your Highest Scorer league pays a point
+// for a 40+ yard catch and a tenth for every first down; the other two pay neither. So
+// the same receiver genuinely has a different ceiling in different leagues, and this is
+// computed per league rather than assumed.
+export const LUMPY = ['rush_td', 'rec_td', 'pass_td', 'rush_2pt', 'rec_2pt', 'pass_2pt',
+  'rec_40p', 'rush_40p', 'pass_40p', 'bonus_rush_yd_100', 'bonus_rec_yd_100',
+  'bonus_rush_rec_yd_100', 'bonus_pass_yd_300', 'bonus_pass_yd_400'];
+
+// The other side of the coin: what the league takes off you, and who tends to give it up.
+export const COSTLY = ['fum_lost', 'fum', 'pass_int', 'rec_drop'];
+
+function pointsFrom(p, league, keys) {
+  const pr = p.proj || {};
+  const sc = league.scoring || {};
+  return keys.reduce((a, k) => a + (pr[k] || 0) * (sc[k] || 0), 0);
+}
+
+// Share of his projection that comes in lumps rather than as a steady drip. High means a
+// boom-or-bust week; low means he gets you his points whether or not he finds the endzone.
+export function swingShare(p, league) {
+  const total = projectedPoints(p, league);
+  if (total <= 0) return 0;
+  return Math.max(0, Math.min(1, pointsFrom(p, league, LUMPY) / total));
+}
+
+// Points this league fines him for, per season. Zero in a league with no penalties, which
+// is why the slider that uses it hides itself when the league has none.
+export function riskPoints(p, league) {
+  return -pointsFrom(p, league, COSTLY);
+}
+
+// Does this league punish mistakes at all? Decides whether to show that preference.
+export function hasPenalties(league) {
+  const sc = league.scoring || {};
+  return COSTLY.some((k) => (sc[k] || 0) < 0);
+}
+
+// How much better the projection expects him to be than he was. Rookies have no last
+// year, so they sit at the optimistic end by definition rather than by accident.
+export function ascent(p) {
+  const m = p.m || {};
+  const now = m.proj_ppg ?? 0;
+  const before = m.last_ppg;
+  if (before == null || !m.has2025) return 6;        // no history: treat as a big ask
+  return now - before;
+}
+
+export function durability(p) {
+  const m = p.m || {};
+  if (!m.has2025) return 13;                          // unknown, so neither rewarded nor punished
+  return Math.max(0, Math.min(17, m.games_2025 ?? 13));
+}
+
 export const STEADY = ['volume', 'role', 'reliability', 'production'];
 export const RISKY = ['upside', 'explosive'];
 
@@ -303,6 +392,42 @@ export function buildBoard(data, st, cache) {
     sorted.forEach((r, i) => { r.scores.projection = n > 1 ? (i / (n - 1)) * 100 : 50; });
   }
 
+  // Each Fit trait as a percentile within position, so "touchdown-heavy" means heavy for
+  // a running back rather than heavy compared with a quarterback.
+  for (const list of Object.values(byPos)) {
+    for (const [key, get] of [['td', (r) => swingShare(r.p, league)],
+      ['asc', (r) => ascent(r.p)], ['dur', (r) => durability(r.p)],
+      ['pen', (r) => -riskPoints(r.p, league)]]) {
+      const vals = list.map((r) => [r, get(r)]).sort((a, b) => a[1] - b[1]);
+      const n = vals.length;
+      // Ties share a percentile. Without this, thirty-two defences all on zero touchdown
+      // share get spread from 0 to 100 by nothing but array order, and one of them comes
+      // out "the most touchdown-dependent player in the league".
+      let i = 0;
+      while (i < n) {
+        let j = i;
+        while (j + 1 < n && vals[j + 1][1] === vals[i][1]) j += 1;
+        const pct = n > 1 ? (((i + j) / 2) / (n - 1)) * 100 : 50;
+        for (let k = i; k <= j; k += 1) {
+          vals[k][0].traits ||= {};
+          vals[k][0].traits[key] = pct;
+        }
+        i = j + 1;
+      }
+    }
+  }
+
+  // Fit is the average distance from neutral across the axes you actually moved. An
+  // untouched slider contributes nothing rather than quietly voting for the middle.
+  const leans = st.fit || {};
+  const live = FIT_AXES.map((a) => a.key).filter((k) => (leans[k] || 0) !== 0);
+  for (const r of rows) {
+    if (!live.length || st.fitOn === false) { r.fit = 50; continue; }
+    const sum = live.reduce(
+      (acc, k) => acc + ((leans[k] / 100) * ((r.traits?.[k] ?? 50) - 50)), 0);
+    r.fit = Math.max(0, Math.min(100, 50 + sum / live.length));
+  }
+
   // VOR on a 0-100 scale above replacement. Below replacement it keeps an ORDERED band
   // down to -25 - clamping at 0 once put 142 of 259 players on the same score.
   const mx = Math.max(...rows.map((r) => r.vor), 1);
@@ -334,7 +459,11 @@ export function buildBoard(data, st, cache) {
     // tilt 0-1 behaves as before (up to +/-20 points of score). Above 1 the rating starts
     // to genuinely outrank value, which is what "I trust my own ratings" has to mean if it
     // is to mean anything - the board makes the trade-off explicit rather than capping it.
-    let s = (r.vorPct + st.tilt * 40 * ((r.rating - 50) / 50)) * posx + r.need;
+    // Fit is capped at FIT_BAND points so it can only ever reorder players the value
+    // numbers were close to indifferent about. That cap is the honest part: nothing here
+    // beat the projections in five years of testing, so it does not get to outvote them.
+    let s = (r.vorPct + st.tilt * 40 * ((r.rating - 50) / 50)
+      + FIT_BAND * ((r.fit - 50) / 50)) * posx + r.need;
     if (st.rookie && r.p.rookie) {
       const c = r.p.m.rookie_conf || '';
       const conf = c.startsWith('HIGH') ? 1 : c.startsWith('MED') ? 0.6 : 0.3;
@@ -361,6 +490,8 @@ export function buildBoard(data, st, cache) {
 
   const adpOrder = [...rows].sort((a, b) => a.p.adp - b.p.adp);
   adpOrder.forEach((r, i) => { r.adpRank = i + 1; });
+
+  valueWindow(rows);
 
   // where the grade alone would have put him, so the detail panel can show the gap
   // between "good for his position" and "worth this pick"
@@ -445,6 +576,47 @@ export function pickType(r) {
   if (floor >= 62 && up < 58) return 'safe';
   if (up >= 60 && floor < 58) return 'swing';
   return null;
+}
+
+// ---------------------------------------------------------------- value window
+// Not a grade out of a hundred. A range of picks.
+//
+// A 0-100 rating never answered the question anyone actually asks, which is "should I
+// take him HERE?". This does: he is worth taking from the pick where he becomes the best
+// man on your board, through to the last pick where he is still the equal of anyone left
+// in his tier. Inside a tier the players are interchangeable, so the window is wide and
+// there is no hurry. At a tier edge it snaps shut and waiting costs you the tier.
+//
+// Then compare that window with where the room takes him. If his ADP sits past the end of
+// your window he is a bargain; if it sits before the start, the room is paying more than
+// you would and you should let someone else.
+export const WINDOW_BAND = 2.5;   // score points inside which two players are a coin flip
+
+export function valueWindow(rows, band = WINDOW_BAND) {
+  // rows arrive sorted best-first. Everyone within a hair of his score is a player you
+  // would be equally happy with, so the window runs across that whole run - not across
+  // his positional tier, which at the top of the board is often just him on his own.
+  for (let i = 0; i < rows.length; i += 1) {
+    const r = rows[i];
+    let lo = i;
+    let hi = i;
+    while (lo > 0 && rows[lo - 1].score - r.score <= band) lo -= 1;
+    while (hi < rows.length - 1 && r.score - rows[hi + 1].score <= band) hi += 1;
+
+    // A tier cliff is a real drop, so the window never runs past one at his own position.
+    for (let k = i; k < hi; k += 1) {
+      if (rows[k].p.pos === r.p.pos && rows[k].lastOfTier) { hi = k; break; }
+    }
+
+    r.worthFrom = rows[lo].rank;
+    r.worthTo = rows[hi].rank;
+    r.equals = hi - lo;                      // how many others are a coin flip with him
+    r.edge = r.adpRank - r.rank;             // + = the room lets him fall past your spot
+    r.verdict = r.adpRank > r.worthTo ? 'bargain'
+      : r.adpRank < r.worthFrom ? 'costly'
+        : 'fair';
+  }
+  return rows;
 }
 
 // ---------------------------------------------------------------- tiers

@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130825';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130825';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608130825';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130825';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130951';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130951';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608130951';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130951';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608130825';
+const BUILD = '202608130951';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
