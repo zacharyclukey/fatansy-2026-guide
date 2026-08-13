@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131914';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131914';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131914';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131914';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131914';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131922';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131922';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131922';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131922';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131922';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131914';
+const BUILD = '202608131922';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -159,7 +159,15 @@ function load() {
   // counted towards the total the rating divides by, quietly diluting every real one.
   // Not a user setting - there is no control for it - so it always comes from the code.
   // Without this a profile saved before it was retuned keeps the old value for ever.
-  st.rookieMax = base.rookieMax;
+  //
+  // The same argument now applies to three more. Safe-vs-Upside (`style`, `styleBudget`)
+  // and Trust-my-ratings (`tilt`) were sliders on the old ratings page. That page is four
+  // preferences now and neither slider is anywhere on it - but the engine still reads
+  // both, so a profile saved back when they existed goes on shifting component weights and
+  // inflating the rating for ever, with nothing on any screen that says so or can undo it.
+  // A setting with no control is not a setting, it is a ghost. Pinning them to the code
+  // default is the only state a user can actually see and reason about.
+  for (const k of ['rookieMax', 'style', 'styleBudget', 'tilt']) st[k] = base[k];
   st.comp = { ...base.comp, ...(st.comp || {}) };
   for (const k of Object.keys(st.comp)) if (!(k in base.comp)) delete st.comp[k];
   st.sub ||= {};
@@ -200,9 +208,6 @@ const injBadge = (p) => (p.inj
   ? `<span class="inj ${INJ_BAD.includes(p.inj) ? 'bad' : 'warn'}" title="${p.inj}${p.injPart ? ` — ${p.injPart}` : ''}">${p.inj.slice(0, 3).toUpperCase()}</span>`
   : '');
 
-const styleWord = (v) => (v <= 15 ? 'safest floor' : v <= 40 ? 'leaning safe'
-  : v < 60 ? 'balanced' : v < 85 ? 'leaning upside' : 'highest ceiling');
-
 function riskOf(r) {
   const f = r.scores.floorish ?? 50;
   if (r.p.inj) {
@@ -217,19 +222,24 @@ function riskOf(r) {
   return 'Risky — little proven work';
 }
 
+// One phrase per component, keyed on the components that actually exist. It carried
+// `floor` and `ceiling` long after both were deleted, and had no entry for `upside` - a
+// real component worth 5% of the rating - so Upside could never be named as either a
+// man's strength or his worry, however far out on it he was. Two dead keys, one live
+// component silently invisible.
 const NAMED = {
   volume: 'he gets the ball a lot', redzone: 'he works near the goal line',
   explosive: 'he hits big plays', efficiency: 'he does a lot with each touch',
   production: 'he scored well last year', role: 'his role is locked in',
-  reliability: 'he stays on the field', ceiling: 'he has room to leap',
-  floor: 'his floor is high', situation: 'the offence around him is good',
+  reliability: 'he stays on the field', upside: 'he is young with room to leap',
+  situation: 'the offence around him is good',
 };
 const WORRY = {
   volume: 'the workload is thin', redzone: 'he does not see the goal line',
   explosive: 'there are no big plays', efficiency: 'he does little with each touch',
   production: 'last year was quiet', role: 'his role is not settled',
-  reliability: 'he misses games', ceiling: 'there is not much upside',
-  floor: 'the floor is low', situation: 'the offence around him is poor',
+  reliability: 'he misses games', upside: 'he has probably shown you his best',
+  situation: 'the offence around him is poor',
 };
 
 // The projection is left out of both halves - it is most of what the score already says,
@@ -621,7 +631,7 @@ function scheduleRebuild() {
 }
 
 function renderAll() {
-  if (view === 'board') { renderMockBar(); renderBoard(); renderAdvice(); renderLean(); }
+  if (view === 'board') { renderMockBar(); renderBoard(); renderAdvice(); renderLean(); renderKeys(); }
   if (view === 'roster') renderRoster();
   if (view === 'mock') renderMock();
   if (view === 'ratings') renderRatings();
@@ -1218,7 +1228,6 @@ feels. Nothing you do here touches your real draft.</p>`;
 }
 
 // ---------------------------------------------------------------- ratings
-function customsFor(key) { return (st.customs || []).filter((c) => c.comp === key); }
 
 // the same recommendation, on the tab where you are reviewing what you have
 function renderAdvice2() {
@@ -1247,7 +1256,15 @@ function renderFit() {
   if (!host) return;
   const league = data.leagues[st.league];
   const axes = FIT_AXES.filter((a) => !a.needsPenalties || hasPenalties(league));
-  const sig = axes.map((a) => a.key).join(',');
+  // The signature was the axis keys alone, which meant the panel only ever rebuilt when an
+  // axis appeared or vanished. But "What this counts" prints your league's actual scoring
+  // values, and two of Zach's three leagues fine mistakes while paying for different lumps
+  // - so switching between them left the previous league's list on screen, telling you the
+  // slider counted 40+ yard catches at +1 in a league that pays nothing for them. The
+  // signature now covers everything the markup is built from.
+  const sig = JSON.stringify(axes.map((a) => [a.key,
+    a.uses ? null : axisKeys(a.key, league, st).map((k) => [k, league.scoring[k]]),
+    a.uses ? null : axisSpare(a.key, league, st).map((k) => [k, league.scoring[k]])]));
 
   if (fitBuilt !== sig) {
     host.innerHTML = axes.map((a) => {
@@ -1531,8 +1548,9 @@ ${LEANS.map((l) => `<button class="chipBtn" data-lean="${l.key}" aria-pressed="$
 }
 
 function readouts() {
-  if ($('#styleOut2')) $('#styleOut2').textContent = styleWord(st.style);
-  if ($('#tiltOut2')) $('#tiltOut2').textContent = `${Math.round(st.tilt * 100)}%`;
+  // #styleOut2 and #tiltOut2 were written to here for weeks after the elements they name
+  // were deleted from index.html along with the rest of the ratings editor. Guarded, so
+  // they never threw - which is exactly why nobody noticed.
   $('#needOut').textContent = st.need;
   $('#priority').textContent = priorityOrder(data, st).slice(0, 3)
     .map((c) => c.label.toLowerCase()).join(' › ');
@@ -1591,6 +1609,95 @@ function measure() {
   document.documentElement.style.setProperty('--stick', `${h}px`);
 }
 
+// ---------------------------------------------------------------- draft night, no mouse
+// A name is called every thirty seconds or so. Between calls you have to find that man on
+// a three-hundred-row board and tick him off, and then be ready for the next one. Doing
+// that with a mouse is why people stop tracking somewhere in round four and the board
+// quietly becomes a lie.
+//
+// So: type three letters of his name, press one key. The search box is already there and
+// already filters the board, so nothing new has to be learned - the only addition is that
+// Enter finishes the job and empties the box for the next name.
+//
+// The rule this is built on is that it must NEVER be a shortcut you have to know about.
+// The line under the search box always names the player the next key press will hit and
+// the key that will hit him, in words. Nobody has to remember anything, and nobody can
+// tick off the wrong man without having read his name first.
+function keyTarget() {
+  const q = query.trim().toLowerCase();
+  if (!q) return { q };
+  const drafted = new Set(picks().drafted);
+  const hits = board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
+    && (r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
+  // The first man matching who is still available. Somebody already off the board is
+  // never the target - Enter must not be able to un-tick a pick by accident, and by the
+  // middle of a draft half of any search is players who have gone.
+  const free = hits.find((r) => !drafted.has(r.p.id));
+  return { q, hits, r: free, allGone: hits.length > 0 && !free };
+}
+
+// What just happened, held on screen until the next keystroke so you get a confirmation
+// rather than a box that empties itself and says nothing.
+let keyEcho = '';
+
+function renderKeys() {
+  const box = $('#kbd');
+  if (!box) return;
+  const { q, hits, r, allGone } = keyTarget();
+  const who = (x) => `<b>${x.p.name}</b> <span class="kbdPos">${x.p.pos}${x.p.team ? ` · ${x.p.team}` : ''}</span>`;
+  if (keyEcho) { box.innerHTML = `<span class="kbdDone">${keyEcho}</span>`; return; }
+  if (!q) {
+    box.innerHTML = picks().drafted.length
+      ? '<span class="kbdIdle">Type a name in the box above and press <kbd>Enter</kbd> to '
+        + 'tick the next player off. No mouse needed.</span>'
+      : '<span class="kbdIdle">On draft night: type a name above, press <kbd>Enter</kbd> when '
+        + 'somebody else takes him, <kbd>Shift</kbd>+<kbd>Enter</kbd> when you take him.</span>';
+    return;
+  }
+  if (!hits.length) { box.innerHTML = `<span class="kbdNone">Nobody on the board is called “${q}”.</span>`; return; }
+  if (allGone) {
+    box.innerHTML = `<span class="kbdNone">Everyone matching “${q}” is already off the board.</span>`;
+    return;
+  }
+  box.innerHTML = mock()
+    ? `<kbd>Enter</kbd> picks ${who(r)}`
+    : `<kbd>Enter</kbd> — ${who(r)} goes off the board`
+      + ` &nbsp;·&nbsp; <kbd>Shift</kbd>+<kbd>Enter</kbd> — he is yours`;
+}
+
+// One key press does the whole job: record him, empty the box, leave the cursor where it
+// already is. Anything less and you are back to reaching for the mouse between picks.
+function keyAct(mine) {
+  const { r } = keyTarget();
+  if (!r) return false;
+  if (mock()) {
+    // mockTake refuses when it is not your turn, so the box is only emptied and the pick
+    // only claimed once it has actually been taken.
+    if (!mockTake(r.p.id)) return false;
+    keyEcho = `${r.p.name} — your pick.`;
+    query = '';
+    $('#search').value = '';
+    renderKeys();
+    return true;
+  }
+  remember(`${r.p.name} ${mine ? 'to your team' : 'off the board'}`);
+  if (mine) {
+    toggle('mine', r.p.id);
+    const dl = picks().drafted;
+    if (!dl.includes(r.p.id)) dl.push(r.p.id);
+    keyEcho = `${r.p.name} added to your team.`;
+    save();
+  } else {
+    toggle('drafted', r.p.id);
+    keyEcho = `${r.p.name} ticked off. Press <kbd>Ctrl</kbd>+<kbd>Z</kbd> if that was wrong.`;
+  }
+  query = '';
+  $('#search').value = '';
+  rebuild();
+  renderKeys();
+  return true;
+}
+
 // ---------------------------------------------------------------- events
 function wire() {
   $('#settingsBtn').onclick = (e) => {
@@ -1622,7 +1729,31 @@ function wire() {
     renderChrome();   // slot, toggles and filters all belong to the league you just chose
     rebuild();
   };
-  $('#search').oninput = (e) => { query = e.target.value; limit = 100; renderBoard(); };
+  $('#search').oninput = (e) => {
+    query = e.target.value;
+    limit = 100;
+    keyEcho = '';                 // a new keystroke clears the last confirmation
+    renderBoard();
+    renderKeys();
+  };
+  $('#search').onkeydown = (e) => {
+    if (e.key === 'Escape') { e.target.value = ''; query = ''; keyEcho = ''; renderBoard(); renderKeys(); return; }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // Shift is "he is mine". Without it, somebody else took him - which is eleven picks
+    // in every twelve, so the plain key is the common one.
+    if (!keyAct(e.shiftKey)) renderKeys();
+  };
+  // A slash puts the cursor in the search box from anywhere on the board, so the whole
+  // loop is: slash, three letters, Enter. Never while you are already typing somewhere.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+    if (view !== 'board') return;
+    e.preventDefault();
+    $('#search').focus();
+    $('#search').select();
+  });
   document.body.addEventListener('change', (e) => {
     if (!e.target.dataset.col) return;
     st.cols[e.target.dataset.col] = e.target.checked;
@@ -1716,7 +1847,12 @@ function wire() {
     f.text().then((t) => {
       const o = JSON.parse(t);
       Object.assign(st, { fit: o.fit || st.fit, fitExtra: o.fitExtra || {},
-        need: o.need ?? st.need, rookie: o.rookie ?? st.rookie, posx: o.posx || st.posx });
+        fitOn: o.fitOn ?? st.fitOn,
+        need: o.need ?? st.need, rookie: o.rookie ?? st.rookie, posx: o.posx || st.posx,
+        // Your list of players travels with your preferences. It is the single most
+        // laborious thing to rebuild by hand, and the whole reason two people in the same
+        // house keep separate files.
+        stars: o.stars || st.stars, fades: o.fades || st.fades });
       fitBuilt = '';
       save(); renderChrome(); rebuild();
     }).catch(() => alert('That file is not a preferences file.'));

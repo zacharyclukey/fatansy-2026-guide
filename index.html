@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608131914" />
+<link rel="stylesheet" href="styles.css?v=202608131922" />
 </head>
 <body>
 
@@ -31,6 +31,13 @@
     <button id="saveBtn" aria-expanded="false">Save or print</button>
     <button id="settingsBtn" aria-expanded="false">Settings</button>
   </div>
+
+  <!-- Draft night is a typing race: a name is called every thirty seconds and you have to
+       get it off the board before the next one. Hunting for the right row with a mouse is
+       what makes people give up and stop tracking halfway through round four.
+       This line says, in words, exactly who the next key press will hit. It is never a
+       shortcut you have to know about - it names the player and the key every time. -->
+  <p id="kbd" class="kbd" aria-live="polite"></p>
 
   <!-- Three things you can take off this screen and keep. Deliberately not called
        "export" anywhere the eye lands, because the Ratings tab already has an
@@ -254,6 +261,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608131914"></script>
+<script type="module" src="app.js?v=202608131922"></script>
 </body>
 </html>

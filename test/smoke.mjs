@@ -106,12 +106,24 @@ const fire = (el, type) => {
   const exported = [...src.matchAll(/^export (?:function|const) (\w+)/gm)].map((m) => m[1]);
   const needed = ['DEFAULT_SETTINGS', 'componentWeights', 'componentScore', 'floorScore',
     'projectedPoints', 'inLeague', 'flexFill', 'replacementLevels', 'SAMPLE_LEAGUE',
-    'subScores', 'RAW_FIELDS', 'applyCustomStats', 'unusedStats', 'buildBoard', 'pickType',
+    'subScores', 'applyCustomStats', 'buildBoard', 'pickType',
     'markTiers', 'myPicks', 'draftContext', 'availability', 'poolAround', 'costOfWaiting',
-    'roundsOf',
-    'influence', 'priorityOrder'];
+    'roundsOf', 'priorityOrder'];
   const missing = needed.filter((n) => !exported.includes(n));
   ok('every engine export the app imports still exists', missing.length === 0, missing.join(', '));
+
+  // The drift runs BOTH ways, and this list only ever guarded one of them. RAW_FIELDS,
+  // unusedStats and influence sat in it for weeks after the page that used them was
+  // deleted - so the suite was actively insisting that ninety lines of dead engine stay
+  // alive. An export that nothing imports and that the engine does not use itself is not
+  // load-bearing; it is a room nobody has opened since the door was bricked up.
+  const others = ['app.js', 'mock.js', 'sleeper.js', 'strategies.js', 'tips.js']
+    .map((f) => fs.readFileSync(`${DIR}/${f}`, 'utf8')).join('\n');
+  const orphans = exported.filter((n) => {
+    if (new RegExp(`\\b${n}\\b`).test(others)) return false;      // someone imports it
+    return (src.match(new RegExp(`\\b${n}\\b`, 'g')) || []).length < 2;  // engine uses it
+  });
+  ok('the engine exports nothing that nothing uses', orphans.length === 0, orphans.join(', '));
 
   const app = fs.readFileSync(`${DIR}/app.js`, 'utf8');
   const imported = [...(app.match(/^import \{([^}]*)\} from '\.\/engine\.js/m)?.[1] || '')
@@ -561,6 +573,163 @@ const fire = (el, type) => {
   ok('preferences survive a reload',
     [...again.d.querySelectorAll('.fitAxis input[type="range"]')].some((s) => +s.value === 100));
   ok('the page threw nothing', again.errs.length === 0, again.errs.join('; '));
+}
+
+// ------------------------------------- 4c. what the removal of the stat editor broke
+// Four bugs, all of the same shape: a control was deleted and the plumbing behind it was
+// left connected to nothing, or connected to the wrong thing. None of them threw.
+{
+  // ---- the export button and the import button did not agree on what a preference is.
+  // Export wrote { comp, sub, style, tilt, need, rookie } - the knobs of the deleted
+  // editor - and import read { fit, fitExtra, need, rookie, posx }. So exporting your
+  // preferences and importing them back silently reset all four sliders to neutral.
+  const app = fs.readFileSync(`${DIR}/app.js`, 'utf8');
+  const exp = app.match(/#exportR'\)\.onclick[\s\S]*?JSON\.stringify\(\{([\s\S]*?)\}/)?.[1] || '';
+  const imp = app.match(/#importR'\)\.onchange[\s\S]*?Object\.assign\(st, \{([\s\S]*?)\}\);/)?.[1] || '';
+  for (const k of ['fit', 'fitExtra', 'need', 'rookie']) {
+    ok(`export carries ${k}`, new RegExp(`\\b${k}\\b`).test(exp), exp.replace(/\s+/g, ' ').trim());
+    ok(`import reads ${k}`, new RegExp(`\\b${k}\\b`).test(imp));
+  }
+  ok('export no longer writes the deleted editor knobs',
+    !/\bcomp\b|\bsub\b|\bstyle\b|\btilt\b/.test(exp), exp.replace(/\s+/g, ' ').trim());
+
+  // ---- every phrase key is a component that exists.
+  // NAMED/WORRY still carried floor and ceiling, deleted long ago, and had no entry for
+  // upside - a live component worth 5% - so Upside could never be named as a man's
+  // strength or his worry however far out on it he was.
+  const compKeys = new Set(players.components.map((c) => c.key));
+  for (const which of ['NAMED', 'WORRY']) {
+    const body = app.match(new RegExp(`const ${which} = \\{([\\s\\S]*?)\\n\\};`))?.[1] || '';
+    const keys = [...body.matchAll(/(?:^|\s)(\w+):/g)].map((m) => m[1]);
+    const dead = keys.filter((k) => !compKeys.has(k));
+    const missed = [...compKeys].filter((k) => k !== 'projection' && !keys.includes(k));
+    ok(`${which} names no component that was deleted`, dead.length === 0, dead.join(', '));
+    ok(`${which} names every component that exists`, missed.length === 0, missed.join(', '));
+  }
+}
+
+{
+  // ---- a slider the page refuses to show must not keep voting.
+  // "Avoid mistakes" is hidden in a league that fines nothing. It was still counted: every
+  // player ties on zero penalty points so it added nothing to the sum, while still counting
+  // towards the divisor - weakening every preference you HAD set. Measured before the fix:
+  // up to 20 points of Fit and 46 places of rank, from a control that is not on screen.
+  const eng = await import(`file://${DIR}/engine.js`);
+  const noPen = { name: 'Fines nothing', teams: 12, rounds: 16,
+    starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DEF: 1 },
+    scoring: { rec: 1, rush_yd: 0.1, rec_yd: 0.1, pass_yd: 0.04, rush_td: 6, rec_td: 6, pass_td: 4 } };
+  const data = JSON.parse(JSON.stringify(players));
+  data.leagues = [noPen];
+  const base = eng.DEFAULT_SETTINGS(data);
+  const build = (fit) => eng.buildBoard(data, { ...base, fit, league: 0, mine: [], atPick: 1 }, null);
+  const a = build({ td: 0, asc: 0, dur: 80, pen: 0 }).rows;
+  const b = build({ td: 0, asc: 0, dur: 80, pen: 90 }).rows;
+  const byId = new Map(b.map((r) => [r.p.id, r]));
+  const worstFit = Math.max(...a.map((r) => Math.abs(r.fit - byId.get(r.p.id).fit)));
+  const worstRank = Math.max(...a.map((r) => Math.abs(r.rank - byId.get(r.p.id).rank)));
+  ok('a hidden preference changes no player\'s fit', worstFit < 0.001, `worst ${worstFit.toFixed(1)}`);
+  ok('a hidden preference reorders nobody', worstRank === 0, `worst ${worstRank}`);
+
+  // and in a league that DOES fine mistakes it still has to work
+  const pen = { ...noPen, name: 'Fines them', scoring: { ...noPen.scoring, fum_lost: -2, pass_int: -2 } };
+  data.leagues = [pen];
+  const c = build({ td: 0, asc: 0, dur: 80, pen: 0 }).rows;
+  const e2 = build({ td: 0, asc: 0, dur: 80, pen: 90 }).rows;
+  const m2 = new Map(e2.map((r) => [r.p.id, r]));
+  ok('the same preference still bites where the league fines mistakes',
+    c.some((r) => Math.abs(r.fit - m2.get(r.p.id).fit) > 1));
+}
+
+// ------------------------------- 4d. the profile Zach actually has in his browser
+// He has been using this app for weeks, so what is in his localStorage is the shape from
+// before the value window and the four sliders existed: comp/sub/tilt/style, components
+// that have since been deleted, and no `fit` key at all. Migration of it was never tested.
+{
+  const old = {
+    league: 0,
+    stars: [], fades: [],
+    tilt: 0.9, style: 90, styleBudget: 15, rookieMax: 10,   // ghosts of deleted sliders
+    need: 12, rookie: true, posx: { RB: 1.1 },
+    comp: { volume: 30, role: 20, reliability: 10, production: 15, upside: 10, explosive: 5,
+      efficiency: 5, redzone: 5, situation: 5, floor: 20, ceiling: 20 },   // floor/ceiling: gone
+    sub: { games: { on: true, w: { QB: 10, RB: 40, WR: 10, TE: 10 } },
+      a_stat_that_no_longer_exists: { on: true, w: { QB: 5, RB: 5, WR: 5, TE: 5 } } },
+    cols: { bye: true },
+    // no fit, no fitExtra, no fitOn
+  };
+  const store = { draft2026: JSON.stringify(old) };
+  const { d, errs } = await boot({ store });
+  ok('an old profile still builds a full board',
+    d.querySelectorAll('.row.player').length > 50,
+    `${d.querySelectorAll('.row.player').length} rows`);
+  ok('an old profile throws nothing', errs.length === 0, errs.join('; '));
+
+  for (const v of ['roster', 'ratings', 'setup', 'mock', 'board']) {
+    d.querySelector(`[data-v="${v}"]`).click();
+    await settle();
+    const t = (d.querySelector(`#v-${v}`).textContent || '').replace(/\s+/g, ' ');
+    ok(`an old profile renders ${v} without junk`, !/NaN|undefined|Infinity|\[object/.test(t),
+      t.match(/.{0,50}(NaN|undefined|Infinity|\[object).{0,30}/)?.[0] || '');
+  }
+
+  d.querySelector('.row.player [data-star]').click();      // anything that triggers a save
+  await saved();
+  const after = JSON.parse(store.draft2026 || '{}');
+  ok('the four preferences are filled in', after.fit && 'td' in after.fit && 'pen' in after.fit);
+  ok('components that no longer exist are dropped',
+    !('floor' in (after.comp || {})) && !('ceiling' in (after.comp || {})));
+  ok('stats that no longer exist are dropped', !('a_stat_that_no_longer_exists' in (after.sub || {})));
+  // The knobs whose sliders were deleted must not go on quietly working. A profile saved
+  // with tilt 0.9 and style 90 was still re-weighting components and inflating the rating,
+  // with nothing on any screen that showed it or could put it back.
+  ok('the deleted Safe/Upside slider is pinned to the default', after.style === 50, `${after.style}`);
+  ok('the deleted Trust-my-ratings slider is pinned', after.tilt === 0.5, `${after.tilt}`);
+  ok('the retuned rookie bonus is pinned', after.rookieMax === 4, `${after.rookieMax}`);
+  // the thing he will actually be reading on the night
+  const kinds = [...d.querySelectorAll('.row.player .kind')].map((e) => e.textContent.trim());
+  ok('an old profile still gets pick types on the board', kinds.length >= 3, kinds.slice(0, 6).join(' '));
+}
+
+// ------------------------ 4e. "What this counts" belongs to the league you are looking at
+// It prints your league's real scoring values, but the panel was only rebuilt when an axis
+// appeared or vanished. Two of Zach's three leagues fine mistakes and pay for different
+// lumps, so switching between them left the previous league's list on screen - the slider
+// claimed to count 40+ yard catches at +1 in a league that pays nothing for them.
+{
+  const common = { teams: 12, rounds: 16, imported: true,
+    starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DEF: 1 } };
+  const two = [
+    { ...common, name: 'Pays for big plays',
+      scoring: { rec: 1, rush_yd: 0.1, rec_yd: 0.1, rush_td: 6, rec_td: 6, pass_td: 4,
+        fum_lost: -2, pass_int: -2, rec_40p: 1 } },
+    { ...common, name: 'Does not',
+      scoring: { rec: 1, rush_yd: 0.1, rec_yd: 0.1, rush_td: 6, rec_td: 6, pass_td: 4,
+        fum_lost: -2, pass_int: -2 } },
+  ];
+  const { d } = await boot({ store: { draft2026: JSON.stringify({ imported: two, league: 0 }) } });
+  const counted = () => [...d.querySelectorAll('.countList')]
+    .map((u) => u.textContent.replace(/\s+/g, ' ')).join(' ');
+  d.querySelector('[data-v="ratings"]').click();
+  await settle();
+  ok('league one counts its 40-yard catches', /40\+ yard catches/.test(counted()));
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  const sel = d.querySelector('#league');
+  sel.value = '1';
+  fire(sel, 'change');
+  await settle();
+  d.querySelector('[data-v="ratings"]').click();
+  await settle();
+  ok('league two does not inherit them', !/40\+ yard catches/.test(counted()), counted().slice(0, 120));
+  // and back again, because a signature that only ever grows is the same bug reversed
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  sel.value = '0';
+  fire(sel, 'change');
+  await settle();
+  d.querySelector('[data-v="ratings"]').click();
+  await settle();
+  ok('and they come back when you switch back', /40\+ yard catches/.test(counted()));
 }
 
 // -------------------------------------------- 4b. the model has no duplicated formulas
@@ -1451,6 +1620,117 @@ const fire = (el, type) => {
   ok('and counts them in the summary', /Players drafted,2/.test(t1.text));
 
   ok('none of it threw', errs.length === 0, errs.join(' | '));
+}
+
+// ---------------------------------------------------- 12. draft night without a mouse
+// A name is called every thirty seconds. Finding that row with a mouse and clicking Gone
+// is what makes people stop tracking in round four, at which point the board is a lie and
+// every number on it is wrong. Type three letters, press one key.
+{
+  const { window, d, store } = await boot();
+  // A fresh install opens on Setup, and renderAll only draws the view you are looking at -
+  // so rows read off the DOM without this are the ones drawn before that switch.
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  const box = d.querySelector('#search');
+  const key = (k, opts = {}) => box.dispatchEvent(new window.KeyboardEvent('keydown',
+    { key: k, bubbles: true, cancelable: true, ...opts }));
+  const type = async (v) => { box.value = v; fire(box, 'input'); await settle(); };
+  const hint = () => (d.querySelector('#kbd').textContent || '').replace(/\s+/g, ' ').trim();
+  const drafted = () => JSON.parse(store.draft2026 || '{}').picks?.[0]?.drafted || [];
+  const mineOf = () => JSON.parse(store.draft2026 || '{}').picks?.[0]?.mine || [];
+
+  ok('the board says what the keyboard does before you touch it',
+    /Enter/.test(hint()), hint());
+
+  // whoever the top row is, by name, so this does not break when the data file moves
+  const first = d.querySelector('.row.player .nm').textContent.trim().replace(/\s+\w{2,3}$/, '');
+  await type(first.split(' ')[1] || first);
+  ok('the hint names the man the key will hit', hint().includes(first.split(' ').pop()), hint());
+  ok('the hint names both keys', /Enter/.test(hint()) && /Shift/.test(hint()), hint());
+
+  const before = drafted().length;
+  key('Enter');
+
+  await saved();
+  ok('Enter takes one player off the board', drafted().length === before + 1,
+    `${before} -> ${drafted().length}`);
+  ok('Enter does not put him on your team', mineOf().length === 0);
+  ok('the box empties itself for the next name', box.value === '');
+  ok('it says what it just did', /ticked off/.test(hint()), hint());
+  ok('and it says how to take it back', /Ctrl/.test(hint()), hint());
+
+  // Shift is "he is mine" - and a player you took is also off the board.
+  const nextName = d.querySelector('.row.player:not(.drafted) .nm').textContent.trim();
+  await type(nextName.split(' ')[1] || nextName);
+  key('Enter', { shiftKey: true });
+  await saved();
+  ok('Shift+Enter adds him to your team', mineOf().length === 1);
+  ok('and takes him off the board too', drafted().length === before + 2);
+  ok('the confirmation says team, not gone', /your team/.test(hint()), hint());
+
+  // Ctrl+Z has to reach a keyboard pick exactly as it reaches a clicked one
+  d.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
+  await saved();
+  ok('undo reaches a keyboard pick', mineOf().length === 0 && drafted().length === before + 1,
+    `${drafted().length} gone, ${mineOf().length} mine`);
+
+  // A player already off the board is never the target. Otherwise Enter un-ticks a pick
+  // by accident, and by the middle of a draft half of any search is players who have gone.
+  const goneId = drafted()[0];
+  const gone = players.players.find((p) => p.id === goneId);
+  await type(gone.name);
+  const held = drafted().length;
+  ok('it says everyone matching has gone', /already off the board/.test(hint()), hint());
+  key('Enter');
+  await settle();
+  ok('Enter cannot un-tick a player who has gone', drafted().length === held);
+
+  // nonsense in the box does nothing at all
+  await type('zzzzzz');
+  ok('it says nobody is called that', /Nobody on the board/.test(hint()), hint());
+  key('Enter');
+  await settle();
+  ok('Enter on no match changes nothing', drafted().length === held);
+
+  key('Escape');
+  await settle();
+  ok('Escape clears the box', box.value === '');
+
+  // a slash from the board puts the cursor in the box, so the loop never needs the mouse
+  d.querySelector('#board').dispatchEvent(new window.KeyboardEvent('keydown',
+    { key: '/', bubbles: true, cancelable: true }));
+  await settle();
+  ok('slash jumps to the search box', d.activeElement === box);
+}
+
+{
+  // The same key in a practice draft has to mean "this is my pick", because in a mock
+  // there is no Gone button at all - every row is a choice you are making.
+  const { window, d, store } = await boot();
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockSlot').value = '1';
+  d.querySelector('#mockStart').click();
+  await settle();
+  const box = d.querySelector('#search');
+  const hint = () => (d.querySelector('#kbd').textContent || '').replace(/\s+/g, ' ').trim();
+  const name = d.querySelector('.row.player:not(.drafted) .nm').textContent.trim().split(' ')[0];
+  box.value = name;
+  fire(box, 'input');
+  await settle();
+  ok('in a practice draft the key picks rather than ticks off',
+    /picks/.test(hint()) && !/goes off the board/.test(hint()), hint());
+  box.dispatchEvent(new window.KeyboardEvent('keydown',
+    { key: 'Enter', bubbles: true, cancelable: true }));
+  await saved();
+  const st2 = JSON.parse(store.draft2026 || '{}');
+  ok('the practice pick was recorded', (st2.mock?.log || []).length > 0,
+    `${(st2.mock?.log || []).length} picks`);
+  ok('one of them is yours', (st2.mock?.log || []).some((x) => x.by === 'you'),
+    JSON.stringify((st2.mock?.log || []).slice(0, 3)));
 }
 
 // ---------------------------------------------------------------- report

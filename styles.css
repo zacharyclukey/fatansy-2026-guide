@@ -664,3 +664,22 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
   padding: 0 4px; line-height: 14px; flex: none;
 }
 .mockHint { max-width: 78ch; margin: -8px 0 16px; }
+
+/* ---------------------------------------------------------------- draft-night keys
+   One line under the search box that always names the player the next key press will
+   hit. It is the whole discoverability story for the keyboard: nobody has to be told a
+   shortcut exists, because the shortcut announces itself and its target in words. */
+.kbd {
+  margin: 0; padding: 6px 22px 0; min-height: 1.4em;
+  font-size: 13px; color: var(--ink2); line-height: 1.5;
+}
+.kbd b { color: var(--ink); }
+.kbd kbd {
+  font: inherit; font-size: 12px; padding: 1px 6px; border-radius: 4px;
+  border: 1px solid var(--line2); border-bottom-width: 2px; background: var(--panel);
+  color: var(--ink); white-space: nowrap;
+}
+.kbdPos { color: var(--ink3); }
+.kbdIdle { color: var(--ink3); }
+.kbdNone { color: var(--warn); }
+.kbdDone { color: var(--good); font-weight: 600; }

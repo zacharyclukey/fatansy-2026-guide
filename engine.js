@@ -413,71 +413,16 @@ export function subScores(data, st) {
   return out;
 }
 
-// Every 2025 field carried in the data file, whether or not the built-in rating uses it.
-// Anything here can be switched on as a stat in any component - "available but unused"
-// should mean one click, not a rebuild.
-// Raw 2025 fields that can be brought in as a stat.
+// The menu of "stats the rating is not using" lived here: RAW_FIELDS, which named every
+// 2025 field in the data file and the built-in stat each one duplicated, and unusedStats,
+// which turned the two into a list you could add from. Both existed only to feed the
+// fifty-stat weight editor on the ratings page. That page is now four sliders, there is no
+// screen that adds a stat, and nothing imported either function - so they were 90 lines of
+// engine that ran for nobody.
 //
-// The catch: almost every one of these ALREADY backs a built-in stat in some form, so a
-// menu of "stats the rating is not using" that listed all of them was simply wrong. Each
-// entry therefore names the built-in it duplicates. If that built-in exists, the right
-// way to "add" the stat is to switch the built-in on, not to create a second copy of it.
-//
-// field, label, higher-is-better, per-game, component, the built-in it duplicates
-export const RAW_FIELDS = [
-  ['off_snp', 'Snaps', true, true, 'volume', 'snaps_pg'],
-  ['pass_att', 'Pass attempts', true, true, 'volume', 'pass_att_pg'],
-  ['pass_yd', 'Passing yards', true, true, 'production', null],
-  ['pass_td', 'Passing touchdowns', true, true, 'redzone', 'pass_td_pg'],
-  ['pass_int', 'Interceptions thrown', false, true, 'reliability', 'int_pg'],
-  ['pass_sack', 'Sacks taken', false, true, 'reliability', 'sack_rate'],
-  ['pass_fd', 'Passing first downs', true, true, 'production', null],
-  ['rush_att', 'Carries', true, true, 'volume', 'carries_pg'],
-  ['rec_tgt', 'Targets', true, true, 'volume', 'targets_pg'],
-  ['rec', 'Receptions', true, true, 'volume', 'rec_pg'],
-  ['rush_ypa', 'Yards per carry', true, false, 'efficiency', 'ypc'],
-  ['rec_ypt', 'Yards per target', true, false, 'efficiency', 'yptgt'],
-  ['rec_ypr', 'Yards per catch', true, false, 'efficiency', 'ypr'],
-  ['rush_rz_att', 'Red-zone carries', true, true, 'redzone', 'rz_carries_pg'],
-  ['rec_rz_tgt', 'Red-zone targets', true, true, 'redzone', 'rz_targets_pg'],
-  ['anytime_tds', 'Touchdowns', true, true, 'redzone', 'td_pg'],
-  ['bonus_rush_rec_yd_100', '100-yard games', true, false, 'explosive', 'hundred'],
-  ['pts_ppr', 'Fantasy points', true, true, 'production', 'ppg'],
-  ['pos_rank_ppr', 'Finish at his position', false, false, 'production', 'finish'],
-  ['gp', 'Games played', true, false, 'reliability', 'games'],
-  ['gs', 'Games started', true, false, 'reliability', 'starts'],
-  ['rec_drop', 'Drops', false, true, 'reliability', 'drop_rate'],
-  ['fum', 'Fumbles', false, true, 'reliability', 'fum_pg'],
-
-  // these genuinely have no built-in equivalent
-  ['rush_yd', 'Rushing yards', true, true, 'production', null],
-  ['rec_yd', 'Receiving yards', true, true, 'production', null],
-  ['rush_rec_yd', 'Yards from scrimmage', true, true, 'production', null],
-  ['fum_lost', 'Fumbles lost', false, true, 'reliability', null],
-  ['rec_40p', '40+ yard catches', true, true, 'explosive', null],
-  ['rush_40p', '40+ yard runs', true, true, 'explosive', null],
-];
-
-// Everything the rating is genuinely NOT using right now: built-in stats that are switched
-// off, plus raw fields with no built-in equivalent that have not already been added.
-export function unusedStats(data, st) {
-  const out = [];
-  for (const c of data.components) {
-    for (const sm of c.subs) {
-      if (sm.custom) continue;
-      if (!st.sub[sm.key]?.on) {
-        out.push({ kind: 'builtin', key: sm.key, label: sm.label, comp: c.key, compLabel: c.label });
-      }
-    }
-  }
-  const added = new Set((st.customs || []).map((x) => x.field));
-  for (const [field, label, hi, pg, comp, dupe] of RAW_FIELDS) {
-    if (dupe || added.has(field)) continue;
-    const cl = data.components.find((c) => c.key === comp)?.label || comp;
-    out.push({ kind: 'raw', field, label, hi, pg, comp, compLabel: cl });
-  }
-  return out;
-}
+// applyCustomStats below STAYS, and is still called on load. A profile saved by the old
+// version can carry customs, and they have to keep working; it needs only the field name
+// off the saved record, never the catalogue.
 
 // Percentiles for a user-added stat, worked out the same way the built-in ones were:
 // within position, so a back is only ever compared with other backs.
@@ -563,8 +508,17 @@ export function buildBoard(data, st, cache) {
 
   // Fit is the average distance from neutral across the axes you actually moved. An
   // untouched slider contributes nothing rather than quietly voting for the middle.
+  //
+  // And a slider the ratings page REFUSES TO SHOW must not keep voting either. "Avoid
+  // mistakes" is hidden in a league that fines nothing, because in that league it has no
+  // answer: every player ties on zero penalty points, so the axis adds nothing to the sum
+  // while still counting towards the divisor - quietly weakening every preference you did
+  // set. Measured on the real pool: a hidden slider left at 90 moved Fit by up to 20
+  // points and one player by 46 places. Switch leagues and your board changed for a reason
+  // that was not on the screen.
   const leans = st.fit || {};
-  const live = FIT_AXES.map((a) => a.key).filter((k) => (leans[k] || 0) !== 0);
+  const usable = FIT_AXES.filter((a) => !a.needsPenalties || hasPenalties(league));
+  const live = usable.map((a) => a.key).filter((k) => (leans[k] || 0) !== 0);
   for (const r of rows) {
     if (!live.length || st.fitOn === false) { r.fit = 50; continue; }
     const sum = live.reduce(
@@ -959,35 +913,6 @@ export function costOfWaiting(rows, clock, drafted, league, have = {}, opts = {}
   }
   return out.sort((a, b) => b.weighted - a.weighted);
 }
-
-// How much does each component actually change the board?
-//
-// Worth measuring rather than assuming. Rebuild the board with one component switched off
-// and see how far players move. The answer is sobering: the components are percentiles
-// within position and heavily correlated with each other (volume and production agree at
-// r = 0.83), so removing any one of them barely disturbs the order - the others carry the
-// same signal. Showing this stops you spending an evening on a slider that cannot move
-// anything.
-export function influence(data, st, cache) {
-  const ref = buildBoard(data, st, cache);
-  const base = new Map(ref.rows.map((r) => [r.p.id, r.rank]));
-  const out = {};
-  for (const c of data.components) {
-    const alt = { ...st, comp: { ...st.comp, [c.key]: 0 } };
-    const rows = buildBoard(data, alt, cache).rows;
-    let sum = 0;
-    let top = 0;
-    for (const r of rows) {
-      const was = base.get(r.p.id);
-      if (was == null) continue;
-      sum += Math.abs(r.rank - was);
-      if (was <= 50 && r.rank > 50) top += 1;
-    }
-    out[c.key] = { mean: sum / rows.length, top50: top };
-  }
-  return out;
-}
-
 // A plain-English read of what the current weights mean, for the ratings editor.
 export function priorityOrder(data, st) {
   const cw = componentWeights(st);
