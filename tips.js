@@ -89,7 +89,8 @@ export const TIPS = {
   'card:finish': ['Where he finished at his position in 2025.', ''],
 
   Type: ['What kind of pick he is AT THIS PICK. It changes as the draft moves.',
-    'Steal = fallen past his range. Reach = too early. Otherwise Safe or Swing.'],
+    'Steal = fallen past his range. Reach = too early. Priced right is always Safe or '
+    + 'Swing, never a dash. A dash means his range is still a long way off - check Worth.'],
   star: ['Your own view of him. Click to cycle.',
     'Liked lifts him above anyone within 5 points, faded drops him below. Never further.'],
 
@@ -97,7 +98,8 @@ export const TIPS = {
     'Counts only players filling a starting or flex slot, not your bench.'],
 
   cliff: ['The last player of his tier.',
-    'The next one at his position is a clear step down, not a small one.'],
+    'The next one at his position is a clear step down, not a small one. Filter to that '
+    + 'position to see the line drawn where the drop actually is.'],
 
   move: ['How far the board moves without this component.',
     'Measured by rebuilding with it switched off. Small means the other components cover for it.'],

@@ -34,3 +34,6 @@ pipeline/board.json
 # python bytecode
 __pycache__/
 *.pyc
+
+# jsdom is symlinked in from a sandbox path just to run the tests
+test/node_modules

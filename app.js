@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName } from './engine.js?v=202608131020';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131020';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131020';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131020';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName } from './engine.js?v=202608131312';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131312';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131312';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131312';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131020';
+const BUILD = '202608131312';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -33,13 +33,21 @@ let clock = null;
 // steal at pick 40 without anything about him changing.
 const KINDS = {
   steal: ['Steal', 'He has fallen past the point where he stops being worth it.'],
-  safe: ['Safe', 'Priced about right, and he is a steady scorer who stays on the field.'],
-  swing: ['Swing', 'Priced about right, but his points arrive in lumps.'],
+  // Safe and Swing split the men who are priced about right, and between them they cover
+  // every one of them - there is no third state where he is correctly priced and we say
+  // nothing. The cut is where his two traits cross, both measured against his own
+  // position: is he more touchdown-dependent than he is durable, or the other way round?
+  safe: ['Safe', 'Priced about right, and his points come in more evenly than they do for most at his position.'],
+  swing: ['Swing', 'Priced about right, but his points arrive in lumps — he leans on touchdowns more than he stays on the field.'],
   reach: ['Reach', 'Taking him here means passing men your board rates higher.'],
 };
 const FIXED = [
   ['Type', (r) => (r.kind
-    ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>` : '<em class="soft">—</em>'), 58, ''],
+    ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>`
+    // The dash now means one thing and one thing only: his window has not opened yet and
+    // he is too far off to even call it a reach. It used to mean that OR "he is correctly
+    // priced but we have nothing to say about him", which is why it read as a bug.
+    : `<em class="soft" title="Not in range yet — his window starts around pick ${r.worthFrom}">—</em>`), 58, ''],
   // Not a grade. The span of picks where taking him costs you nothing, because everyone
   // inside it is a player you would be equally happy with.
   // Plain information, no colour. The judgement is in Type, which knows the clock.
@@ -527,8 +535,22 @@ function renderBoard() {
       if (gb.getAttribute('aria-pressed') !== String(d)) gb.setAttribute('aria-pressed', String(d));
       if (mb.getAttribute('aria-pressed') !== String(m)) mb.setAttribute('aria-pressed', String(m));
     }
+    // The rule under a tier cliff is drawn ONLY in a single-position view.
+    //
+    // A cliff is a fact about one position: "he is the last running back before the drop".
+    // A horizontal rule, though, is a statement about the two rows it sits between - and
+    // on the full board those two rows are almost never the same position. Counted on the
+    // real pool: of the 23 cliffs in the top 100, 21 had a different position on the next
+    // row, so the line was drawn between, say, the last RB4 and a receiver, announcing a
+    // step down that does not exist between those two men. That is also why lines kept
+    // appearing mid-run of identical Type labels - it was never tracking Type, and
+    // markTiers is not firing too often (a tier every 6 to 12 players at each position).
+    // Filter to one position and every rule lands between two players it actually
+    // describes. The "last RB4" badge carries the same fact on the full board, correctly
+    // attached to the one player it is true of.
+    const rule = r.lastOfTier && !d && filter !== 'ALL';
     const cls = `row player${d ? ' drafted' : ''}${m ? ' mine' : ''}`
-      + `${r.lastOfTier && !d ? ' cliff' : ''}${r.star ? ' starred' : ''}${r.fade ? ' faded' : ''}`;
+      + `${rule ? ' cliff' : ''}${r.star ? ' starred' : ''}${r.fade ? ' faded' : ''}`;
     if (el.className !== cls) el.className = cls;
     keep.add(r.p.id);
     frag.appendChild(el);          // appendChild MOVES an existing node, it does not clone

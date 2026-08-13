@@ -617,10 +617,18 @@ export function poolAround(rows, r, drafted, band = 6) {
 // How far before his window a man can be and still count as a reach rather than as
 // simply not in range yet. At pick 5, taking the 100th player is technically a reach, but
 // labelling two hundred rows "Reach" tells you nothing.
+// 24 is where the label mix on the visible board is most informative: measured over the
+// 307-player pool at picks 1/12/24/40/60/90, shrinking it to 16 pushes half the screen to
+// no verdict at all, and stretching it to 40 turns 94% of the screen into "Reach", which
+// is true but says nothing. 24 sits at the peak of that trade-off. It is tuned for
+// readability, not fitted to any outcome - nothing here forecasts.
 export const REACH_RANGE = 24;
 // Being one pick early is not a reach, it is a rounding error. Below this the honest
 // answer is "about right", which is what Safe and Swing say.
-export const SLACK = 3;
+// Raised from 3 to 4: at 3 only ~12% of the visible board was ever priced "about right",
+// so the two labels that describe a player rather than a price almost never showed. 4
+// widens that to ~14% without thinning out Steal, which 5 does (23 down to 13).
+export const SLACK = 4;
 
 export function pickType(r, atPick) {
   // Before the draft starts there is no clock, so judge him against where the room takes
@@ -634,12 +642,20 @@ export function pickType(r, atPick) {
     return early <= REACH_RANGE ? 'reach' : null;          // else: simply not in range yet
   }
 
-  // He is priced about right, so the only question left is what kind of player he is.
-  const lump = r.traits?.td ?? 50;
-  const avail = r.traits?.dur ?? 50;
-  if (lump >= 62) return 'swing';
-  if (avail >= 50) return 'safe';
-  return null;
+  // He is in his window, so the price is settled and the only question left is what kind
+  // of player he is. This ALWAYS answers: a man who is correctly priced right now must
+  // never render as a dash, because a dash reads as "no opinion" when the opinion is
+  // "take him". The old test was two independent absolute cuts (td >= 62, dur >= 50) and
+  // left a dead zone 25% of the pool wide that fell through to null.
+  //
+  // The cut now is where the two traits cross. Both are percentiles WITHIN position, so
+  // "his points are lumpier than he is durable" is a statement about him against his own
+  // peers, and the split point is a property of the data rather than a number picked out
+  // of the air. Kickers and defences tie at 50/50 on both - there is no touchdown share
+  // or games history for them - so they fall to Safe. That is the deliberate direction:
+  // bust rate repeats year to year and boom rate does not, so an unmeasured player gets
+  // the floor label, never the ceiling one.
+  return (r.traits?.td ?? 50) > (r.traits?.dur ?? 50) ? 'swing' : 'safe';
 }
 
 // ---------------------------------------------------------------- value window
@@ -654,12 +670,24 @@ export function pickType(r, atPick) {
 // Then compare that window with where the room takes him. If his ADP sits past the end of
 // your window he is a bargain; if it sits before the start, the room is paying more than
 // you would and you should let someone else.
-export const WINDOW_BAND = 2.5;   // score points inside which two players are a coin flip
+// Score points inside which two players are a coin flip. Still a guess - it decides what
+// "equally happy" means and there is no outcome to fit it against. Left at 2.5 because
+// that keeps the median window across the top 60 at 3 picks wide; at 4 it becomes 8,
+// which claims an indifference the scores do not support.
+export const WINDOW_BAND = 2.5;
 // Deep in the pool the scores flatten and a run of coin flips can be a hundred players
 // long. That is true - pick 200 and pick 260 really are interchangeable - but a window
 // that wide tells you nothing, and it would let a man 90 picks away read as a bargain.
 // Past this the window is marked open-ended and shown as "180+" instead of pretending.
-export const WINDOW_MAX = 30;
+//
+// Raised from 30 to 45. At 30, 131 of 307 players came out open-ended - and open-ended
+// does not merely change how the Worth column prints, it switches OFF the steal test
+// entirely (a truncated window cannot be sold as a bargain). So 43% of the pool could
+// never be called a Steal no matter how far he fell, which is an artefact of the cap
+// rather than anything about the player. 45 cuts that to 69 of 307. Going further to 60
+// gets it to a handful, but a 60-pick window is most of the visible board and stops
+// meaning anything.
+export const WINDOW_MAX = 45;
 
 export function valueWindow(rows, band = WINDOW_BAND, cap = WINDOW_MAX) {
   // rows arrive sorted best-first. Everyone within a hair of his score is a player you

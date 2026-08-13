@@ -211,6 +211,49 @@ const fire = (el, type) => {
   ok('nobody far out of range gets a label', b.rows.every(
     (r) => !(r.worthFrom - r.adpRank > m.REACH_RANGE && r.kind === 'reach')));
 
+  // THE invariant behind the blank-Type bug. If the clock is inside a man's window then
+  // his price is settled, so the column must say something. It used to fall through two
+  // absolute trait cuts and render an em-dash on a quarter of the pool, which reads as
+  // "no opinion" at the exact moment the opinion is "take him". Swept across the whole
+  // pool at every pick of a 12-team draft, not just the handful a fixed clock happens to
+  // catch.
+  {
+    let blanks = 0; let inBand = 0; let worst = null;
+    for (let at = 1; at <= 180; at += 1) {
+      for (const r of b.rows) {
+        const late = !r.openEnded && at - r.worthTo >= m.SLACK;
+        const early = r.worthFrom - at >= m.SLACK;
+        if (late || early) continue;               // he is a steal or a reach, not in band
+        inBand += 1;
+        if (m.pickType(r, at) === null) { blanks += 1; worst ||= `${r.p.name} at pick ${at}`; }
+      }
+    }
+    ok('a man inside his window always gets a verdict', blanks === 0,
+      `${blanks} of ${inBand} in-band rows blank, e.g. ${worst}`);
+    ok('the in-band sweep actually found players to check', inBand > 500, `${inBand}`);
+  }
+  // and the two in-band verdicts have to partition it - neither may swallow the other
+  {
+    const at = 40;
+    const band = b.rows.filter((r) => {
+      const late = !r.openEnded && at - r.worthTo >= m.SLACK;
+      return !late && r.worthFrom - at < m.SLACK;
+    });
+    const kinds = new Set(band.map((r) => m.pickType(r, at)));
+    ok('in-band verdicts are only Safe or Swing',
+      [...kinds].every((k) => k === 'safe' || k === 'swing'), [...kinds].join(','));
+    ok('both in-band verdicts occur', kinds.has('safe') && kinds.has('swing'),
+      `${band.length} in band, kinds ${[...kinds].join(',')}`);
+  }
+  // kickers and defences have no touchdown share and no games history, so both traits tie
+  // at 50. They must not land on the ceiling label by accident.
+  {
+    const kd = b.rows.filter((r) => ['K', 'DEF'].includes(r.p.pos));
+    ok('unmeasured players get the floor label, never the ceiling one',
+      kd.every((r) => m.pickType({ ...r, worthFrom: 1, worthTo: 300, openEnded: false }, 5) === 'safe'),
+      `${kd.length} K/DEF`);
+  }
+
   // the snake clock
   ok('snake picks', JSON.stringify(m.myPicks(12, 4, 4)) === '[4,21,28,45]');
   const c = m.draftContext({ teams: 12, rounds: 16 }, 4, 4);
@@ -330,10 +373,27 @@ const fire = (el, type) => {
       .every((x) => ['Steal', 'Safe', 'Swing', 'Reach'].includes(x)),
     [...new Set([...d.querySelectorAll('.kind')].map((x) => x.textContent))].join(','));
 
+  // A tier rule is a claim about the two rows it sits between, so it only belongs where
+  // those two rows are the same position. On the full board they almost never are.
+  ok('no tier rule on the all-positions board', !d.querySelector('.row.cliff'),
+    `${d.querySelectorAll('.row.cliff').length} rules drawn across mixed positions`);
+  ok('but the cliff badge still names the last of the tier',
+    d.querySelectorAll('.row.player .tierEnd').length > 0);
+
   // position detail only offered once you have filtered to one position
   ok('no position detail chip on the full board', !d.querySelector('[data-col="posdetail"]'));
   d.querySelector('[data-f="WR"]').click();
   await settle();
+  {
+    const cliffs = [...d.querySelectorAll('.row.cliff')];
+    ok('filtering to one position brings the tier rules back', cliffs.length > 0);
+    const rowsNow = [...d.querySelectorAll('.row.player')];
+    ok('every rule now sits between two players of that position',
+      cliffs.every((c) => {
+        const i = rowsNow.indexOf(c);
+        return i >= 0 && i < rowsNow.length - 1;      // same-position list by construction
+      }));
+  }
   const pd = d.querySelector('[data-col="posdetail"]');
   ok('a position filter offers its own stats', !!pd);
   pd.checked = true; fire(pd, 'change');
