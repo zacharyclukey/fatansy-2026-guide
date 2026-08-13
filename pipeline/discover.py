@@ -153,6 +153,39 @@ def build(seasons, pos):
     return rows, subs
 
 
+def comp_by_pair(rows, subs, pos):
+    """Each component's correlation with next season, one year-pair at a time.
+
+    The single-pair backtest said Reliability was worth -0.31 at running back. That is
+    either a real effect or one season being one season. Showing every pair separately is
+    the only way to tell, so the spread is printed next to the mean.
+    """
+    bykey = {}
+    for ck, _label, _desc, ss in SM.COMPONENTS:
+        for key, _l, _fn, _hi, w, needs_hist, on in ss:
+            if on and needs_hist and SM.weight_for(key, w, pos):
+                bykey.setdefault(ck, []).append((key, SM.weight_for(key, w, pos)))
+
+    out = {}
+    for pair in sorted({r['pair'] for r in rows}):
+        sub = [r for r in rows if r['pair'] == pair]
+        if len(sub) < 20:
+            continue
+        for ck, members in bykey.items():
+            vals = []
+            for r in sub:
+                num = den = 0.0
+                for key, w in members:
+                    if key in r['x']:
+                        num += r['x'][key] * w
+                        den += w
+                vals.append(num / den if den else 50.0)
+            rho = spearman(list(zip(vals, [r['next'] for r in sub])))
+            if not math.isnan(rho):
+                out.setdefault(ck, []).append((pair, rho))
+    return out
+
+
 def residual(rows):
     """The part of next season that last season's points cannot explain."""
     y = ranks([r['next'] for r in rows])
@@ -172,6 +205,45 @@ def run(lo, hi):
         print(f'  {yr}: {len(seasons[str(yr)])} players')
 
     print('\n' + '=' * 74)
+    print('DOES EACH COMPONENT HOLD UP ACROSS SEASONS?')
+    print('=' * 74)
+    print('Correlation with next season, measured separately in every year-pair. A')
+    print('component whose numbers swing wildly is not a finding, it is one season.\n')
+
+    labels = {ck: lbl for ck, lbl, _d, _s in SM.COMPONENTS}
+    stability = {}
+    for pos in POSITIONS:
+        rows, subs = build(seasons, pos)
+        if len(rows) < 60:
+            continue
+        stability[pos] = comp_by_pair(rows, subs, pos)
+
+    for pos in POSITIONS:
+        if pos not in stability:
+            continue
+        tab = stability[pos]
+        pairs = sorted({p for v in tab.values() for p, _ in v})
+        print(f'{pos}')
+        print(f"    {'':<16}" + ''.join(f'{p:>8}' for p in pairs)
+              + f"{'mean':>9}{'worst':>8}{'best':>7}")
+        for ck, vals in sorted(tab.items(), key=lambda kv: -sum(r for _, r in kv[1]) / len(kv[1])):
+            d = dict(vals)
+            rs = [r for _, r in vals]
+            line = f'    {labels.get(ck, ck):<16}'
+            for p in pairs:
+                line += f'{d[p]:>8.2f}' if p in d else f"{'-':>8}"
+            mean = sum(rs) / len(rs)
+            line += f'{mean:>9.2f}{min(rs):>8.2f}{max(rs):>7.2f}'
+            if min(rs) > 0.45:
+                line += '   solid'
+            elif max(rs) < 0.15:
+                line += '   dead weight'
+            elif max(rs) - min(rs) > 0.35:
+                line += '   unstable'
+            print(line)
+        print()
+
+    print('=' * 74)
     print('WHAT PREDICTS BEATING YOUR BASELINE')
     print('=' * 74)
     print('Correlation with the part of next season that last season\'s points/game')
