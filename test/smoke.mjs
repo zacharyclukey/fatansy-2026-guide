@@ -176,6 +176,35 @@ const fire = (el, type) => {
   // ---- Fit: a preference, and provably not more than that ----------------
   ok('neutral sliders leave every player at 50', b.rows.every((r) => r.fit === 50));
 
+  // ---- kickers and defences must not be given an opinion we do not have -----
+  // Every component sits at a flat 50 for them because there are no stats to rate, so the
+  // only thing moving was the projection percentile. That made the best defence read 56,
+  // which looked like a judgement and was not one.
+  const unrated = b.rows.filter((r) => !['QB', 'RB', 'WR', 'TE'].includes(r.p.pos));
+  ok('kickers and defences get no rating at all',
+    unrated.length > 0 && unrated.every((r) => r.rating === null && r.rated === false));
+  ok('skill players still get one',
+    b.rows.filter((r) => r.rated).every((r) => typeof r.rating === 'number'));
+
+  // Streamed positions: the alternative is a good one off waivers, not the last drafted.
+  const bestDef = b.rows.find((r) => r.p.pos === 'DEF');
+  const bestK = b.rows.find((r) => r.p.pos === 'K');
+  ok('no defence cracks the top 100', !bestDef || bestDef.rank > 100, `#${bestDef?.rank}`);
+  ok('no kicker cracks the top 100', !bestK || bestK.rank > 100, `#${bestK?.rank}`);
+
+  // The invariant that matters, tested directly rather than through a rank that depends
+  // on which league is loaded: treating a streamed position as replaceable must LOWER its
+  // value. Getting this backwards is exactly the bug being fixed - a deeper replacement
+  // index means a worse alternative, which makes defences look better, not worse.
+  const deep = m.replacementLevels(data.players, m.SAMPLE_LEAGUE);
+  ok('streamed replacement sits above the last starter',
+    deep.DEF > 0 && deep.K > 0);
+  const defPts = data.players.filter((p) => p.pos === 'DEF')
+    .map((p) => m.projectedPoints(p, m.SAMPLE_LEAGUE)).sort((a, c) => c - a);
+  const lastStarter = defPts[m.SAMPLE_LEAGUE.teams - 1];
+  ok('a defence is measured against a good one, not the last one drafted',
+    deep.DEF > lastStarter, `replacement ${deep.DEF.toFixed(0)} vs 12th best ${lastStarter?.toFixed(0)}`);
+
   const before = new Map(b.rows.map((r) => [r.p.id, r.rank]));
   const hard = m.buildBoard(data, { ...st, fit: { td: 100, asc: 0, dur: 0, pen: 0 } });
   const moves = hard.rows.slice(0, 80).map((r) => Math.abs(before.get(r.p.id) - r.rank));

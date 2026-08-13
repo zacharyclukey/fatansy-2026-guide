@@ -282,6 +282,15 @@ export function flexFill(players, league) {
   return { used, pool };
 }
 
+// Positions nobody holds a backup for, because the waiver wire always has one.
+export const STREAMED = ['K', 'DEF'];
+// Where the real alternative sits, as a fraction of the last starter's rank. It is
+// SHALLOWER, not deeper: if you can pull a top-ten defence off waivers in any given week,
+// the man you are really choosing against is near the top of the position, not the last
+// one drafted. 0.5 puts him around 6th of 32 in a 12-team league, which collapses the
+// apparent value of drafting one early - correctly, because nobody should.
+export const STREAM_DEPTH = 0.5;
+
 export function replacementLevels(players, league) {
   const out = {};
   const { used, pool } = flexFill(players, league);
@@ -293,8 +302,13 @@ export function replacementLevels(players, league) {
       .map((p) => projectedPoints(p, league))
       .sort((a, b) => b - a);
     if (!list.length) { out[pos] = 0; continue; }
-    // flex-eligible positions use the derived count; K and DEF just use their own slots
-    const n = Math.max(1, used[pos] ?? (league.starters[pos] || 0) * league.teams);
+    // Flex-eligible positions use the derived count. Kickers and defences are different:
+    // every manager streams them off waivers week to week, so the man you would really be
+    // starting instead is not the last drafted one - he is whoever is free. Setting their
+    // replacement level deeper reflects that, and collapses the phantom value that had
+    // the best defence sitting 11 picks ahead of where the room takes it.
+    const base = used[pos] ?? (league.starters[pos] || 0) * league.teams;
+    const n = Math.max(1, Math.round(base * (STREAMED.includes(pos) ? STREAM_DEPTH : 1)));
     // smoothed across three ranks so one odd projection cannot set the baseline
     const win = list.slice(Math.max(0, n - 2), Math.min(list.length, n + 1));
     out[pos] = win.length ? win.reduce((a, b) => a + b, 0) / win.length : list[list.length - 1];
@@ -532,8 +546,14 @@ export function buildBoard(data, st, cache) {
 
   for (const r of rows) {
     r.vorPct = r.vor > 0 ? (r.vor / mx) * 100 : (r.vor / Math.abs(mn)) * 25;
-    r.rating = Object.entries(cw)
-      .reduce((a, [k, w]) => a + (r.scores[k] ?? 50) * w, 0) / cwTotal;
+    // Kickers and defences have no stats we rate, so every component sits at a flat 50
+    // and only the projection percentile moves. That is not a rating - it is "he is the
+    // 3rd best defence" dressed up on the same 0-100 scale a receiver uses, which made
+    // the best defence read 56 and look like a real opinion. There isn't one, so say so.
+    r.rated = (data.ratePos || RATE_POS).includes(r.p.pos);
+    r.rating = r.rated
+      ? Object.entries(cw).reduce((a, [k, w]) => a + (r.scores[k] ?? 50) * w, 0) / cwTotal
+      : null;
     r.need = needFor(r.p.pos);
     const posx = st.posx[r.p.pos] ?? 1;
     // The rating is ADDED, not multiplied: multiplying erases it when VOR is 0 and
@@ -544,8 +564,12 @@ export function buildBoard(data, st, cache) {
     // Fit is capped at FIT_BAND points so it can only ever reorder players the value
     // numbers were close to indifferent about. That cap is the honest part: nothing here
     // beat the projections in five years of testing, so it does not get to outvote them.
-    let s = (r.vorPct + st.tilt * 40 * ((r.rating - 50) / 50)
-      + FIT_BAND * ((r.fit - 50) / 50)) * posx + r.need;
+    // An unrated man gets pure value. Tilting him by a number built from absent data
+    // would be inventing an opinion and then acting on it.
+    const lean = r.rated
+      ? st.tilt * 40 * ((r.rating - 50) / 50) + FIT_BAND * ((r.fit - 50) / 50)
+      : 0;
+    let s = (r.vorPct + lean) * posx + r.need;
     if (st.rookie && r.p.rookie) {
       const c = r.p.m.rookie_conf || '';
       const conf = c.startsWith('HIGH') ? 1 : c.startsWith('MED') ? 0.6 : 0.3;

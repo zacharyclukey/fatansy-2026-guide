@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131359';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131359';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131359';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131359';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131359';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131405';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131405';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131405';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131405';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131405';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131359';
+const BUILD = '202608131405';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -795,8 +795,13 @@ ${r.lastOfTier ? ` <b class="warn">He is the last ${r.p.pos} of his tier</b> —
 ${statCards(r)}
 <p class="facts">${facts.length ? `2025: <b>${facts.join('</b> · <b>')}</b>`
     : 'No 2025 data — rated off the projection.'}</p>
-<p class="facts">Your grade <b>${r.rating.toFixed(0)}</b> ranks him <b>${r.posRated}</b> of ${r.posCount} ${r.p.pos}s.
-Projected <b>${r.pts.toFixed(1)}</b> points, <b>${r.vor.toFixed(1)}</b> above a replacement ${r.p.pos} — which is why the board has him at <b>#${r.rank}</b> overall.</p>
+<p class="facts">${r.rated
+    ? `Your grade <b>${r.rating.toFixed(0)}</b> ranks him <b>${r.posRated}</b> of ${r.posCount} ${r.p.pos}s.`
+    : `No grade — there are no ${r.p.pos} stats worth rating, so this is pure value.`}
+Projected <b>${r.pts.toFixed(1)}</b> points, <b>${r.vor.toFixed(1)}</b> above a replacement ${r.p.pos} — which is why the board has him at <b>#${r.rank}</b> overall.
+${STREAMED.includes(r.p.pos) ? `<br />Everyone streams this position off waivers, so “replacement”
+here means a good one you could pick up in-season, not the last one drafted. That is why the
+board takes ${r.p.pos}s later than the room does.` : ''}</p>
 </div>`;
 }
 
