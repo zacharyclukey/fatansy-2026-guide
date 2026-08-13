@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130804';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130804';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608130804';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130804';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130807';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130807';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608130807';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130807';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608130804';
+const BUILD = '202608130807';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -17,7 +17,9 @@ let query = '';
 let open = null;
 let timer = null;
 let cache = null;
-let history = [];      // recent pick changes, so a mis-click is one click to undo
+// named pickHistory, not history: `history` is a global in every browser and shadowing
+// it is a trap waiting to happen
+let pickHistory = [];
 let subVersion = 0;
 let cachedVersion = -1;
 let frame = null;
@@ -410,8 +412,8 @@ function renderAll() {
   const stale = age > 7;
   const u = $('#undo');
   if (u) {
-    u.disabled = !history.length;
-    u.textContent = history.length ? `Undo ${history[history.length - 1].label}` : 'Undo';
+    u.disabled = !pickHistory.length;
+    u.textContent = pickHistory.length ? `Undo ${pickHistory[pickHistory.length - 1].label}` : 'Undo';
   }
   $('#meta').innerHTML = `${board.rows.length} players · ${board.league.name} · `
     + `${picks().mine.length} on your roster · build ${BUILD} · `
@@ -1195,8 +1197,11 @@ function wire() {
       else if (liked) st.fades.push(id);            // like -> fade
       // fade -> none, so a third click clears it
       save(); rebuild();
-    } else if (b.dataset.d) toggle('drafted', b.dataset.d);
-    else if (b.dataset.m) {
+    } else if (b.dataset.d) {
+      remember(`${byId(b.dataset.d)?.name || 'a player'} off the board`);
+      toggle('drafted', b.dataset.d);
+    } else if (b.dataset.m) {
+      remember(`${byId(b.dataset.m)?.name || 'a player'} to your team`);
       const on = toggle('mine', b.dataset.m);
       const dl = picks().drafted;
       if (on && !dl.includes(b.dataset.m)) dl.push(b.dataset.m);
@@ -1206,17 +1211,17 @@ function wire() {
 }
 
 function remember(label) {
-  history.push({
+  pickHistory.push({
     label,
     league: st.league,
     drafted: [...picks().drafted],
     mine: [...picks().mine],
   });
-  if (history.length > 30) history.shift();
+  if (pickHistory.length > 30) pickHistory.shift();
 }
 
 function undo() {
-  const last = history.pop();
+  const last = pickHistory.pop();
   if (!last) return;
   st.league = last.league;
   st.picks[last.league] = { drafted: last.drafted, mine: last.mine };
