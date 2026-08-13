@@ -1290,6 +1290,169 @@ const fire = (el, type) => {
     typeof mk.autoPick === 'function' && typeof mk.capsOf === 'function');
 }
 
+// ------------------------------------------------- 11. save and print
+// jsdom has no URL.createObjectURL and no navigation, so the two ends of the download are
+// stubbed and the middle - the file we actually generate - is what gets asserted on.
+{
+  const arm = (window) => {
+    const out = [];
+    window.URL.createObjectURL = (b) => { out.push({ blob: b }); return 'blob:test'; };
+    window.URL.revokeObjectURL = () => {};
+    window.HTMLAnchorElement.prototype.click = function click() {
+      if (out.length) out[out.length - 1].name = this.download;
+    };
+    return out;
+  };
+  const grab = async (d, sel) => {
+    const out = arm(d.defaultView);
+    d.querySelector(sel).click();
+    await settle();
+    const last = out[out.length - 1];
+    return last ? { name: last.name, text: await last.blob.text(), type: last.blob.type }
+      : { name: null, text: '', type: '' };
+  };
+  // a,b,"c,d" -> ['a','b','c,d'] - enough of a parser for our own output
+  const cells = (line) => {
+    const out = [];
+    let cur = '';
+    let q = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const c = line[i];
+      if (q) {
+        if (c === '"' && line[i + 1] === '"') { cur += '"'; i += 1; } else if (c === '"') q = false;
+        else cur += c;
+      } else if (c === '"') q = true;
+      else if (c === ',') { out.push(cur); cur = ''; } else cur += c;
+    }
+    out.push(cur);
+    return out;
+  };
+  const lines = (t) => t.replace(/^﻿/, '').trim().split('\r\n');
+
+  const { window, d, errs } = await boot();
+  ok('the three save buttons are all on the page',
+    !!d.querySelector('#saveBoard') && !!d.querySelector('#saveSheet')
+    && !!d.querySelector('#saveTeam'));
+  // the one thing that must not be confused with the ratings export
+  const labels = ['#saveBoard', '#saveSheet', '#saveTeam']
+    .map((s) => d.querySelector(s).textContent.toLowerCase());
+  ok('no save button reads like the ratings export',
+    labels.every((l) => !l.includes('preference') && !l.includes('export')), labels.join(' / '));
+  ok('the ratings export is still there and still says what it is',
+    d.querySelector('#exportR')?.textContent.includes('preferences'));
+
+  d.querySelector('#saveBtn').click();
+  ok('the panel opens', d.querySelector('#savePanel').hidden === false);
+
+  // ---- the board
+  const b1 = await grab(d, '#saveBoard');
+  const L = lines(b1.text);
+  const head = cells(L[0]);
+  ok('the board saves a csv', /\.csv$/.test(b1.name || '') && b1.type.startsWith('text/csv'),
+    `${b1.name} ${b1.type}`);
+  ok('with a header row carrying the fixed columns',
+    ['#', 'Player', 'Team', 'Position', 'Bye', 'ADP', 'Type', 'Worth', 'Status']
+      .every((h) => head.includes(h)), head.join('|'));
+  ok('and one row per player, not one per hundred', L.length > 200, `${L.length} lines`);
+  ok('every row has the same number of cells as the header',
+    L.every((l) => cells(l).length === head.length));
+  ok('nothing in it is html', !/[<>]/.test(b1.text));
+  const bye = head.indexOf('Bye');
+  ok('bye is only there once', head.filter((h) => h === 'Bye').length === 1);
+  ok('the bye column holds week numbers',
+    L.slice(1, 40).some((l) => /^\d+$/.test(cells(l)[bye])));
+  ok('the first data row is board rank 1', cells(L[1])[0] === '1');
+
+  // ---- it follows the position filter and the column toggles
+  d.querySelector('[data-f="RB"]').click();
+  await settle();
+  const b2 = await grab(d, '#saveBoard');
+  const L2 = lines(b2.text);
+  const posCol = cells(L2[0]).indexOf('Position');
+  ok('filtering to one position filters the file too',
+    L2.slice(1).every((l) => cells(l)[posCol] === 'RB'), `${L2.length - 1} rows`);
+  ok('and the file name says which position', /board-rb/.test(b2.name || ''), b2.name);
+
+  const tot = [...d.querySelectorAll('[data-col]')].find((x) => x.dataset.col === 'tot');
+  tot.checked = true;
+  fire(tot, 'change');
+  await settle();
+  const b3 = await grab(d, '#saveBoard');
+  const h3 = cells(lines(b3.text)[0]);
+  ok('switching a stat group on adds its columns to the file',
+    ['Gms', 'Yards', 'TDs'].every((h) => h3.includes(h)), h3.join('|'));
+
+  // ---- a name with a comma and a quote in it
+  const real = players.players[0].name;
+  players.players[0].name = 'Smith, Jr. "The Truth"';
+  const { d: d2 } = await boot();
+  const b4 = await grab(d2, '#saveBoard');
+  players.players[0].name = real;
+  ok('a comma and a quote in a name survive the round trip',
+    b4.text.includes('"Smith, Jr. ""The Truth"""')
+    && lines(b4.text).some((l) => cells(l).includes('Smith, Jr. "The Truth"')));
+
+  // ---- the cheat sheet
+  const c1 = await grab(d, '#saveSheet');
+  ok('the cheat sheet saves an html file',
+    /^cheat-sheet-.*\.html$/.test(c1.name || '') && c1.text.startsWith('<!doctype html'),
+    c1.name);
+  ok('it has a print stylesheet and a page size', /@media print/.test(c1.text)
+    && /@page\s*\{[^}]*margin/.test(c1.text));
+  ok('it lists all four positions in words',
+    ['Quarterbacks', 'Running backs', 'Wide receivers', 'Tight ends']
+      .every((w) => c1.text.includes(w)));
+  ok('it marks where a position falls off a cliff', c1.text.includes('big drop after here'));
+  const perPos = [...c1.text.matchAll(/<section>([\s\S]*?)<\/section>/g)]
+    .map((m) => (m[1].match(/<tr><td class="box">/g) || []).length);
+  ok('it is capped at fourteen players a position, so it fits one sheet',
+    perPos.length === 4 && perPos.every((n) => n > 0 && n <= 14), perPos.join(','));
+  // Page fit cannot be seen without a browser, so what is checked is the thing that would
+  // break it: the number of printed lines in the tallest column. 14 players plus their
+  // drop-off lines has to stay inside a budget that fits on one sheet at 9pt.
+  const tallest = Math.max(...[...c1.text.matchAll(/<section>([\s\S]*?)<\/section>/g)]
+    .map((m) => (m[1].match(/<tr/g) || []).length));
+  ok('the tallest column still fits a page at nine point', tallest <= 26, `${tallest} rows`);
+  ok('nothing on it is printed white on black',
+    !/background:\s*#[0-5]/.test(c1.text) && !/color:\s*#(fff|eee)/.test(c1.text));
+  // the measured finding: the projections predict, last season's box score does not, and
+  // the sliders are a tie-break. None of that may read as a forecast on paper.
+  ok('it does not sell itself as a prediction',
+    /not a forecast/.test(c1.text) && !/predict(s|ed)? who/.test(c1.text));
+  ok('and it carries no 2025 box-score numbers',
+    !/Snap|Tch\/g|Pts\/g|Catch%|Targets/.test(c1.text));
+
+  // ---- my team, with nothing drafted
+  const t0 = await grab(d, '#saveTeam');
+  ok('the team file works before a single pick',
+    /^my-team-.*\.csv$/.test(t0.name || '') && t0.text.length > 50, t0.name);
+  ok('and says so in words', /Nothing drafted yet/.test(t0.text));
+  ok('it still carries the summary', /Players drafted,0/.test(t0.text));
+
+  // ---- my team, after two picks
+  d.querySelector('[data-f="ALL"]').click();
+  await settle();
+  // .nm is "Name TEAM" with the team in a nested span - take the name off the front
+  const takes = [...d.querySelectorAll('#rows .row')].slice(0, 2).map((row) => {
+    const el = row.querySelector('.nm');
+    const tm = el.querySelector('.tm')?.textContent || '';
+    return el.textContent.replace(tm, '').trim();
+  });
+  [...d.querySelectorAll('#rows .row')].slice(0, 2)
+    .forEach((row) => row.querySelector('[data-m]').click());
+  await settle();
+  const t1 = await grab(d, '#saveTeam');
+  const TL = lines(t1.text);
+  ok('the team file names who you took',
+    takes.every((n) => t1.text.includes(n)), takes.join(' / '));
+  ok('it says how late you got each one',
+    cells(TL[0]).includes('Picks later than the room')
+    && cells(TL[0]).includes('Starting or bench'));
+  ok('and counts them in the summary', /Players drafted,2/.test(t1.text));
+
+  ok('none of it threw', errs.length === 0, errs.join(' | '));
+}
+
 // ---------------------------------------------------------------- report
 console.log(`\n${pass} passed, ${fails.length} failed`);
 for (const f of fails) console.log('  FAIL', f);

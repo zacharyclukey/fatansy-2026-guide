@@ -376,6 +376,16 @@ span.nm:hover { text-decoration: none; }
 }
 
 
+/* ---------------------------------------------------------------- save or print */
+.saveLede { margin: 0 0 14px; font-size: 13px; color: var(--ink2); max-width: 70ch; }
+.saveOpts {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px 26px; align-items: start;
+}
+.saveOpt { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.saveOpt button { width: 100%; }
+.saveOpt .hint { max-width: 42ch; }
+
 /* ---------------------------------------------------------------- column chips */
 .colBar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;

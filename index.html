@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608131423" />
+<link rel="stylesheet" href="styles.css?v=202608131914" />
 </head>
 <body>
 
@@ -28,7 +28,34 @@
     <input id="search" type="search" placeholder="Search players" aria-label="Search players" />
     <nav class="filters" id="filters" aria-label="Position filter"></nav>
     <span class="spacer"></span>
+    <button id="saveBtn" aria-expanded="false">Save or print</button>
     <button id="settingsBtn" aria-expanded="false">Settings</button>
+  </div>
+
+  <!-- Three things you can take off this screen and keep. Deliberately not called
+       "export" anywhere the eye lands, because the Ratings tab already has an
+       "Export my preferences" button and the two have nothing to do with each other. -->
+  <div id="savePanel" class="panel savePanel" hidden>
+    <p class="saveLede">Each of these saves a file onto this computer. Nothing is sent
+      anywhere, and nothing on the board changes.</p>
+    <div class="saveOpts">
+      <div class="saveOpt">
+        <button id="saveBoard">Save the board as a spreadsheet</button>
+        <span class="hint">Every player showing right now, in the same order, with the same
+          columns you have switched on. Opens in Excel or Google Sheets.</span>
+      </div>
+      <div class="saveOpt">
+        <button id="saveSheet">Make a one-page sheet to print</button>
+        <span class="hint">The best players at each position on a single sheet of paper.
+          Open the file it saves and press Ctrl+P. This is the backup for draft night if
+          the laptop dies or the wifi drops.</span>
+      </div>
+      <div class="saveOpt">
+        <button id="saveTeam">Save the team you drafted</button>
+        <span class="hint">Who you took, how late you got each one, the bye weeks and who
+          starts. For looking back at afterwards.</span>
+      </div>
+    </div>
   </div>
 
   <div id="settings" class="panel" hidden>
@@ -176,6 +203,9 @@
       <label class="fileBtn">Import<input id="importR" type="file" accept=".json" /></label>
       <button id="resetR" class="ghost">Reset to default</button>
     </div>
+    <p class="hint">That saves the four settings on this page and nothing else — no players.
+      To save the board itself, or a sheet to print, use <b>Save or print</b> on the Board
+      tab.</p>
     <p class="priority big">You are drafting for <span id="priority2"></span></p>
   </main>
 </section>
@@ -224,6 +254,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608131423"></script>
+<script type="module" src="app.js?v=202608131914"></script>
 </body>
 </html>

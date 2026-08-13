@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131423';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131423';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131423';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131423';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131423';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131914';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131914';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131914';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131914';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131914';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131423';
+const BUILD = '202608131914';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -662,8 +662,20 @@ ${mock() ? '' : `<button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>`}
 <button data-m="${r.p.id}" aria-pressed="${m}">${mock() ? 'Pick' : 'Mine'}</button></span>`;
 }
 
-function renderBoard() {
+// Everything the board would show, before the display cut-off: the position filter, the
+// search box, hide-drafted and my-list-only, in that order. Pulled out of renderBoard so
+// that saving the board to a file cannot drift away from what is on the screen.
+function filteredRows() {
   const q = query.trim().toLowerCase();
+  const drafted = new Set(picks().drafted);
+  const mine = new Set(picks().mine);
+  return board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
+    && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
+    && (!st.cols?.starsonly || r.star || r.fade)
+    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
+}
+
+function renderBoard() {
   const drafted = new Set(picks().drafted);
   const mine = new Set(picks().mine);
   const cols = activeCols();
@@ -679,10 +691,7 @@ function renderBoard() {
     lastCols = colKey;
   }
 
-  const all = board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
-    && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
-    && (!st.cols?.starsonly || r.star || r.fade)
-    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
+  const all = filteredRows();
 
   // Late in a draft the entire top of the board is gone, and with "hide drafted" off the
   // first hundred rows can be a hundred players somebody else already owns - a screen with
@@ -913,6 +922,175 @@ function renderRoster() {
 <span class="num">${want}</span><span class="num">${got}</span>
 <span class="${got < want ? 'dn' : 'up'}">${got < want ? `Need ${want - got} more` : `Filled — ${got} drafted`}</span></div>`;
     }).join('');
+}
+
+// ---------------------------------------------------------------- save and print
+// Three ways to take this off the screen. Not to be confused with "Export my preferences"
+// on the Ratings tab, which saves four slider positions and no players at all.
+//
+// All three go through one helper and no library: a Blob, an object URL, a link with a
+// download attribute. That is the whole mechanism, and it keeps this a no-build site.
+function saveFile(name, type, text) {
+  const a = document.createElement('a');
+  const url = URL.createObjectURL(new Blob([text], { type: `${type};charset=utf-8` }));
+  a.href = url;
+  a.download = name;
+  a.rel = 'noopener';
+  a.click();
+  // the blob is held in memory until this runs; the click has to have happened first
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+// Excel decides the encoding from the first bytes and guesses wrong without this, which
+// turns every accented name into mojibake.
+const BOM = '﻿';
+const csvCell = (v) => {
+  const s = v == null ? '' : String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+const csv = (rows) => BOM + rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+
+// The column renderers return HTML because that is what the board wants. A spreadsheet
+// wants the words inside it.
+function plain(html) {
+  return String(html)
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ').trim();
+}
+
+const stampFor = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-|-$/g, '').slice(0, 40) || 'league';
+const today = () => new Date().toISOString().slice(0, 10);
+
+// 1. The board as it stands: same order, same filter, same columns switched on. Not cut
+// at a hundred rows the way the screen is - on paper or in a spreadsheet there is no
+// reason to hide the rest.
+function boardCsv() {
+  // Bye is always given its own column, so drop the copy the "Bye + value" group adds
+  const cols = activeCols().filter(([n]) => n !== 'Bye');
+  const drafted = new Set(picks().drafted);
+  const mine = new Set(picks().mine);
+  const head = ['#', 'Player', 'Team', 'Position', 'Bye', ...cols.map((c) => c[0]), 'Status'];
+  const body = filteredRows().map((r) => [
+    r.rank, r.p.name, r.p.team || '', r.p.pos, r.p.bye || '',
+    ...cols.map((c) => plain(c[1](r))),
+    mine.has(r.p.id) ? 'Yours' : drafted.has(r.p.id) ? 'Gone' : 'Available',
+  ]);
+  return csv([head, ...body]);
+}
+
+// 3. What you actually ended up with, and what it cost you against the going rate.
+function teamCsv() {
+  const lg = board.league;
+  const cards = lineupOf(picks().mine, lg);
+  const head = ['Your pick', 'Player', 'Team', 'Position', 'Bye', 'ADP',
+    'The room had him at pick', 'Picks later than the room', 'Starting or bench',
+    'How safe he looks'];
+  const body = cards.map(({ r, role, pick, vsAdp }) => [
+    pick || '', r.p.name, r.p.team || '', r.p.pos, r.p.bye || '',
+    r.p.adp ? r.p.adp.toFixed(1) : '', r.adpRank, vsAdp, role, riskOf(r),
+  ]);
+  const rows = body.length ? [head, ...body]
+    : [head, ['', 'Nothing drafted yet — tick "Mine" on the board as players go.']];
+
+  const withPick = cards.filter((c) => c.pick);
+  const avg = withPick.length
+    ? withPick.reduce((a, c) => a + c.vsAdp, 0) / withPick.length : 0;
+  const byes = {};
+  for (const c of cards) {
+    if (c.role !== 'Bench' && c.r.p.bye) byes[c.r.p.bye] = (byes[c.r.p.bye] || 0) + 1;
+  }
+  const worstBye = Object.entries(byes).sort((a, b) => b[1] - a[1])[0];
+  rows.push([], ['Summary'],
+    ['League', lg.name],
+    ['Players drafted', cards.length],
+    ['Average picks later than the room', avg.toFixed(1)],
+    ['Bargains (8 or more picks later than the room)',
+      withPick.filter((c) => c.vsAdp >= 8).length],
+    ['Worst bye week', worstBye ? `Week ${worstBye[0]} — ${worstBye[1]} starters off` : '—'],
+    ['Saved', today()]);
+  return csv(rows);
+}
+
+// 2. One sheet of paper. This is the version that gets used when the laptop dies, and it
+// is the version his fiancee reads, so it carries five things and no jargon: how good we
+// think he is, who he is, who he plays for, when his week off is, and where everyone else
+// is taking him. No 2025 box-score numbers - they were measured and they predict nothing,
+// so printing them would only invite an argument nobody can win.
+const CHEAT_POS = [['QB', 'Quarterbacks'], ['RB', 'Running backs'],
+  ['WR', 'Wide receivers'], ['TE', 'Tight ends']];
+const CHEAT_N = 14;
+const esc = (s) => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+function cheatSheetHtml() {
+  const lg = board.league;
+  const block = ([pos, label]) => {
+    const list = board.rows.filter((r) => r.p.pos === pos).slice(0, CHEAT_N);
+    const body = list.map((r, i) => `<tr><td class="box"></td><td class="n">${r.rank}</td>
+<td class="nm">${esc(r.p.name)}</td><td class="tm">${esc(r.p.team || '')}</td>
+<td class="n">${r.p.bye || '-'}</td><td class="n">${r.p.adp ? Math.round(r.p.adp) : '-'}</td></tr>${
+  r.lastOfTier && i < list.length - 1
+    ? '<tr class="brk"><td></td><td colspan="5">big drop after here</td></tr>' : ''}`).join('');
+    return `<section><h2>${label}</h2><table>
+<tr class="hd"><th></th><th>#</th><th>Player</th><th>Tm</th><th>Bye</th><th>ADP</th></tr>
+${body}</table></section>`;
+  };
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8" />
+<title>2026 draft cheat sheet</title>
+<style>
+  /* Printer's default paper, small margins, nothing to swallow ink. */
+  @page { size: portrait; margin: 10mm; }
+  * { box-sizing: border-box; }
+  body { font: 9pt/1.25 "Segoe UI", -apple-system, Arial, sans-serif;
+    color: #000; background: #fff; margin: 0; padding: 10mm; }
+  h1 { font-size: 15pt; margin: 0 0 1mm; }
+  .sub { font-size: 8pt; color: #444; margin: 0 0 2mm; }
+  .how { font-size: 7.8pt; margin: 0 0 3mm; padding-bottom: 2mm;
+    border-bottom: 1px solid #000; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5mm; }
+  h2 { font-size: 9.5pt; margin: 0 0 1mm; border-bottom: 1.5pt solid #000;
+    padding-bottom: .6mm; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: .5mm 1mm; text-align: left; vertical-align: baseline; }
+  .hd th { font-size: 6.6pt; text-transform: uppercase; letter-spacing: .04em;
+    color: #444; font-weight: 600; border-bottom: .5pt solid #999; }
+  .n { text-align: right; font-variant-numeric: tabular-nums; }
+  /* Four columns on portrait paper is about 44mm each, and "Christian McCaffrey" does
+     not fit in that. Wrapping to a second line is ugly; cutting his name off is worse,
+     and there is plenty of spare height on the page. */
+  .nm { line-height: 1.15; }
+  .tm { color: #444; }
+  .box { width: 3.2mm; }
+  .box::before { content: ""; display: block; width: 2.6mm; height: 2.6mm;
+    border: .5pt solid #666; margin-top: .4mm; }
+  tr:nth-child(even) td { background: #f2f2f2; }
+  .brk td { font-size: 6.4pt; color: #000; letter-spacing: .03em;
+    border-top: 1.2pt solid #000; padding-top: .4mm; background: #fff !important; }
+  .foot { font-size: 7.4pt; color: #333; margin: 3mm 0 0; padding-top: 1.5mm;
+    border-top: 1px solid #000; }
+  .noprint { font-size: 9pt; background: #eee; border: 1px solid #999;
+    padding: 3mm; margin: 0 0 4mm; }
+  @media print { body { padding: 0; } .noprint { display: none; } }
+</style></head><body>
+<p class="noprint"><b>Press Ctrl+P (or Cmd+P on a Mac) to print this.</b> It is built to fit
+  on one sheet of paper. This box does not print.</p>
+<h1>2026 draft cheat sheet</h1>
+<p class="sub">${esc(lg.name)} &middot; ${esc(today())}</p>
+<p class="how"><b>#</b> is the order this guide would take players in, across all positions
+  &mdash; a lower number means take him first. <b>ADP</b> is roughly the pick number where
+  most people take him, so if he is still there well past his ADP you are getting him
+  cheap. <b>Bye</b> is the week his team does not play. A thick line across a column means
+  the next player down is a real step worse, so the man above the line is the last good one
+  of that group. Tick the box when someone takes him.</p>
+<div class="grid">${CHEAT_POS.map(block).join('')}</div>
+<p class="foot">The order comes from this year's projections and the preferences you set on
+  the Ratings tab. Nobody can tell you in advance who will actually score the most points,
+  and this does not try to: it is a plan for the room, not a forecast of the season.</p>
+</body></html>`;
 }
 
 // ---------------------------------------------------------------- practice results
@@ -1420,6 +1598,23 @@ function wire() {
     p.hidden = !p.hidden;
     e.target.setAttribute('aria-expanded', String(!p.hidden));
   };
+  $('#saveBtn').onclick = (e) => {
+    const p = $('#savePanel');
+    p.hidden = !p.hidden;
+    e.target.setAttribute('aria-expanded', String(!p.hidden));
+  };
+  $('#saveBoard').onclick = () => {
+    const what = filter === 'ALL' ? 'board' : `board-${filter.toLowerCase()}`;
+    saveFile(`${what}-${stampFor(board.league.name)}-${today()}.csv`, 'text/csv', boardCsv());
+  };
+  $('#saveSheet').onclick = () => {
+    saveFile(`cheat-sheet-${stampFor(board.league.name)}-${today()}.html`,
+      'text/html', cheatSheetHtml());
+  };
+  $('#saveTeam').onclick = () => {
+    saveFile(`my-team-${stampFor(board.league.name)}-${today()}.csv`, 'text/csv', teamCsv());
+  };
+
   $('#league').onchange = (e) => {
     st.league = +e.target.value;
     open = null;
@@ -1497,11 +1692,19 @@ function wire() {
   $('#dryBtn').onclick = doDryRun;
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };
 
-  // ratings profile as a file, so you and someone else can keep different ones
+  // ratings profile as a file, so you and someone else can keep different ones.
+  //
+  // This wrote { comp, sub, style, tilt, need, rookie } - the knobs of the fifty-stat
+  // editor - while the importer next to it read { fit, fitExtra, need, rookie, posx }.
+  // Not one key overlapped except need and rookie, so "Export my preferences" saved a file
+  // that did not contain a single one of the four sliders, and importing it silently reset
+  // them all to neutral. Export now writes exactly what import reads, which is the only
+  // arrangement that cannot drift apart again.
   $('#exportR').onclick = () => {
-    const { comp, sub, style, tilt, need, rookie } = st;
-    const blob = new Blob([JSON.stringify({ kind: 'draft2026-ratings', comp, sub, style, tilt, need, rookie }, null, 2)],
-      { type: 'application/json' });
+    const { fit, fitExtra, fitOn, need, rookie, posx, stars, fades } = st;
+    const blob = new Blob([JSON.stringify({ kind: 'draft2026-ratings',
+      fit, fitExtra, fitOn, need, rookie, posx, stars, fades }, null, 2)],
+    { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'my-ratings.json';
