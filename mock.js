@@ -156,23 +156,25 @@ export function aiPick(avail, roster, league, opts) {
 }
 
 // ---------------------------------------------------------------- picking for you
-// The other half of the simulator: let the app make YOUR picks too, from your own board.
+// The other half of the simulator: let the app make YOUR picks too.
 //
-// There is no second opinion in here and there is deliberately no cleverness. It walks
-// your board from the top and takes the first man it is allowed to take. Everything that
-// decides the order - the projections, the need bonus, your four preferences, your
-// strategy, your position lean, anyone you have starred or faded - has already been
-// applied by buildBoard before these rows arrive. So the team it builds is not the app's
-// opinion of a good team. It is a picture of YOUR settings, played out.
+// There is no second opinion in here. `prefer` is what the app's own recommendation panel
+// would say - the player it names, and failing him the position it names - so the app
+// drafts by following its own advice rather than by a rule written next to it. That also
+// makes every practice draft a full run of the advice being read on the night.
+//
+// Passing it in is what gives this a CLOCK, and the clock is the whole point. Without it
+// this walked the board from the top, which is how it spent pick 96 on a man the entire
+// room agreed would still be there at 170. Board order says who is best; cost of waiting
+// says who will not last. A drafter needs both.
+//
+// Everything that decides the order underneath - the projections, the need bonus, the four
+// preferences, the strategy, the position lean, anyone starred or faded - has already been
+// applied by buildBoard before these rows arrive. Nothing is re-decided here.
 //
 // Two rules stop it being silly, and they are the same two the pretend teams follow:
 // never carry more of a position than anyone sensibly carries, and once your remaining
 // picks equal your empty starting slots, fill them.
-// `prefer` is what the app's own recommendation panel would say - the player it names, and
-// failing him the position it names. Passing it in is what gives the auto-drafter a CLOCK.
-// Without it, it took the top of the board every time, which is how it ended up spending
-// pick 96 on a man the whole room agreed would still be there at 170. Board order says who
-// is best; cost of waiting says who will not last. A drafter needs both.
 export function autoPick(rows, gone, roster, league, picksLeft, caps, prefer) {
   const need = needsOf(roster, league);
   const cap = caps || capsOf(league);
