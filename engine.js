@@ -503,12 +503,30 @@ export function costOfWaiting(rows, clock, drafted, league, have = {}, opts = {}
     if (!avail.length) continue;
     const best = avail[0];
 
-    // the best man at this position with a real chance of lasting until your next pick
-    const survivor = avail.find((r) => (availability(r.p.adp, clock.target, clock.currentPick) ?? 0) >= 0.5);
-    const fallback = survivor ? survivor.score : (avail[avail.length - 1]?.score ?? 0);
-    const cost = Math.max(0, best.score - fallback);
+    // What score should you EXPECT at this position when you next pick?
+    //
+    // The first version of this took the best man with better-than-even odds of lasting,
+    // and if that was the best player available it reported a cost of zero. Which meant
+    // the whole panel read 0.0 whenever your next pick was close - exactly when the
+    // question matters. A 55% chance of keeping the best player is not "no cost".
+    //
+    // So it is a real expectation: walk down the position, and weight each player by the
+    // chance he is still there AND everyone better has gone.
+    let expected = 0;
+    let allGone = 1;                       // probability everyone above is off the board
+    for (const r of avail.slice(0, 40)) {
+      const p = availability(r.p.adp, clock.target, clock.currentPick) ?? 0;
+      expected += r.score * p * allGone;
+      allGone *= 1 - p;
+      if (allGone < 0.001) break;
+    }
+    // whatever probability is left over, assume the worst man considered
+    expected += (avail[Math.min(39, avail.length - 1)]?.score ?? 0) * allGone;
 
-    // a position you have already filled is worth less to you than the raw gap suggests
+    const cost = Math.max(0, best.score - expected);
+    // named for the sentence in the UI: the best one with better-than-even odds
+    const survivor = avail.find((r) => (availability(r.p.adp, clock.target, clock.currentPick) ?? 0) >= 0.5);
+
     const want = league.starters[pos] || 0;
     const got = have[pos] || 0;
     const shortfall = Math.max(0, want - got);
@@ -518,6 +536,7 @@ export function costOfWaiting(rows, clock, drafted, league, have = {}, opts = {}
       pos,
       best,
       survivor,
+      expected,
       cost,
       weighted: cost * urgency + (shortfall > 0 ? need / 2 : 0),
       shortfall,

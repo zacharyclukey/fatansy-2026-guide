@@ -557,3 +557,6 @@ span.nm:hover { text-decoration: none; }
 .row.starred { box-shadow: inset 3px 0 0 var(--pigskin); }
 .row.faded .nm, .row.faded .sc { color: var(--ink3); text-decoration: line-through; text-decoration-thickness: 1px; }
 .chip.mineOnly:has(input:checked) { background: var(--card); border-color: var(--pigskin); color: var(--pigskin); }
+
+#statFind { width: 260px; }
+.statRow.hit { background: var(--fieldSoft); border-radius: 4px; }

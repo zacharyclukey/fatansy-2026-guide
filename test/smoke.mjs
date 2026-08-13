@@ -92,6 +92,27 @@ const fire = (el, type) => {
   ok('the sticky header is still sticky', /\.row\.head\s*\{[^}]*position:\s*sticky/.test(css));
 }
 
+// ------------------------------------------------- 0b. nothing exported has gone missing
+// Three separate times an edit that replaced a block between two markers has silently
+// deleted a neighbouring function. Each time the app broke in a way only one test caught.
+{
+  const src = fs.readFileSync(`${DIR}/engine.js`, 'utf8');
+  const exported = [...src.matchAll(/^export (?:function|const) (\w+)/gm)].map((m) => m[1]);
+  const needed = ['DEFAULT_SETTINGS', 'componentWeights', 'componentScore', 'floorScore',
+    'projectedPoints', 'inLeague', 'flexFill', 'replacementLevels', 'SAMPLE_LEAGUE',
+    'subScores', 'RAW_FIELDS', 'applyCustomStats', 'unusedStats', 'buildBoard', 'pickType',
+    'markTiers', 'myPicks', 'draftContext', 'availability', 'poolAround', 'costOfWaiting',
+    'influence', 'priorityOrder'];
+  const missing = needed.filter((n) => !exported.includes(n));
+  ok('every engine export the app imports still exists', missing.length === 0, missing.join(', '));
+
+  const app = fs.readFileSync(`${DIR}/app.js`, 'utf8');
+  const imported = [...(app.match(/^import \{([^}]*)\} from '\.\/engine\.js/m)?.[1] || '')
+    .split(',').map((x) => x.trim()).filter(Boolean)];
+  const broken = imported.filter((n) => !exported.includes(n));
+  ok('the app imports nothing that is not exported', broken.length === 0, broken.join(', '));
+}
+
 // ---------------------------------------------------------------- 1. the engine
 {
   const m = await import(`file://${DIR}/engine.js`);
@@ -343,6 +364,17 @@ const fire = (el, type) => {
     `${qbStats.length} stats count for a QB`);
   ok('touches no longer counts for a quarterback',
     !players.components.flatMap((c) => c.subs).find((s) => s.key === 'touches_pg')?.w.QB);
+
+  // finding a stat among fifty behind ten collapsed panels
+  const findBox = d.querySelector('#statFind');
+  findBox.value = 'interception'; fire(findBox, 'input');
+  await settle();
+  const found = [...d.querySelectorAll('.statRow:not(.hdr) label span')].map((x) => x.textContent.trim());
+  ok('a stat can be found by name', found.length === 1 && /Interceptions/.test(found[0]),
+    found.join(' | '));
+  ok('and its panel is opened for you', d.querySelector('details.comp')?.hasAttribute('open'));
+  findBox.value = ''; fire(findBox, 'input');
+  await settle();
 
   ok('the influence note explains itself', /switch a component off|switch/.test(d.querySelector('#inflNote').textContent));
 

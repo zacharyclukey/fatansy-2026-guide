@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608121635';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608121635';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608121635';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608121635';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130757';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130757';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608130757';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130757';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608121635';
+const BUILD = '202608130757';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -114,9 +114,19 @@ function load() {
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { saved = null; }
   st = { ...base, ...(saved || {}) };
-  // a saved profile from an older build may not know about newer stats
+
+  // A saved profile may be older than the current stat list, in both directions.
+  // New stats have to be added, and - the part that was silently wrong - stats that no
+  // longer exist have to be dropped. A leftover weight for a deleted component still
+  // counted towards the total the rating divides by, quietly diluting every real one.
   st.comp = { ...base.comp, ...(st.comp || {}) };
+  for (const k of Object.keys(st.comp)) if (!(k in base.comp)) delete st.comp[k];
+  st.sub ||= {};
   for (const [k, v] of Object.entries(base.sub)) st.sub[k] = st.sub[k] || v;
+  const live = new Set(Object.keys(base.sub));
+  for (const k of Object.keys(st.sub)) {
+    if (!live.has(k) && !k.startsWith('x_')) delete st.sub[k];   // x_ are your own additions
+  }
   // Whoever opens this link is not necessarily whoever generated the data file, so the
   // leagues baked into it are never shown. You get a neutral league until you import.
   data.leagues = st.imported?.length ? [...st.imported] : [SAMPLE_LEAGUE];
@@ -630,6 +640,7 @@ function renderRatings() {
   // The open panels are read back out of the DOM immediately before the rebuild rather
   // than tracked through toggle events. <details> fires `toggle` without bubbling and it
   // was not reaching a delegated listener, so the state silently went stale.
+  const find = ($('#statFind')?.value || '').trim().toLowerCase();
   const live = [...document.querySelectorAll('details.comp[open]')].map((x) => x.dataset.comp);
   if (live.length || st.openComps) st.openComps = live.length ? live : (st.openComps || []);
   st.openComps ||= ['volume'];
@@ -669,12 +680,14 @@ ${(st.customs || []).length ? `<p class="hint">Added: ${(st.customs || [])
         + 'overlap heavily, so the others cover for whichever you drop.'
       : `Switching one off moves ${churn} player${churn === 1 ? '' : 's'} in or out of your top 50.`}
     To make your ratings matter more overall, raise <b>Trust my ratings</b> on the board.`;
-  $('#comps').innerHTML = data.components.map((c) => {
+  const html = data.components.map((c) => {
     const locked = c.key === 'floor' || c.key === 'ceiling';
     const subs = c.subs.map((sm) => {
       const cfg = st.sub[sm.key];
       if (!cfg) return '';
-      return `<div class="statRow${cfg.on ? '' : ' off'}">
+      const hit = find && sm.label.toLowerCase().includes(find);
+      if (find && !hit) return '';
+      return `<div class="statRow${cfg.on ? '' : ' off'}${hit ? ' hit' : ''}">
 <label data-tip="sub:${sm.key}"><input type="checkbox" data-son="${sm.key}"${cfg.on ? ' checked' : ''} />
 <span>${sm.label}${sm.custom ? ' <em class="hint" style="display:inline">added</em>' : ''}</span></label>
 ${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}" data-tip="posW">
@@ -684,7 +697,9 @@ ${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}" data-ti
     }).join('');
 
     const mineHere = customsFor(c.key);
-    return `<details class="comp" data-comp="${c.key}"${st.openComps?.includes(c.key) ? ' open' : ''}>
+    const matches = find ? c.subs.filter((sm) => sm.label.toLowerCase().includes(find)).length : 0;
+    if (find && !matches) return '';
+    return `<details class="comp" data-comp="${c.key}"${find || st.openComps?.includes(c.key) ? ' open' : ''}>
 <summary><span class="cName" data-tip="${c.key}" tabindex="0">${c.label}</span>
 <span class="cDesc">${c.desc}</span>
 <span class="cMeter"><b style="width:${Math.round(((cw[c.key] ?? 0) / maxW) * 100)}%"></b></span>
@@ -703,6 +718,7 @@ ${mineHere.length ? `<div class="addBar">
 </div>` : ''}
 </div></details>`;
   }).join('');
+  $('#comps').innerHTML = html || `<p class="empty">No stat matches “${find}”.</p>`;
 }
 
 // ---------------------------------------------------------------- sleeper
@@ -1038,6 +1054,7 @@ function wire() {
       save(); renderChrome(); rebuild();
     }).catch(() => alert('That file is not a ratings profile.'));
   };
+  $('#statFind').oninput = () => renderRatings();
   $('#resetR').onclick = () => {
     const base = DEFAULT_SETTINGS(data);
     Object.assign(st, { comp: base.comp, sub: base.sub });
