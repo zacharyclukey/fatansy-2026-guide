@@ -186,6 +186,9 @@ def index(rows):
         out[pid] = {
             'pos': pl['position'],
             'name': f"{pl.get('first_name', '')} {pl.get('last_name', '')}".strip(),
+            'team': r.get('team') or pl.get('team'),
+            'exp': pl.get('years_exp'),
+            'age': pl.get('age'),
             'a': r.get('stats') or {},
         }
     return out

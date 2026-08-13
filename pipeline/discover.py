@@ -47,6 +47,122 @@ MAX_STATS = 5        # a blend nobody can hold in their head is not a slider peo
 POSITIONS = ['QB', 'RB', 'WR', 'TE']
 
 
+def projection_test(seasons, projections):
+    """The test everything else rests on: are the projections any good?
+
+    Score is built from projections, and VOR only rearranges them - a transformation
+    cannot rescue a bad forecast, it can only make positions comparable. So the honest
+    order of questions is: do the projections beat "he was good last year", and does
+    knowing last year add anything the projection missed?
+
+    A projection is made BEFORE the season, so unlike every stat we have tested, it is
+    allowed to know about a new team, a new role and a rookie's draft capital. That is
+    exactly the family of information the box-score test could not see.
+    """
+    print('\n' + '=' * 74)
+    print('ARE THE PROJECTIONS ANY GOOD?')
+    print('=' * 74)
+    print('Everything the app recommends comes from these. VOR reshapes them for your')
+    print('roster, it does not make them more accurate.\n')
+
+    years = sorted(seasons)
+    for pos in POSITIONS:
+        rowsets = []
+        for a, b in zip(years, years[1:]):
+            if b not in projections:
+                continue
+            prior, actual, proj = seasons[a], seasons[b], projections[b]
+            got = []
+            for pid, pr in proj.items():
+                if pr['pos'] != pos:
+                    continue
+                pv = float(pr['a'].get('pts_ppr') or 0)
+                if pv <= 0:
+                    continue
+                t = actual.get(pid)
+                real = (float(t['a'].get('pts_ppr') or 0)
+                        / max(float(t['a'].get('gp') or 1), 1)) if t else 0.0
+                last = prior.get(pid)
+                lp = (float(last['a'].get('pts_ppr') or 0)
+                      / max(float(last['a'].get('gp') or 1), 1)) if last else None
+                got.append({'pair': b, 'proj': pv, 'last': lp, 'real': real})
+            if len(got) >= 30:
+                rowsets.append((b, got))
+        if not rowsets:
+            print(f'{pos}: no projections returned for these seasons.\n')
+            continue
+
+        print(f'{pos}')
+        print(f"    {'':<28}" + ''.join(f'{b:>8}' for b, _g in rowsets) + f"{'mean':>9}")
+        lines = {}
+        for label, pick in [
+                ('the projection', lambda r: r['proj']),
+                ("last year's points/game", lambda r: r['last']),
+                ('both, fitted', None)]:
+            vals = []
+            for b, got in rowsets:
+                if label == 'both, fitted':
+                    both = [r for r in got if r['last'] is not None]
+                    if len(both) < 30:
+                        vals.append(None)
+                        continue
+                    X = [[1.0, r['proj'], r['last']] for r in both]
+                    beta = ols(X, ranks([r['real'] for r in both]))
+                    if not beta:
+                        vals.append(None)
+                        continue
+                    pred = [sum(c * v for c, v in zip(beta, x)) for x in X]
+                    vals.append(spearman(list(zip(pred, [r['real'] for r in both]))))
+                else:
+                    sub = [r for r in got if pick(r) is not None]
+                    vals.append(spearman([(pick(r), r['real']) for r in sub])
+                                if len(sub) >= 30 else None)
+            lines[label] = vals
+
+        for label, vals in lines.items():
+            ok = [v for v in vals if v is not None]
+            line = f'    {label:<28}'
+            for v in vals:
+                line += f'{v:>8.2f}' if v is not None else f"{'-':>8}"
+            line += f'{sum(ok) / len(ok):>9.2f}' if ok else f"{'-':>9}"
+            print(line)
+
+        p = [v for v in lines['the projection'] if v is not None]
+        l = [v for v in lines["last year's points/game"] if v is not None]
+        if p and l:
+            d = sum(p) / len(p) - sum(l) / len(l)
+            verdict = ('the projection is genuinely better' if d > 0.03 else
+                       'the projection adds nothing over last year' if d > -0.03 else
+                       'last year beats the projection')
+            print(f'    -> {verdict} ({d:+.2f})')
+        print()
+
+
+def metadata_kind(seasons, field):
+    """Is this field the value AT that season, or today's value stapled onto old rows?
+
+    Sleeper attaches a player object to historical stat rows, and it is not obvious
+    whether years_exp on a 2021 row means "his experience in 2021" or "his experience
+    now". Get that wrong and the feature is silently shifted by five years. So ask the
+    data: if a player's value never changes across seasons, it is a snapshot and needs
+    an offset. If it climbs, it is historical and can be used as-is.
+    """
+    years = sorted(seasons)
+    changed = same = 0
+    for pid in list(seasons[years[0]])[:400]:
+        vals = [seasons[y][pid].get(field) for y in years
+                if pid in seasons[y] and seasons[y][pid].get(field) is not None]
+        if len(vals) < 2:
+            continue
+        if len(set(vals)) > 1:
+            changed += 1
+        else:
+            same += 1
+    if changed + same < 20:
+        return 'missing', changed, same
+    return ('historical' if changed > same else 'snapshot'), changed, same
+
+
 def all_subs(pos):
     """Every sub-metric that is switched on, historical, and means something at this position."""
     out = []
@@ -116,11 +232,16 @@ def ols(X, y):
     return [A[i][k] / A[i][i] for i in range(k)]
 
 
+CONTEXT = [('ctx_exp', 'exp', True), ('ctx_young', 'exp', False), ('ctx_age', 'age', False)]
+META = {}          # field -> 'historical' | 'snapshot' | 'missing', filled in by run()
+
+
 def build(seasons, pos):
     """One row per player-season: his stat percentiles, his baseline, and what he then did."""
-    subs = all_subs(pos)
+    subs = [s for s in all_subs(pos)]
     rows = []
     years = sorted(seasons)
+    newest = years[-1]
     for a, b in zip(years, years[1:]):
         prior, target = seasons[a], seasons[b]
         group = {pid: r for pid, r in prior.items()
@@ -140,6 +261,19 @@ def build(seasons, pos):
             p = pcts(raw)
             col[key] = [(v if higher else 100 - v) for v in p]   # higher always = better
 
+        # Context: what a drafter knows about the man, not the box score. Offset when
+        # Sleeper handed us today's value rather than the value that season.
+        for key, field, higher in CONTEXT:
+            shift = (int(newest) - int(a)) if META.get(field) == 'snapshot' else 0
+            raw = []
+            for pid in ids:
+                v = group[pid].get(field)
+                raw.append(float(v) - shift if v is not None else float('nan'))
+            ok = [v for v in raw if not math.isnan(v)]
+            fill = sorted(ok)[len(ok) // 2] if ok else 0.0
+            p = pcts([fill if math.isnan(v) else v for v in raw])
+            col[key] = [(v if higher else 100 - v) for v in p]
+
         base = pcts([float(group[pid]['a'].get('pts_ppr') or 0)
                      / max(float(group[pid]['a'].get('gp') or 1), 1) for pid in ids])
 
@@ -150,6 +284,12 @@ def build(seasons, pos):
             rows.append({'pair': b, 'id': pid, 'name': group[pid]['name'],
                          'base': base[i], 'next': nxt,
                          'x': {k: col[k][i] for k in col}})
+
+    labels = {'ctx_exp': 'Experience (more)', 'ctx_young': 'Experience (less)',
+              'ctx_age': 'Age (younger)'}
+    for key, field, _hi in CONTEXT:
+        if META.get(field) not in (None, 'missing'):
+            subs = subs + [(key, labels[key], None, True, 'context')]
     return rows, subs
 
 
@@ -203,6 +343,43 @@ def run(lo, hi):
         rows = collect('stats', str(yr))
         seasons[str(yr)] = index(rows)
         print(f'  {yr}: {len(seasons[str(yr)])} players')
+
+    for field in ['exp', 'age', 'team']:
+        kind, ch, sm = metadata_kind(seasons, field)
+        META[field] = kind
+        note = {'historical': 'varies by season, usable as-is',
+                'snapshot': "today's value on old rows, offset applied",
+                'missing': 'not supplied by Sleeper, cannot be tested'}[kind]
+        print(f'  metadata {field:<5} {kind:<11} ({ch} vary, {sm} constant) - {note}')
+
+    if META['team'] == 'historical':
+        print('\n  Changing team, among players who appeared in both seasons:')
+        for pos in POSITIONS:
+            years = sorted(seasons)
+            moved, stayed = [], []
+            for a, b in zip(years, years[1:]):
+                for pid, r in seasons[a].items():
+                    t = seasons[b].get(pid)
+                    if r['pos'] != pos or not t or float(r['a'].get('gp') or 0) < MIN_GAMES:
+                        continue
+                    d = (float(t['a'].get('pts_ppr') or 0) / max(float(t['a'].get('gp') or 1), 1)
+                         - float(r['a'].get('pts_ppr') or 0) / max(float(r['a'].get('gp') or 1), 1))
+                    (moved if r.get('team') != t.get('team') else stayed).append(d)
+            if len(moved) > 15 and len(stayed) > 15:
+                mm, ms = sum(moved) / len(moved), sum(stayed) / len(stayed)
+                print(f'    {pos}  moved {mm:+.2f} pts/g (n={len(moved)}),  '
+                      f'stayed {ms:+.2f} (n={len(stayed)}),  difference {mm - ms:+.2f}')
+        print('  Descriptive only - a player with no following season has no known team,')
+        print('  so team change cannot enter the fitted test without leaking who survived.')
+
+    projections = {}
+    for yr in range(int(lo) + 1, int(hi) + 1):
+        try:
+            projections[str(yr)] = index(collect('projections', str(yr)))
+        except Exception as e:
+            print(f'  projections {yr}: unavailable ({type(e).__name__})')
+    if projections:
+        projection_test(seasons, projections)
 
     print('\n' + '=' * 74)
     print('DOES EACH COMPONENT HOLD UP ACROSS SEASONS?')
