@@ -65,6 +65,9 @@ async function boot({ store = {}, offline = false } = {}) {
   return { window, d: window.document, errs, store };
 }
 const settle = () => new Promise((r) => setTimeout(r, 60));
+// save() is debounced 250ms so a drag does not write to localStorage on every pixel.
+// Anything that asserts on the store has to outwait that.
+const saved = () => new Promise((r) => setTimeout(r, 320));
 // position multipliers as the app has them, read back out of saved settings
 const st_posx = (d) => {
   const raw = d.defaultView.localStorage.getItem('draft2026');
@@ -396,93 +399,56 @@ const fire = (el, type) => {
   ok('cost of waiting is shown', d.querySelectorAll('#advice .costPill').length >= 3);
 }
 
-// ---------------------------------------------------------------- 4. ratings
+// ---------------------------------------------------------------- 4. the fit page
 {
   const { d, store } = await boot();
   d.querySelector('[data-v="ratings"]').click();
   await settle();
-  ok('every weight is a slider', d.querySelectorAll('#comps input[type="number"]').length === 0);
-  // derived, not hardcoded - the stat list changes and the test should follow it
-  const nStats = players.components.reduce((a, c) => a + c.subs.length, 0);
-  ok('per-position sliders', d.querySelectorAll('#comps [data-sw]').length === nStats * 4,
-    `${d.querySelectorAll('#comps [data-sw]').length} for ${nStats} stats x 4 positions`);
 
-  const before = d.querySelectorAll('#comps .statRow:not(.hdr)').length;
-  const menu = d.querySelector('#addPick');
-  const offered = [...menu.options].slice(1).map((o) => o.text);
+  // The fifty-stat weight editor is gone. It weighted a rating that measured no lift
+  // against the projections, so every hour spent in it changed nothing but confidence.
+  ok('the component editor is gone', !d.querySelector('#comps'));
+  ok('the stat finder is gone', !d.querySelector('#statFind'));
+  ok('the trust-my-ratings slider is gone', !d.querySelector('#tilt2'));
 
-  // the menu must never offer a stat the rating is already using
-  const inUse = [...d.querySelectorAll('#comps .statRow:not(.hdr)')]
-    .filter((r) => !r.classList.contains('off'))
-    .map((r) => r.querySelector('label span').textContent.trim());
-  const clash = offered.filter((o) => inUse.some((u) => o.startsWith(u)));
-  ok('no stat already in use is offered', clash.length === 0, clash.join(', '));
-  ok('switched-off built-ins are offered', offered.some((o) => /switch on in/.test(o)));
-  ok('unmapped raw fields are offered', offered.some((o) => /add to/.test(o)));
+  const sliders = [...d.querySelectorAll('.fitAxis input[type="range"]')];
+  ok('the page is a handful of sliders', sliders.length >= 3 && sliders.length <= 5,
+    `${sliders.length} sliders`);
+  ok('every slider starts neutral', sliders.every((s) => +s.value === 0));
+  ok('every slider says what it counts',
+    [...d.querySelectorAll('.fitAxis')].every((a) => a.querySelector('.countList li')));
 
-  // turning a built-in back on must not create a second copy of it
-  const rows0 = d.querySelectorAll('#comps .statRow:not(.hdr)').length;
-  menu.value = [...menu.options].find((o) => /switch on in/.test(o.text)).value;
-  fire(menu, 'change');
-  await settle();
-  d.querySelector('[data-v="ratings"]').click();
-  ok('switching one on adds no duplicate row',
-    d.querySelectorAll('#comps .statRow:not(.hdr)').length === rows0);
+  // Moving one must actually reach the board rather than only the label.
+  const s0 = sliders[0];
+  s0.value = '100';
+  fire(s0, 'input');
+  await saved();
+  const raw = JSON.parse(store.draft2026 || '{}');
+  ok('a preference is saved', Object.values(raw.fit || {}).some((v) => v === 100));
+  ok('the readout stops saying no preference',
+    !/no preference/.test(d.querySelector('.fitAxis em').textContent));
 
-  const menu2 = d.querySelector('#addPick');
-  const opt = [...menu2.options].find((o) => /add to/.test(o.text));
-  menu2.value = opt.value;
-  fire(menu2, 'change');
-  await settle();
-  d.querySelector('[data-v="ratings"]').click();
-  // the influence readout - it is measured, so it must actually be there and be numeric
-  const moves = [...d.querySelectorAll('#comps .cMove')].map((x) => x.textContent.trim());
-  ok('every component reports its influence',
-    moves.length === players.components.length && moves.every((x) => /^±\d/.test(x)),
-    `${moves.length} of ${players.components.length}: ${moves.join(' ')}`);
-  // the Ratings Lab must not slam your open panel shut when you change something in it
-  const comps = [...d.querySelectorAll('details.comp')];
-  comps[0].removeAttribute('open');
-  const rel = comps.find((c) => c.querySelector('.cName').textContent === 'Reliability');
-  rel.setAttribute('open', '');
-  rel.querySelector('input[type="checkbox"][data-son]').click();
-  await settle();
-  ok('the panel you are working in stays open',
-    [...d.querySelectorAll('details.comp[open]')].map((x) => x.dataset.comp).join(',') === 'reliability',
-    [...d.querySelectorAll('details.comp[open] .cName')].map((x) => x.textContent).join(','));
+  // Extras are bounded by the league: nothing is offered that the league does not score.
+  const spare = [...d.querySelectorAll('[data-fitkey]')];
+  if (spare.length) {
+    const box = spare[0];
+    const [, field] = box.dataset.fitkey.split('|');
+    box.checked = true;
+    fire(box, 'change');
+    await saved();
+    const after = JSON.parse(store.draft2026 || '{}');
+    ok('ticking an extra stat is remembered',
+      Object.values(after.fitExtra || {}).some((v) => (v || []).includes(field)));
+  } else {
+    ok('ticking an extra stat is remembered', true, 'league scores nothing spare');
+  }
 
-  // a quarterback has to be rated on passing, not on his carries
-  const qbStats = players.components.flatMap((c) => c.subs.filter((s) => s.w.QB > 0));
-  ok('quarterbacks are rated on passing',
-    qbStats.some((s) => /pass|Completion|Interception/i.test(s.label)),
-    `${qbStats.length} stats count for a QB`);
-  ok('touches no longer counts for a quarterback',
-    !players.components.flatMap((c) => c.subs).find((s) => s.key === 'touches_pg')?.w.QB);
-
-  // finding a stat among fifty behind ten collapsed panels
-  const findBox = d.querySelector('#statFind');
-  findBox.value = 'interception'; fire(findBox, 'input');
-  await settle();
-  const found = [...d.querySelectorAll('.statRow:not(.hdr) label span')].map((x) => x.textContent.trim());
-  ok('a stat can be found by name', found.length === 1 && /Interceptions/.test(found[0]),
-    found.join(' | '));
-  ok('and its panel is opened for you', d.querySelector('details.comp')?.hasAttribute('open'));
-  findBox.value = ''; fire(findBox, 'input');
-  await settle();
-
-  ok('the influence note explains itself', /switch a component off|switch/.test(d.querySelector('#inflNote').textContent));
-
-  ok('an unused stat can be added',
-    d.querySelectorAll('#comps .statRow:not(.hdr)').length === before + 1);
-
-  // and it has to come back after a reload. Closing the page must flush the debounced
-  // save first, or a change made in the last quarter second is silently lost.
-  fire(d.defaultView, 'pagehide');
   const again = await boot({ store });
   again.d.querySelector('[data-v="ratings"]').click();
   await settle();
-  ok('added stats survive a reload',
-    again.d.querySelectorAll('#comps .statRow:not(.hdr)').length === before + 1);
+  ok('preferences survive a reload',
+    [...again.d.querySelectorAll('.fitAxis input[type="range"]')].some((s) => +s.value === 100));
+  ok('the page threw nothing', again.errs.length === 0, again.errs.join('; '));
 }
 
 // -------------------------------------------- 4b. the model has no duplicated formulas
@@ -536,13 +502,19 @@ const fire = (el, type) => {
 
   // presets are temperament only and live in the lab
   d.querySelector('[data-v="ratings"]').click(); await settle();
-  ok('presets are in the lab', d.querySelectorAll('[data-strat]').length === 5);
+  ok('presets are on the ratings page', d.querySelectorAll('[data-strat]').length === 5);
   ok('no position lean in the lab', d.querySelectorAll('#v-ratings [data-lean]').length === 0);
   const before = JSON.stringify(st_posx(d));
   d.querySelector('[data-strat="upside"]').click(); await settle();
   d.querySelector('[data-v="ratings"]').click();
   ok('a preset leaves position values alone', JSON.stringify(st_posx(d)) === before);
-  const tw = d.querySelector('#tilt2'); tw.value = '175'; fire(tw, 'input');
+  // a preset must actually move the sliders it claims to set
+  d.querySelector('[data-strat="floor"]').click(); await settle();
+  d.querySelector('[data-v="ratings"]').click(); await settle();
+  const durBox = d.querySelector('#fit_dur');
+  ok('a preset moves the sliders', durBox && +durBox.value === 70, `dur=${durBox?.value}`);
+
+  const tw = d.querySelector('#fit_td'); tw.value = '15'; fire(tw, 'input');
   await settle();
   d.querySelector('[data-v="ratings"]').click();
   ok('editing a slider drops the preset label',

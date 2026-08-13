@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints } from './engine.js?v=202608131000';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131000';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131000';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131000';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName } from './engine.js?v=202608131017';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131017';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131017';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131017';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131000';
+const BUILD = '202608131017';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -671,8 +671,6 @@ function renderAdvice2() {
     + 'recommendation for your next pick appears here too.</p>';
 }
 
-let infl = null;
-let inflKey = '';
 
 // ---------------------------------------------------------------- fit sliders
 // Built once and then left alone. Rebuilding the markup on every input event is what made
@@ -694,12 +692,30 @@ function renderFit() {
   const sig = axes.map((a) => a.key).join(',');
 
   if (fitBuilt !== sig) {
-    host.innerHTML = axes.map((a) => `<label class="knob fitAxis">
+    host.innerHTML = axes.map((a) => {
+      // Say what the slider counts. The old page let you weight fifty stats; this one
+      // shows you the handful that matter and lets you add any your league also scores.
+      const counted = a.uses ? a.uses.map((u) => `<li>${u}</li>`).join('')
+        : axisKeys(a.key, league, st)
+          .map((k) => `<li>${keyName(k)} <em>${league.scoring[k] > 0 ? '+' : ''}`
+            + `${league.scoring[k]}</em></li>`).join('');
+      const spare = a.uses ? [] : axisSpare(a.key, league, st);
+      return `<label class="knob fitAxis">
 <span class="knobLabel"><span data-tip="${a.key}" tabindex="0">${a.label}</span>
 <em id="fitOut_${a.key}">no preference</em></span>
 <input id="fit_${a.key}" class="fitSlide" type="range" min="-100" max="100" step="5" value="0" />
 <span class="fitEnds"><b>${a.left}</b><b>${a.right}</b></span>
-<span class="hint">${a.hint}</span></label>`).join('');
+<span class="hint">${a.hint}</span>
+<details class="counts"${a.open ? '' : ''}>
+<summary>What this counts</summary>
+<ul class="countList">${counted || '<li class="soft">Nothing — this league scores none of it.</li>'}</ul>
+${spare.length ? `<p class="hint">Your league also scores these. Tick any you think belong
+here.</p><div class="spare">${spare.map((k) => `<label class="check tiny">
+<input type="checkbox" data-fitkey="${a.key}|${k}" />
+<span>${keyName(k)} <em>${league.scoring[k] > 0 ? '+' : ''}${league.scoring[k]}</em></span>
+</label>`).join('')}</div>` : ''}
+</details></label>`;
+    }).join('');
     fitBuilt = sig;
     for (const a of axes) {
       const el = $(`#fit_${a.key}`);
@@ -719,6 +735,11 @@ function renderFit() {
     // set of listeners on every render.
   }
 
+  for (const box of host.querySelectorAll('[data-fitkey]')) {
+    const [axis, field] = box.dataset.fitkey.split('|');
+    box.checked = (((st.fitExtra || {})[axis]) || []).includes(field);
+  }
+
   // keep the controls honest when settings arrive from a load, an import or a preset
   for (const a of axes) {
     const el = $(`#fit_${a.key}`);
@@ -730,6 +751,11 @@ function renderFit() {
         : `${fitWord(v)} — ${v < 0 ? a.left.toLowerCase() : a.right.toLowerCase()}`;
     }
   }
+
+  // The preset chips live on this page and describe these sliders, so they have to
+  // follow them. renderStrategies only ran from renderChrome, which a slider never
+  // triggers - so moving one left the old preset still showing as active.
+  renderStrategies();
 
   const on = axes.filter((a) => Math.abs((st.fit || {})[a.key] || 0) >= 8);
   const note = $('#fitNote');
@@ -747,98 +773,12 @@ function renderFit() {
 }
 
 function renderRatings() {
+  // The whole page is now the four sliders. There used to be a fifty-stat weight editor
+  // here, ten collapsible components with a per-position slider each. It was deleted
+  // because it weighted a rating that measured zero lift against the projections over
+  // five seasons - so every hour spent in it changed nothing except the user's
+  // confidence. What each slider counts is now stated plainly instead.
   renderFit();
-  // Re-rendering used to slam every panel shut and force Volume open, so ticking a stat
-  // in Reliability threw you back to the top of the page. Worse, a stat you added landed
-  // in a component that was now collapsed - which looked exactly like the stat had been
-  // lost, which is what it was reported as.
-  //
-  // The open panels are read back out of the DOM immediately before the rebuild rather
-  // than tracked through toggle events. <details> fires `toggle` without bubbling and it
-  // was not reaching a delegated listener, so the state silently went stale.
-  const find = ($('#statFind')?.value || '').trim().toLowerCase();
-  const live = [...document.querySelectorAll('details.comp[open]')].map((x) => x.dataset.comp);
-  if (live.length || st.openComps) st.openComps = live.length ? live : (st.openComps || []);
-  st.openComps ||= ['volume'];
-  const cw = board.weights;
-  const maxW = Math.max(...Object.values(cw), 1);
-
-  // eleven extra board builds, about 25ms, and only when this tab is on screen
-  const key = `${JSON.stringify(st.comp)}|${st.style}|${st.tilt}|${subVersion}`;
-  if (key !== inflKey) { infl = influence(data, st, cache); inflKey = key; }
-
-  // one place to add a stat. It only ever offers things the rating is genuinely not
-  // using: built-in stats you have switched off, and raw fields with no built-in at all.
-  const label = (k) => data.components.find((c) => c.key === k)?.label || k;
-  const free = unusedStats(data, st);
-  $('#addStat').innerHTML = `<label class="addLine">
-<span class="stratLabel" data-tip="addstat" tabindex="0">Add a stat</span>
-<select id="addPick"${free.length ? '' : ' disabled'}>
-<option value="">${free.length
-    ? `Choose one of the ${free.length} stats not currently in use…`
-    : 'Every available stat is already in use'}</option>
-${free.map((x) => (x.kind === 'builtin'
-    ? `<option value="on|${x.key}">${x.label} — switch on in ${x.compLabel}</option>`
-    : `<option value="new|${x.field}|${x.hi}|${x.pg}|${x.comp}">`
-      + `${x.label}${x.pg ? ' per game' : ''} — add to ${x.compLabel}</option>`)).join('')}</select>
-</label>
-${(st.customs || []).length ? `<p class="hint">Added: ${(st.customs || [])
-    .map((c) => `<b>${c.label}</b> in ${label(c.comp)}`).join(', ')}.</p>` : ''}`;
-  $('#priority2').textContent = priorityOrder(data, st).slice(0, 4)
-    .map((c) => c.label.toLowerCase()).join(' › ');
-  const biggest = Object.entries(infl).sort((a2, b2) => b2[1].mean - a2[1].mean)[0];
-  const lab = (k) => data.components.find((c) => c.key === k)?.label || k;
-  const churn = Object.values(infl).reduce((a2, x) => a2 + x.top50, 0);
-  $('#inflNote').innerHTML = `<b class="warn">Measured 2024 → 2025, this blend was beaten by `
-    + `“last year's points per game” at all four positions</b> (0.64–0.72 against 0.71–0.78 `
-    + `rank correlation). Treat the weights below as a way to express what you care about, `
-    + `not as a better forecast than the simple number. `
-    + `The <b>±</b> column is how far the board moves if you switch a `
-    + `component off — measured, not guessed. <b>${lab(biggest[0])}</b> moves it most `
-    + `(±${biggest[1].mean.toFixed(1)} places). ${churn === 0
-      ? 'Switching any single one off changes <b>nobody</b> in your top 50: the components '
-        + 'overlap heavily, so the others cover for whichever you drop.'
-      : `Switching one off moves ${churn} player${churn === 1 ? '' : 's'} in or out of your top 50.`}
-    To make your ratings matter more overall, raise <b>Trust my ratings</b> on the board.`;
-  const html = data.components.map((c) => {
-    const locked = c.key === 'floor' || c.key === 'ceiling';
-    const subs = c.subs.map((sm) => {
-      const cfg = st.sub[sm.key];
-      if (!cfg) return '';
-      const hit = find && sm.label.toLowerCase().includes(find);
-      if (find && !hit) return '';
-      return `<div class="statRow${cfg.on ? '' : ' off'}${hit ? ' hit' : ''}">
-<label data-tip="sub:${sm.key}"><input type="checkbox" data-son="${sm.key}"${cfg.on ? ' checked' : ''} />
-<span>${sm.label}${sm.custom ? ' <em class="hint" style="display:inline">added</em>' : ''}</span></label>
-${data.ratePos.map((q) => `<span class="miniW${cfg.w[q] ? '' : ' zero'}" data-tip="posW">
-<input type="range" min="0" max="40" step="1" data-sw="${sm.key}" data-q="${q}" value="${cfg.w[q]}" />
-<u>${cfg.w[q]}</u></span>`).join('')}
-</div>`;
-    }).join('');
-
-    const mineHere = customsFor(c.key);
-    const matches = find ? c.subs.filter((sm) => sm.label.toLowerCase().includes(find)).length : 0;
-    if (find && !matches) return '';
-    return `<details class="comp" data-comp="${c.key}"${find || st.openComps?.includes(c.key) ? ' open' : ''}>
-<summary><span class="cName" data-tip="${c.key}" tabindex="0">${c.label}</span>
-<span class="cDesc">${c.desc}</span>
-<span class="cMeter"><b style="width:${Math.round(((cw[c.key] ?? 0) / maxW) * 100)}%"></b></span>
-<span class="cMove" data-tip="move" tabindex="0">${infl[c.key]
-    ? `±${infl[c.key].mean.toFixed(1)}` : '—'}</span>
-<span class="cW">${cw[c.key] ?? 0}</span></summary>
-<div class="cBody">
-${locked
-    ? '<p class="hint">Driven by the Safe ↔ Upside slider on the board, so it is not set here.</p>'
-    : `<div class="cTop"><span>How much this component counts</span>
-<input type="range" min="0" max="30" step="1" data-cw="${c.key}" value="${st.comp[c.key] ?? 0}" /></div>`}
-${c.subs.length ? `<div class="statRow hdr"><span>Stat</span>${data.ratePos.map((q) => `<span>${q}</span>`).join('')}</div>${subs}
-<p class="hint">One slider per position. A zero means the stat says nothing there — a receiver has no carries to break tackles on — but you can raise it if you disagree.</p>` : ''}
-${mineHere.length ? `<div class="addBar">
-<button data-clearcustom="${c.key}" class="small">Remove the ${mineHere.length} stat${mineHere.length > 1 ? 's' : ''} you added here</button>
-</div>` : ''}
-</div></details>`;
-  }).join('');
-  $('#comps').innerHTML = html || `<p class="empty">No stat matches “${find}”.</p>`;
 }
 
 // ---------------------------------------------------------------- sleeper
@@ -983,8 +923,6 @@ function renderChrome() {
   $('#colToggles').innerHTML = groups.join('');
   $('#rookie').checked = st.rookie;
   $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
-  if ($('#tilt2')) $('#tilt2').value = Math.round(st.tilt * 100);
-  if ($('#style2')) $('#style2').value = st.style;
   if ($('#rookie')) $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
   readouts();
@@ -1132,7 +1070,7 @@ function wire() {
     }
   });
   for (const [id, fn] of [['need', (v) => { st.need = +v; }],
-    ['style2', (v) => { st.style = +v; }], ['tilt2', (v) => { st.tilt = +v / 100; }]]) {
+  ]) {
     const el = $(`#${id}`);
     if (!el) continue;
     el.oninput = (e) => { fn(e.target.value); readouts(); save(); scheduleRebuild(); };
@@ -1173,86 +1111,45 @@ function wire() {
     if (!f) return;
     f.text().then((t) => {
       const o = JSON.parse(t);
-      Object.assign(st, { comp: o.comp, sub: o.sub, style: o.style, tilt: o.tilt, need: o.need, rookie: o.rookie });
+      Object.assign(st, { fit: o.fit || st.fit, fitExtra: o.fitExtra || {},
+        need: o.need ?? st.need, rookie: o.rookie ?? st.rookie, posx: o.posx || st.posx });
+      fitBuilt = '';
       save(); renderChrome(); rebuild();
-    }).catch(() => alert('That file is not a ratings profile.'));
+    }).catch(() => alert('That file is not a preferences file.'));
   };
-  $('#statFind').oninput = () => renderRatings();
   $('#resetR').onclick = () => {
     const base = DEFAULT_SETTINGS(data);
-    Object.assign(st, { comp: base.comp, sub: base.sub });
-    save(); rebuild();
+    Object.assign(st, { fit: { ...base.fit }, fitExtra: {} });
+    fitBuilt = '';
+    save(); renderChrome(); rebuild();
   };
 
-  document.body.addEventListener('input', (e) => {
-    const t = e.target;
-    if (t.dataset.cw) {
-      st.comp[t.dataset.cw] = +t.value;
-      t.closest('.comp').querySelector('.cW').textContent = t.value;
-      save(); scheduleRebuild();
-    } else if (t.dataset.sw) {
-      const v = +t.value || 0;
-      st.sub[t.dataset.sw].w[t.dataset.q] = v;
-      t.parentElement.querySelector('u').textContent = v;
-      t.parentElement.classList.toggle('zero', !v);
-      subVersion += 1;
-      save(); scheduleRebuild();
-    }
-  });
+  // Ticking an extra scoring key into one of the two point-based sliders. This is all
+  // that remains of stat customisation, and it is bounded by what your league actually
+  // scores - there is nothing to offer that the league does not pay or fine.
   document.body.addEventListener('change', (e) => {
-    if (e.target.id === 'addPick' && e.target.value) {
-      const parts = e.target.value.split('|');
-      if (parts[0] === 'on') {
-        // it already exists in the rating, it was just switched off - turn it back on
-        // rather than creating a duplicate copy of the same number
-        st.sub[parts[1]].on = true;
-        subVersion += 1;
-        const home = data.components.find((c) => c.subs.some((x) => x.key === parts[1]));
-        st.openComps ||= [];
-        if (home && !st.openComps.includes(home.key)) st.openComps.push(home.key);
-        save(); rebuild();
-        $(`details.comp[data-comp="${home?.key}"]`)?.scrollIntoView?.({ block: 'nearest' });
-        return;
-      }
-      const [, field, hi, pg, comp] = parts;
-      const meta = RAW_FIELDS.find((f) => f[0] === field);
-      st.customs ||= [];
-      st.customs.push({
-        key: `x_${comp}_${field}`, field, comp,
-        hi: hi === 'true', pg: pg === 'true',
-        label: meta[1] + (pg === 'true' ? ' / game' : ''),
-      });
-      syncCustoms();
-      subVersion += 1;
-      // open the component it went into, so it is never added into a collapsed panel
-      st.openComps ||= [];
-      if (!st.openComps.includes(comp)) st.openComps.push(comp);
-      save(); rebuild();
-      const panel = $(`details.comp[data-comp="${comp}"]`);
-      if (panel?.scrollIntoView) panel.scrollIntoView({ block: 'nearest' });
-      return;
-    }
-    if (e.target.dataset.son) {
-      st.sub[e.target.dataset.son].on = e.target.checked;
-      e.target.closest('.statRow').classList.toggle('off', !e.target.checked);
-      subVersion += 1;
-      save(); rebuild();
-    }
+    const key = e.target.dataset.fitkey;
+    if (!key) return;
+    const [axis, field] = key.split('|');
+    const cur = new Set(((st.fitExtra || {})[axis]) || []);
+    if (e.target.checked) cur.add(field); else cur.delete(field);
+    st.fitExtra = { ...(st.fitExtra || {}), [axis]: [...cur] };
+    fitBuilt = '';
+    save(); rebuild();
   });
 
   document.body.addEventListener('click', (e) => {
     const b = e.target.closest('button');
     if (!b) return;
     if (b.dataset.strat) {
-      // a preset sets temperament only - never position values, never stat weights
-      Object.assign(st, PRESETS.find((y) => y.key === b.dataset.strat).set);
+      // a preset sets temperament only - never position values
+      const preset = PRESETS.find((y) => y.key === b.dataset.strat).set;
+      Object.assign(st, { ...preset, fit: { ...preset.fit } });
+      fitBuilt = '';                 // the readouts must follow the preset
       save(); renderChrome(); rebuild();
     } else if (b.dataset.lean) {
       st.posx = { ...LEANS.find((l) => l.key === b.dataset.lean).posx };
       save(); rebuild();
-    } else if (b.dataset.clearcustom) {
-      st.customs = (st.customs || []).filter((c) => c.comp !== b.dataset.clearcustom);
-      syncCustoms(); subVersion += 1; save(); rebuild();
     } else if (b.id === 'more') { limit += 100; renderBoard(); }
     else if (b.dataset.v) show(b.dataset.v);
     else if (b.dataset.f) {

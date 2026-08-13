@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608131000" />
+<link rel="stylesheet" href="styles.css?v=202608131017" />
 </head>
 <body>
 
@@ -110,34 +110,17 @@
       <p id="stratWhy" class="hint"></p>
     </div>
     <div class="knobs labKnobs">
-      <label class="knob">
-        <span class="knobLabel"><span data-tip="tilt" tabindex="0">Trust my ratings</span> <em id="tiltOut2">50%</em></span>
-        <input id="tilt2" type="range" min="0" max="200" step="5" value="50" />
-        <span class="hint">Past 100 your ratings start to outrank projected points.</span>
-      </label>
-      <label class="knob">
-        <span class="knobLabel"><span data-tip="style" tabindex="0">Safe <em id="styleOut2">balanced</em> Upside</span></span>
-        <input id="style2" type="range" min="0" max="100" step="5" value="50" />
-        <span class="hint">Moves weight between the steady components and Upside.</span>
-      </label>
       <label class="check">
         <input id="rookie" type="checkbox" checked />
         <span data-tip="rookie" tabindex="0">Rookie upside<span class="hint">Pay up for rookies you trust</span></span>
       </label>
     </div>
     <div class="rowbtns">
-      <button id="exportR">Export my ratings</button>
-      <label class="fileBtn">Import ratings<input id="importR" type="file" accept=".json" /></label>
+      <button id="exportR">Export my preferences</button>
+      <label class="fileBtn">Import<input id="importR" type="file" accept=".json" /></label>
       <button id="resetR" class="ghost">Reset to default</button>
     </div>
-    <div id="addStat" class="addStat"></div>
-    <label class="addLine" style="margin-bottom:18px">
-      <span class="stratLabel">Find a stat</span>
-      <input id="statFind" type="search" placeholder="interceptions, red zone, snap…" />
-    </label>
     <p class="priority big">You are drafting for <span id="priority2"></span></p>
-    <p id="inflNote" class="inflNote"></p>
-    <div id="comps"></div>
   </main>
 </section>
 
@@ -185,6 +168,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608131000"></script>
+<script type="module" src="app.js?v=202608131017"></script>
 </body>
 </html>

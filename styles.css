@@ -589,3 +589,13 @@ span.nm:hover { text-decoration: none; }
 .footBtns { display: flex; gap: 8px; }
 #undo:disabled { opacity: .45; cursor: default; }
 #undo:disabled:hover { background: var(--card); border-color: var(--line2); }
+
+/* "What this counts" - the whole of what is left of stat customisation. */
+.counts { margin-top: 8px; font-size: 12px; }
+.counts summary { cursor: pointer; color: var(--ink3); padding: 3px 0; }
+.counts summary:hover { color: var(--ink2); }
+.countList { margin: 6px 0 8px; padding-left: 18px; color: var(--ink2); }
+.countList li { margin: 2px 0; }
+.countList em, .spare em { font-style: normal; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.spare { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.check.tiny { font-size: 12px; }

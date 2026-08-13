@@ -1,13 +1,16 @@
 // Two different kinds of choice, which used to be muddled into one list.
 //
-// PRESETS are about temperament - how much you trust your own ratings, whether you want
-// floors or ceilings, whether roster holes should pull you around. They are preferences
-// you can hold before the draft starts, so they live in the Ratings Lab as starting points.
+// PRESETS are about temperament - what kind of player you want when the value numbers
+// cannot separate two men. They are preferences you can hold before the draft starts, so
+// they live on the Ratings page as starting points. Each one just sets the four sliders.
 //
 // LEANS are about position scarcity, which you cannot know in advance. Whether Zero RB is
 // right depends entirely on how the board falls on the night. So they are not offered as
 // a personality to pick up front - the app watches the board and suggests one when the
 // evidence is there, and an advanced user can force one from the board.
+//
+// "Trust my ratings" used to be a preset. It is gone, because the thing it told you to
+// trust measured no better than chance against the projections over five seasons.
 
 export const PRESETS = [
   {
@@ -15,38 +18,37 @@ export const PRESETS = [
     name: 'Balanced',
     blurb: 'Best player available, nudged by what you still need.',
     when: 'Hard to go badly wrong. Rarely wins the league on its own.',
-    set: { tilt: 0.5, need: 8, style: 50, rookie: true },
+    set: { fit: { td: 0, asc: 0, dur: 0, pen: 0 }, need: 8, rookie: true },
   },
   {
     key: 'value',
     name: 'Pure value',
     blurb: 'Ignore roster holes and take the most points above replacement.',
     when: 'Strong early and with deep benches. Can leave you with five backs and no tight end.',
-    set: { tilt: 0.2, need: 0, style: 50, rookie: true },
-  },
-  {
-    key: 'mine',
-    name: 'Trust my ratings',
-    blurb: 'Let your own weights outrank the projections when they disagree.',
-    when: 'Only if you have actually tuned the stats below. Otherwise it just adds noise.',
-    set: { tilt: 1.4, need: 6, style: 50, rookie: true },
+    set: { fit: { td: 0, asc: 0, dur: 0, pen: 0 }, need: 0, rookie: true },
   },
   {
     key: 'upside',
     name: 'Upside hunter',
-    blurb: 'Chase ceilings and rookies, and accept the busts that come with them.',
+    blurb: 'Chase the men whose points come in lumps, and the ones being asked to jump.',
     when: 'Good in a big league where a median team wins nothing. Bad in a small one.',
-    set: { tilt: 0.7, need: 6, style: 90, rookie: true },
+    set: { fit: { td: 70, asc: 60, dur: -20, pen: 0 }, need: 6, rookie: true },
   },
   {
     key: 'floor',
     name: 'Safe floor',
-    blurb: 'Locked-in roles and players who do not miss games.',
+    blurb: 'Steady scorers who were on the field every week.',
     when: 'Good when you just need to make the playoffs. Rarely produces the best team.',
-    set: { tilt: 0.6, need: 10, style: 10, rookie: false },
+    set: { fit: { td: -60, asc: -50, dur: 70, pen: 40 }, need: 10, rookie: false },
+  },
+  {
+    key: 'clean',
+    name: 'No mistakes',
+    blurb: 'Avoid the men who fumble and throw interceptions, priced at your league rules.',
+    when: 'Worth more the harder your league fines them. Does nothing in a league that does not.',
+    set: { fit: { td: -20, asc: 0, dur: 40, pen: 90 }, need: 8, rookie: true },
   },
 ];
-
 // Position leans. These only ever set position multipliers - never the rating knobs.
 export const LEANS = [
   {
@@ -70,9 +72,9 @@ export const LEANS = [
 export function activePreset(st) {
   return PRESETS.find((s) => {
     const a = s.set;
-    return Math.abs((st.tilt ?? 0.5) - a.tilt) < 0.01
+    const fit = st.fit || {};
+    return Object.entries(a.fit).every(([k, v]) => (fit[k] || 0) === v)
       && (st.need ?? 8) === a.need
-      && (st.style ?? 50) === a.style
       && !!st.rookie === !!a.rookie;
   })?.key || null;
 }

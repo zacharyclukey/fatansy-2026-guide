@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS = (data) => ({
   // They break ties between players you would be roughly equally happy with. They are
   // not a forecast and the app says so.
   fit: { td: 0, asc: 0, dur: 0, pen: 0 },
+  fitExtra: {},       // extra scoring keys you have added to a point-based axis
   fitOn: true,
   need: 8,            // draft-score bonus for a position you still need
   style: 50,          // 0 = safest floor, 100 = highest ceiling
@@ -53,18 +54,56 @@ export const FIT_BAND = 8;        // most Fit can move a score. Deliberately sma
 
 export const FIT_AXES = [
   { key: 'td', label: 'Steady points vs big plays', left: 'Steady', right: 'Big plays',
-    hint: 'How much of his projection arrives in lumps - touchdowns, long catches, any '
-        + 'bonus THIS league pays. Lumps are where the big weeks and the empty ones '
-        + 'both come from.' },
+    hint: 'How much of his projection arrives in lumps rather than as a steady drip. '
+        + 'Lumps are where the big weeks and the empty ones both come from.',
+    open: true },
   { key: 'asc', label: 'Proven vs ascending', left: 'Proven', right: 'Ascending',
-    hint: 'How big a leap the 2026 projection is asking for, against what he actually did.' },
+    hint: 'How big a leap the 2026 projection is asking for, against what he actually did.',
+    uses: ['Projected points per game this year', 'His points per game last year',
+      'A man with no last season counts as a big ask'] },
   { key: 'dur', label: 'Punish injury risk', left: 'Ignore it', right: 'Punish it',
-    hint: 'Games he was available for. The only one of these with hard evidence behind '
-        + 'it: every projection overshoots, and the whole gap is games missed.' },
+    hint: 'The only one of these with hard evidence behind it: every projection '
+        + 'overshoots its season total, and the whole gap is games missed.',
+    uses: ['Games he was available for last season, out of 17'] },
   { key: 'pen', label: 'Avoid mistakes', left: 'Do not care', right: 'Avoid them',
-    hint: 'Fumbles and interceptions, priced at what YOUR league fines them. Hidden in a '
-        + 'league that does not punish them.', needsPenalties: true },
+    hint: 'Fumbles and interceptions, priced at what YOUR league actually fines them.',
+    needsPenalties: true, open: true },
 ];
+
+// Plain-English names for the scoring keys a person might tick on or off. Anything not
+// listed here is still usable, it just shows its raw Sleeper name.
+export const KEY_NAMES = {
+  rush_td: 'Rushing touchdowns', rec_td: 'Receiving touchdowns', pass_td: 'Passing touchdowns',
+  rush_2pt: 'Two-point runs', rec_2pt: 'Two-point catches', pass_2pt: 'Two-point passes',
+  rec_40p: '40+ yard catches', rush_40p: '40+ yard runs', pass_40p: '40+ yard passes',
+  bonus_rush_yd_100: '100-yard rushing games', bonus_rec_yd_100: '100-yard receiving games',
+  bonus_rush_rec_yd_100: '100-yard games', bonus_pass_yd_300: '300-yard passing games',
+  bonus_pass_yd_400: '400-yard passing games',
+  fum_lost: 'Fumbles lost', fum: 'Fumbles', pass_int: 'Interceptions thrown',
+  rec_drop: 'Drops', rec_fd: 'Receiving first downs', rush_fd: 'Rushing first downs',
+  pass_fd: 'Passing first downs', pass_cmp: 'Completions', rec: 'Receptions',
+  rush_yd: 'Rushing yards', rec_yd: 'Receiving yards', pass_yd: 'Passing yards',
+};
+export const keyName = (k) => KEY_NAMES[k] || k;
+
+// Which scoring keys each of the two point-based axes counts, given your league and any
+// extras you have ticked on. Only keys the league actually scores are ever included -
+// there is no point counting 40-yard catches in a league that does not pay for them.
+export function axisKeys(axis, league, st = {}) {
+  const sc = league.scoring || {};
+  const extra = (st.fitExtra || {})[axis] || [];
+  const base = axis === 'pen' ? COSTLY : LUMPY;
+  return [...new Set([...base, ...extra])].filter((k) => (sc[k] || 0) !== 0);
+}
+
+// Everything else the league scores that this axis is not already counting, so the UI can
+// offer them without ever offering something meaningless.
+export function axisSpare(axis, league, st = {}) {
+  const sc = league.scoring || {};
+  const used = new Set(axisKeys(axis, league, st));
+  const wrongWay = axis === 'pen' ? (v) => v >= 0 : (v) => v <= 0;
+  return Object.keys(sc).filter((k) => !used.has(k) && !wrongWay(sc[k])).sort();
+}
 
 // Points that arrive in lumps, under YOUR league's rules.
 //
@@ -89,16 +128,16 @@ function pointsFrom(p, league, keys) {
 
 // Share of his projection that comes in lumps rather than as a steady drip. High means a
 // boom-or-bust week; low means he gets you his points whether or not he finds the endzone.
-export function swingShare(p, league) {
+export function swingShare(p, league, st = {}) {
   const total = projectedPoints(p, league);
   if (total <= 0) return 0;
-  return Math.max(0, Math.min(1, pointsFrom(p, league, LUMPY) / total));
+  return Math.max(0, Math.min(1, pointsFrom(p, league, axisKeys('td', league, st)) / total));
 }
 
 // Points this league fines him for, per season. Zero in a league with no penalties, which
 // is why the slider that uses it hides itself when the league has none.
-export function riskPoints(p, league) {
-  return -pointsFrom(p, league, COSTLY);
+export function riskPoints(p, league, st = {}) {
+  return -pointsFrom(p, league, axisKeys('pen', league, st));
 }
 
 // Does this league punish mistakes at all? Decides whether to show that preference.
@@ -395,9 +434,9 @@ export function buildBoard(data, st, cache) {
   // Each Fit trait as a percentile within position, so "touchdown-heavy" means heavy for
   // a running back rather than heavy compared with a quarterback.
   for (const list of Object.values(byPos)) {
-    for (const [key, get] of [['td', (r) => swingShare(r.p, league)],
+    for (const [key, get] of [['td', (r) => swingShare(r.p, league, st)],
       ['asc', (r) => ascent(r.p)], ['dur', (r) => durability(r.p)],
-      ['pen', (r) => -riskPoints(r.p, league)]]) {
+      ['pen', (r) => -riskPoints(r.p, league, st)]]) {
       const vals = list.map((r) => [r, get(r)]).sort((a, b) => a[1] - b[1]);
       const n = vals.length;
       // Ties share a percentile. Without this, thirty-two defences all on zero touchdown
