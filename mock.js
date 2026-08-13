@@ -10,7 +10,7 @@
 // models is the ONE thing a draft room reliably does - take players roughly in ADP order,
 // with need and herd behaviour pulling on it - and it says so on screen.
 
-import { myPicks, roundsOf } from './engine.js?v=202608131405';
+import { myPicks, roundsOf } from './engine.js?v=202608131423';
 
 // ---------------------------------------------------------------- randomness
 // Seeded, so a mock can be replayed. The seed is mixed with the pick number rather than
@@ -168,21 +168,33 @@ export function aiPick(avail, roster, league, opts) {
 // Two rules stop it being silly, and they are the same two the pretend teams follow:
 // never carry more of a position than anyone sensibly carries, and once your remaining
 // picks equal your empty starting slots, fill them.
-export function autoPick(rows, gone, roster, league, picksLeft, caps) {
+// `prefer` is what the app's own recommendation panel would say - the player it names, and
+// failing him the position it names. Passing it in is what gives the auto-drafter a CLOCK.
+// Without it, it took the top of the board every time, which is how it ended up spending
+// pick 96 on a man the whole room agreed would still be there at 170. Board order says who
+// is best; cost of waiting says who will not last. A drafter needs both.
+export function autoPick(rows, gone, roster, league, picksLeft, caps, prefer) {
   const need = needsOf(roster, league);
   const cap = caps || capsOf(league);
   const forced = need.total >= picksLeft;
-  for (const r of rows) {
-    const p = r.p || r;
-    if (gone.has(p.id)) continue;
-    if ((need.have[p.pos] || 0) >= (cap[p.pos] ?? 99)) continue;
-    if (forced && !wants(p.pos, need)) continue;
+  const ok = (p) => !gone.has(p.id)
+    && (need.have[p.pos] || 0) < (cap[p.pos] ?? 99)
+    // once your picks run out, only the slots you still have to fill
+    && (!forced || wants(p.pos, need))
     // A kicker and a defence go last, always. Not because the board is wrong about them -
     // a starting kicker really is worth more than the sixtieth receiver - but because the
-    // board has no sense of time and they do not go anywhere. Waiting on one costs nothing,
-    // which is what the cost-of-waiting panel says about them every single pick.
-    if (!forced && ['K', 'DEF'].includes(p.pos)) continue;
-    return p;
+    // board has no sense of time and they are not going anywhere.
+    && (forced || !['K', 'DEF'].includes(p.pos));
+
+  if (prefer) {
+    const named = rows.find((r) => (r.p || r).id === prefer.id && ok(r.p || r));
+    if (named) return named.p || named;
+    const atPos = rows.find((r) => (r.p || r).pos === prefer.pos && ok(r.p || r));
+    if (atPos) return atPos.p || atPos;
+  }
+  for (const r of rows) {
+    const p = r.p || r;
+    if (ok(p)) return p;
   }
   // Caps have painted us into a corner - take the best man left rather than stalling.
   for (const r of rows) {

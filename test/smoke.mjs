@@ -1137,6 +1137,159 @@ const fire = (el, type) => {
   ok('three practice drafts raised no errors', errs.length === 0, errs.join('; '));
 }
 
+// ------------------------------------------------ 10. a man with no NFL season
+// The worst bug this project has had. The pipeline worked out ONE rookie score and copied
+// it into every history sub-metric, so a player who had never taken a snap read 94 for
+// rushing efficiency, 94 for red-zone conversion and 94 for reliability. The rating, being
+// the mean of forty copies of one number, came out 81 - higher than a proven WR1 - for a
+// quarterback projected 84 points BELOW replacement, and he went at pick 96 against an ADP
+// of 170. Every unexplained reach on the board was a player with no season.
+{
+  const e = await import(`file://${DIR}/engine.js`);
+  const data = JSON.parse(JSON.stringify(players));
+  data.leagues = [e.SAMPLE_LEAGUE];
+  const base = e.DEFAULT_SETTINGS(data);
+  const b = e.buildBoard(data, { ...base, mine: [] });
+  const row = (n) => b.rows.find((r) => r.p.name === n);
+  const noSeason = b.rows.filter((r) => e.noSeason(r.p));
+
+  ok('the pool really does contain men with no season', noSeason.length > 15,
+    `${noSeason.length}`);
+
+  // ---- the invented percentiles are ignored ----------------------------
+  const fabricated = noSeason.filter((r) => {
+    const v = Object.values(r.p.sub || {}).filter((x) => x != null).map(Math.round);
+    const c = {};
+    for (const x of v) c[x] = (c[x] || 0) + 1;
+    return v.length > 5 && Math.max(...Object.values(c)) >= v.length * 0.6;
+  });
+  ok('todays data file still has the invented percentiles in it', fabricated.length > 0,
+    'if this fails the pipeline fix has landed and this test can be simplified');
+  const bars = noSeason.filter((r) => ['volume', 'efficiency', 'redzone', 'explosive',
+    'production', 'reliability'].some((k) => r.scores[k] != null));
+  ok('but no history component reports a score for a man with no history',
+    bars.length === 0, bars.slice(0, 3).map((r) => r.p.name).join(', '));
+
+  // ---- he is rated on what is actually knowable ------------------------
+  const wrong = noSeason.filter((r) => Math.abs(r.rating
+    - e.rookieRating(r.p, r.scores.projection)) > 0.01);
+  ok('a man with no season is rated on projection, draft capital and depth chart',
+    wrong.length === 0, wrong.slice(0, 3).map((r) => r.p.name).join(', '));
+  ok('draft capital steps the way NFL opportunity does',
+    e.capitalScore(1) === 100 && e.capitalScore(20) === 85 && e.capitalScore(200) === 25
+    && e.capitalScore(null) === 25);
+  ok('the projection is the biggest single part of it', e.ROOKIE_MIX.proj > e.ROOKIE_MIX.capital
+    && e.ROOKIE_MIX.capital > e.ROOKIE_MIX.role);
+  // two rookies, same everything except where they were drafted
+  const fake = (pick) => ({ m: { draft_pick: pick, role_pct: 50, team_off: 1000 } });
+  ok('a first-round pick outrates a day-three pick',
+    e.rookieRating(fake(5), 50) > e.rookieRating(fake(180), 50));
+  ok('but the projection can outweigh the draft slot',
+    e.rookieRating(fake(180), 95) > e.rookieRating(fake(5), 20));
+
+  // ---- the regression itself -------------------------------------------
+  const mendoza = row('Fernando Mendoza');
+  const collins = row('Nico Collins');
+  if (mendoza && collins) {
+    ok('a rookie projected below replacement no longer outrates a proven WR1',
+      mendoza.rating < collins.rating,
+      `${mendoza.rating.toFixed(0)} vs ${collins.rating.toFixed(0)}`);
+    ok('and he is no longer a top-70 pick', mendoza.rank > 70, `#${mendoza.rank}`);
+  }
+  const cheats = b.rows.filter((r) => r.rank <= 60 && r.vor < -40);
+  ok('nobody miles below replacement sits in the top 60', cheats.length === 0,
+    cheats.map((r) => `${r.p.name} #${r.rank} vor ${r.vor.toFixed(0)}`).join(', '));
+  const gaps = noSeason.map((r) => r.adpRank - r.rank);
+  ok('as a group they are no longer ranked above the market',
+    gaps.reduce((a, c) => a + c, 0) / gaps.length < 5,
+    `mean ${(gaps.reduce((a, c) => a + c, 0) / gaps.length).toFixed(0)} places above ADP`);
+
+  // ---- and the double count is gone -------------------------------------
+  // Draft capital is 30% of his rating now, so a +10 bonus on top was the same fact twice.
+  ok('the rookie bonus is a nudge, not a second rating', base.rookieMax <= 5,
+    `${base.rookieMax}`);
+
+  // ---- forward compatible with the fixed pipeline ------------------------
+  // Tomorrow's data file leaves those sub-metrics out entirely. The board must come out
+  // the same, which is what proves the app is not leaning on the invention.
+  const clean = JSON.parse(JSON.stringify(players));
+  clean.leagues = [e.SAMPLE_LEAGUE];
+  let stripped = 0;
+  for (const p of clean.players) {
+    if (!e.noSeason(p)) continue;
+    const copied = p.m?.rookie_score;
+    for (const k of Object.keys(p.sub || {})) {
+      if (copied != null && p.sub[k] === copied) { delete p.sub[k]; stripped += 1; }
+    }
+  }
+  ok('the stripped copy really did lose the invented numbers', stripped > 50, `${stripped}`);
+  const b2 = e.buildBoard(clean, { ...e.DEFAULT_SETTINGS(clean), mine: [] });
+  const moved = b2.rows.filter((r) => e.noSeason(r.p)
+    && Math.abs(r.rating - (row(r.p.name)?.rating ?? 0)) > 0.01);
+  ok('and the board is identical without them', moved.length === 0,
+    moved.slice(0, 3).map((r) => r.p.name).join(', '));
+
+  // ---- a saved profile cannot keep the old bonus ------------------------
+  const store = { draft2026: JSON.stringify({ rookieMax: 10, league: 0 }) };
+  const { d: d2 } = await boot({ store });
+  await settle();
+  fire(d2.defaultView, 'pagehide');
+  ok('an old saved profile does not keep the old rookie bonus',
+    JSON.parse(store.draft2026).rookieMax <= 5, `${JSON.parse(store.draft2026).rookieMax}`);
+}
+
+// ------------------------------------------- 10b. the auto-drafter has a clock now
+// It used to take the top of the board every time, which is how it spent pick 96 on a man
+// the whole room agreed would still be there at 170. It now does what the recommendation
+// panel says, which is the same code path Zach will be reading on the night.
+{
+  const e = await import(`file://${DIR}/engine.js`);
+  const mk = await import(`file://${DIR}/mock.js`);
+  const R = e.roundsOf(e.SAMPLE_LEAGUE);
+  let picks = 0;
+  let early = 0;
+  let worst = 0;
+  for (const slot of [1, 6, 12]) {
+    const { window, d } = await boot();
+    d.querySelector('[data-v="mock"]').click();
+    await settle();
+    d.querySelector('#mockSlot').value = String(slot);
+    d.querySelector('#mockAll').click();
+    await settle();
+    fire(window, 'pagehide');
+    const st = JSON.parse(window.localStorage.getItem('draft2026') || '{}');
+    ok(`slot ${slot} drafts a full team`, st.mock?.done && st.picks[0].mine.length === R,
+      `${st.picks[0]?.mine?.length}`);
+    for (const x of st.mock.log.filter((y) => y.team === slot)) {
+      if (!x.adp || x.adp > 180 || ['K', 'DEF'].includes(x.pos)) continue;
+      picks += 1;
+      const gap = x.n - x.adp;
+      if (gap <= -12) early += 1;
+      worst = Math.min(worst, gap);
+    }
+  }
+  // Reaching sometimes is the point of having your own board. Reaching 73 picks was not.
+  ok('it no longer reaches half a draft early', Math.abs(worst) < 45,
+    `worst reach ${Math.abs(worst).toFixed(0)} picks`);
+  ok('and most picks are near the going rate', early / picks < 0.35,
+    `${early} of ${picks} were 12+ picks early`);
+  // it takes the man the panel names
+  const { d } = await boot();
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockSlot').value = '6';
+  d.querySelector('#mockStart').click();
+  await settle();
+  const named = d.querySelector('#advice .advHead b')?.textContent.trim();
+  d.querySelector('#mockAuto').click();
+  await settle();
+  const got = d.querySelector('.row.player.mine .nm')?.textContent.trim().split(/\s{2,}|\n/)[0];
+  ok('picking for you takes the player the panel just named',
+    !!named && !!got && got.startsWith(named), `panel said "${named}", took "${got}"`);
+  ok('the mock module still exposes what the app imports',
+    typeof mk.autoPick === 'function' && typeof mk.capsOf === 'function');
+}
+
 // ---------------------------------------------------------------- report
 console.log(`\n${pass} passed, ${fails.length} failed`);
 for (const f of fails) console.log('  FAIL', f);

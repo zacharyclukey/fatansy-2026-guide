@@ -59,7 +59,7 @@ node test/_probe.mjs   # optional: plays three practice drafts and prints what t
 node test/_auto.mjs    # optional: lets the app draft for itself and prints the teams
 ```
 
-195 checks against the real `index.html` in a real DOM — the engine maths, the board, the
+224 checks against the real `index.html` in a real DOM — the engine maths, the board, the
 draft clock, the call, strategies, Sleeper import and sync, and the offline path. Two of
 them play a **whole 180-pick draft**, once headlessly and once by clicking the real buttons,
 which is the best regression test in here: it covers the snake maths, the drafted list, the
@@ -74,10 +74,10 @@ your real league settings, and hands you the board when it is your turn. A full 
 about a minute. Nothing it does touches a real draft — and it warns you before it clears a
 board you have picks on.
 
-**Draft it all for me** plays the whole thing in one press, taking the top of your board
-every time — the quickest way to see what your ratings and preferences actually build, and
-what they build from slot 1 against slot 12. You can also hand over half way through, and
-the report marks which picks were yours and which were the app's.
+**Draft it all for me** plays the whole thing in one press, doing exactly what the
+recommendation panel says on every pick — so it is both a look at what your ratings build
+and a full rehearsal of the advice you will be following on the night. You can hand over
+half way through, and the report marks which picks were yours and which were the app's.
 
 One control: **how disciplined is this room**. Tight means the other teams take the best
 player left by ADP almost every time; loose means they reach. The model underneath is
@@ -88,6 +88,26 @@ twice in a row, and fill your empty slots once you run out of room to shop.
 **It is not a prediction.** It does not know your family and it cannot know who busts —
 nothing measured over 2020–2025 could. It copies the one habit every draft room really has,
 so that the interface gets used in anger before the night it matters.
+
+## Players with no NFL season
+
+Roughly a third of the pool has no 2025 games — rookies, and veterans the stats feed does
+not cover. They used to be handed **one** number, the rookie model's score, copied into all
+forty history sub-metrics. The rating is the mean of those sub-metrics, so it just returned
+that one number wearing forty hats: a quarterback who had never taken a snap read 94 for
+rushing efficiency, 94 for red-zone conversion and 94 for reliability, rated 81 out of 100
+while projecting 84 points **below** replacement, and got drafted at pick 96 against an ADP
+of 170. Every unexplained reach on the board was a player who had never played.
+
+Now a man with no season is rated on the three things actually knowable about him — his
+projection (45%), where he went in the NFL draft (30%), and how much of his team's work he
+has been handed (25% between depth chart and team offence) — and the stats he does not have
+say nothing at all. The pipeline emits blanks instead of copies, `check_data.py` fails the
+build if anything starts inventing them again, and the app ignores them either way, so it
+is correct with today's committed data file as well as tomorrow's.
+
+The rookie bonus dropped from +10 to +4 at the same time: draft capital is now inside the
+rating, so a full need-bonus on top of it was the same fact counted twice.
 
 Playing practice drafts has found seven real bugs so far, every one of them in the app
 rather than the simulator: the recommendation panel was a draft behind on the first pick, a

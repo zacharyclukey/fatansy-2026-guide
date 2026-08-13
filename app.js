@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131405';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131405';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131405';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131405';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131405';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131423';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131423';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131423';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131423';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131423';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131405';
+const BUILD = '202608131423';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -157,6 +157,9 @@ function load() {
   // New stats have to be added, and - the part that was silently wrong - stats that no
   // longer exist have to be dropped. A leftover weight for a deleted component still
   // counted towards the total the rating divides by, quietly diluting every real one.
+  // Not a user setting - there is no control for it - so it always comes from the code.
+  // Without this a profile saved before it was retuned keeps the old value for ever.
+  st.rookieMax = base.rookieMax;
   st.comp = { ...base.comp, ...(st.comp || {}) };
   for (const k of Object.keys(st.comp)) if (!(k in base.comp)) delete st.comp[k];
   st.sub ||= {};
@@ -320,6 +323,31 @@ function syncCustoms() {
   }
 }
 
+// What the app would do with this pick: which position costs most to wait on, and who to
+// take there. Pulled out of the panel so that when the app drafts for you it follows its
+// OWN advice rather than a second opinion written next to it - which also means every
+// practice draft is a test of the thing you will actually lean on come draft night.
+function recommendation(drafted, have) {
+  if (!clock?.target) return null;
+  const ranked = costOfWaiting(board.rows, clock, drafted, board.league, have, { need: st.need })
+    .filter((x) => !['K', 'DEF'].includes(x.pos) || x.shortfall > 0);
+  if (!ranked.length) return null;
+
+  const top = ranked[0];
+  // if you have starred someone at this position who is within touching distance of the
+  // best available, recommend YOUR man - that is the whole point of the star
+  const near = board.rows.find((r) => r.p.pos === top.pos && r.star && !drafted.has(r.p.id)
+    && r.score >= top.best.score - STAR_BAND && r.p.id !== top.best.p.id);
+  if (near) top.best = near;
+  // and never lead with someone you have said you do not trust, if there is an alternative
+  if (top.best.fade) {
+    const alt = board.rows.find((r) => r.p.pos === top.pos && !r.fade && !drafted.has(r.p.id)
+      && r.score >= top.best.score - STAR_BAND * 2);
+    if (alt) top.best = alt;
+  }
+  return { ranked, top, near };
+}
+
 // The recommendation panel: what to do with THIS pick, and why.
 function renderAdvice() {
   const box = $('#advice');
@@ -343,22 +371,9 @@ function renderAdvice() {
       + '<b>My team</b> tab.</p>';
     return;
   }
-  const ranked = costOfWaiting(board.rows, clock, drafted, board.league, have, { need: st.need })
-    .filter((x) => !['K', 'DEF'].includes(x.pos) || x.shortfall > 0);
-  if (!ranked.length) { box.innerHTML = ''; return; }
-
-  const top = ranked[0];
-  // if you have starred someone at this position who is within touching distance of the
-  // best available, recommend YOUR man - that is the whole point of the star
-  const near = board.rows.find((r) => r.p.pos === top.pos && r.star && !drafted.has(r.p.id)
-    && r.score >= top.best.score - STAR_BAND && r.p.id !== top.best.p.id);
-  if (near) top.best = near;
-  // and never lead with someone you have said you do not trust, if there is an alternative
-  if (top.best.fade) {
-    const alt = board.rows.find((r) => r.p.pos === top.pos && !r.fade && !drafted.has(r.p.id)
-      && r.score >= top.best.score - STAR_BAND * 2);
-    if (alt) top.best = alt;
-  }
+  const rec = recommendation(drafted, have);
+  if (!rec) { box.innerHTML = ''; return; }
+  const { ranked, top, near } = rec;
   const cliff = top.best.lastOfTier;
   // kickers and defences always "can wait" - saying so is noise
   const cheap = ranked.filter((x) => x.cost < top.cost * 0.55 && x.pos !== top.pos
@@ -476,9 +491,10 @@ function mockTake(id, by) {
 
 // Let the app pick for you - one pick, or all the way to the end.
 //
-// This is the honest way to see what your settings actually build. It takes the top of
-// YOUR board every time, so whatever comes out is a picture of the ratings page rather
-// than of anybody's draft-day judgement, and the report says which picks were yours.
+// It does exactly what the recommendation panel tells you to do, pick by pick: the
+// position that costs most to wait on, the man it names there, your stars and fades
+// respected. So a practice draft is not just practice for you, it is a full run of the
+// advice you will be following on the night - and the report says which picks were yours.
 function autoDraft(all) {
   const m = mock();
   if (!m || m.done) return;
@@ -490,9 +506,14 @@ function autoDraft(all) {
     advanceMock();                       // the room, up to your turn or to the end
     if (m.done) break;
     rescore();                           // your need bonus has moved since the last pick
+    tickClock();                         // and so has the clock the recommendation needs
     const roster = picks().mine.map((id) => byId(id)).filter(Boolean);
-    const p = autoPick(board.rows, new Set(picks().drafted), roster, lg,
-      rounds - roster.length, caps);
+    const have = {};
+    for (const x of roster) have[x.pos] = (have[x.pos] || 0) + 1;
+    const drafted = new Set(picks().drafted);
+    const rec = recommendation(drafted, have);
+    const p = autoPick(board.rows, drafted, roster, lg, rounds - roster.length, caps,
+      rec ? { id: rec.top.best.p.id, pos: rec.top.pos } : null);
     if (!p) break;
     m.log.push({ n: m.log.length + 1, team: m.slot, id: p.id, pos: p.pos,
       adp: p.adp ?? null, by: 'app' });
@@ -541,7 +562,7 @@ function renderMockBar() {
 <b class="good">You are on the clock</b> — press <b>Pick</b> on the row you want.
 ${since.length ? `<span class="hint">${since.length} went since your last pick${
   names.length ? `: ${names.join(', ')}${since.length > names.length ? '…' : ''}` : ''}</span>` : ''}
-<button id="mockAuto" class="chipBtn" title="Take the top of your board">Pick for me</button>
+<button id="mockAuto" class="chipBtn" title="Do what the recommendation says">Pick for me</button>
 <button id="mockQuit" class="chipBtn">End</button>`;
 }
 
@@ -948,10 +969,14 @@ player you want.<div class="rowbtns"><button data-v="board" class="primary">Back
   // the end of the draft - averaging those in produced "average vs ranking: -80", which is
   // arithmetic about the size of the pool rather than anything about the picks.
   const rated = mineLog.filter((x) => isRanked(x.adp, total));
+  // Kickers and defences all go at the end at prices nobody has an opinion about, so
+  // "your best bit of business was the Dallas defence" is noise. The headline is about
+  // the picks that decided something.
+  const called = rated.filter((x) => !['K', 'DEF'].includes(x.pos));
   const gaps = rated.map((x) => vsAdp(x.n, x.adp));
   const avg = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
-  const best = [...rated].sort((a, b) => (b.n - b.adp) - (a.n - a.adp))[0];
-  const worst = [...rated].sort((a, b) => (a.n - a.adp) - (b.n - b.adp))[0];
+  const best = [...called].sort((a, b) => (b.n - b.adp) - (a.n - a.adp))[0];
+  const worst = [...called].sort((a, b) => (a.n - a.adp) - (b.n - b.adp))[0];
   const short = Object.entries(need.short).filter(([, v]) => v > 0)
     .map(([p, v]) => `${v} ${p}`);
   if (need.flex > 0) short.push(`${need.flex} flex`);
@@ -959,11 +984,11 @@ player you want.<div class="rowbtns"><button data-v="board" class="primary">Back
   // app built is a picture of the ratings page; a team you built is a picture of you.
   const auto = mineLog.filter((x) => x.by === 'app').length;
   const whose = auto === mineLog.length
-    ? 'Every pick was made by the app, straight off the top of your board — so this team is '
-      + 'a picture of your ratings and preferences, not of anybody\'s judgement on the night.'
+    ? 'Every pick was made by the app, following its own recommendation each time — so this '
+      + 'is the team your ratings and preferences build if you do exactly as you are told.'
     : auto === 0 ? 'You made every pick yourself.'
-      : `You made ${mineLog.length - auto} of these picks and the app made ${auto} off the top `
-        + 'of your board.';
+      : `You made ${mineLog.length - auto} of these picks and the app made ${auto} by `
+        + 'following its own recommendation.';
 
   const card = (label, val, note) => `<div class="card"><span class="cardV">${val}</span>
 <span class="cardL">${label}</span><span class="hint">${note}</span></div>`;

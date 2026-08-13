@@ -92,6 +92,10 @@ def raw_metrics(pid, pos, team, s):
 
     return dict(
         has2025=bool(a),
+        # bool(a) is not "he played". The 2025 feed returns a row for men who took no
+        # snaps at all - a rookie comes back as {'pos_rank_ppr': 173} - and treating that
+        # as a season let players with no games set the percentile scale for everyone.
+        played=bool(a) and int(g(a, 'gp')) > 0,
         snap_share=round(g(a, 'off_snp') / tm_snp * 100, 1),
         touches_pg=round(touches / gp, 2),
         volume_raw=round(g(a, 'off_snp') / tm_snp * 100 * 0.55 + (touches / gp) * 2.2, 2),
@@ -188,7 +192,7 @@ def build(players):
         pm = pctile(vals)
         for x in grp:
             x['m']['nohist_score'] = pm[float((x['_s'].get('pts_ppr') or 0))]
-            x['m']['no_history'] = (not x['m']['has2025']) and not x['is_rookie']
+            x['m']['no_history'] = (not x['m']['played']) and not x['is_rookie']
 
     # --- percentile each component within position ---------------------------
     by_pos = defaultdict(list)
@@ -199,7 +203,7 @@ def build(players):
         for key, field, hib, _ in COMPONENTS:
             hist = key in HISTORY
             # only players WITH real 2025 history set the scale for history components
-            pool = [x for x in grp if (not hist or (not x['is_rookie'] and x['m']['has2025']))]
+            pool = [x for x in grp if (not hist or (not x['is_rookie'] and x['m']['played']))]
             if not pool:
                 for x in grp:
                     x.setdefault('c', {})[key] = 50.0
@@ -211,12 +215,23 @@ def build(players):
                 x.setdefault('c', {})[key] = v if hib else round(100 - v, 1)
             if hist:
                 for x in grp:
-                    if x['is_rookie']:
-                        # rookies inherit their rookie-model score for history components
-                        x.setdefault('c', {})[key] = x['m']['rookie_score']
-                    elif not x['m']['has2025']:
-                        # veteran with no 2025 data - fall back to his projection
-                        x.setdefault('c', {})[key] = x['m']['nohist_score']
+                    # NO SEASON, SO NO PERCENTILE.
+                    #
+                    # This used to copy one number - the rookie model's score, or the
+                    # player's projection percentile - into every history component and
+                    # every history sub-metric underneath them. Forty copies of the same
+                    # number. The app then averaged those forty copies and called it a
+                    # rating, so Fernando Mendoza, who has never played an NFL snap, read
+                    # 94 for rushing efficiency, 94 for red-zone conversion and 94 for
+                    # reliability, rated 81 out of 100, and got drafted at pick 96 against
+                    # an ADP of 170. Every unexplained reach on the board was a player who
+                    # had never played.
+                    #
+                    # A blank is the honest answer and the app already knows what to do
+                    # with one: it rates a man with no season on his projection, his draft
+                    # capital and his spot on the depth chart, and on nothing else.
+                    if x['is_rookie'] or not x['m']['played']:
+                        x.setdefault('c', {})[key] = None
 
     # ---- two-level rating: percentile every SUB-METRIC within position -------
     # The old 13 blended components stay (the board still shows them as a stat view);
@@ -239,7 +254,7 @@ def build(players):
     for pos, grp in by_pos2.items():
         for comp, sub, _lbl, hib, _w, hist, _on in SM.ALL_SUBS:
             pool = [x for x in grp
-                    if not hist or (not x['is_rookie'] and x['m']['has2025'])]
+                    if not hist or (not x['is_rookie'] and x['m']['played'])]
             if not pool:
                 for x in grp:
                     x.setdefault('sub', {})[sub] = 50.0
@@ -249,10 +264,10 @@ def build(players):
                 v = pm[x['sub_raw'][sub]]
                 x.setdefault('sub', {})[sub] = v if hib else round(100 - v, 1)
             if hist:
+                # same as above: no season, no percentile. export_json drops the blanks
+                # and the app reads a missing sub as "nothing to go on".
                 for x in grp:
-                    if x['is_rookie']:
-                        x.setdefault('sub', {})[sub] = x['m']['rookie_score']
-                    elif not x['m']['has2025']:
-                        x.setdefault('sub', {})[sub] = x['m']['nohist_score']
+                    if x['is_rookie'] or not x['m']['played']:
+                        x.setdefault('sub', {})[sub] = None
 
     return players

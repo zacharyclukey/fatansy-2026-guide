@@ -56,10 +56,22 @@ def main():
     if not d.get('leagues'):
         okay = fail('no league configs in the file')
 
-    # every player needs the percentiles the rating is built from
-    thin = [p['name'] for p in players if len(p.get('sub') or {}) < 10]
-    if len(thin) > len(players) * 0.25:
-        okay = fail(f'{len(thin)} players have almost no stat percentiles')
+    # Every player who PLAYED needs the percentiles the rating is built from. A man with
+    # no 2025 season legitimately has none - he is rated on his projection, his draft
+    # capital and his depth-chart spot instead - so counting him here would fail the build
+    # for doing the right thing.
+    played = [p for p in players if (p.get('a') or {}).get('gp')]
+    thin = [p['name'] for p in played if len(p.get('sub') or {}) < 10]
+    if len(thin) > len(played) * 0.25:
+        okay = fail(f'{len(thin)} players who played have almost no stat percentiles')
+    # and the opposite mistake: a man with no season must NOT have a full set, because the
+    # only way to have one is for something to have invented them.
+    faked = [p['name'] for p in players
+             if not (p.get('a') or {}).get('gp') and len(p.get('sub') or {}) > 25
+             and p['pos'] in ('QB', 'RB', 'WR', 'TE')]
+    if faked:
+        okay = fail(f'{len(faked)} players with no 2025 season have a full set of stat '
+                    f'percentiles - something is inventing them: {", ".join(faked[:4])}')
 
     # and compare against what is already committed
     import subprocess

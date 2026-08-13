@@ -25,7 +25,12 @@ export const DEFAULT_SETTINGS = (data) => ({
   need: 8,            // draft-score bonus for a position you still need
   style: 50,          // 0 = safest floor, 100 = highest ceiling
   rookie: true,       // pay up for rookies you trust
-  rookieMax: 10,
+  // Was 10, which is the whole of the need bonus. It could afford to be that big when the
+  // rookie rating was invented nonsense and this was the only thing pricing a rookie at
+  // all. Now that draft capital is 30% of his actual rating, +10 on top is the same fact
+  // counted twice - it put a quarterback projected 84 points below replacement at pick 80.
+  // It stays as a taste knob, at a size a taste knob should be.
+  rookieMax: 4,
   styleBudget: 15,    // rating weight split between Floor and Ceiling
   posx: {},           // per-position thumb on the scale, defaults to 1
   comp: Object.fromEntries(data.components.map((c) => [c.key, c.weight])),
@@ -190,10 +195,72 @@ export function floorScore(scores) {
 const RATE_POS = ['QB', 'RB', 'WR', 'TE'];
 const ratePos = (pos) => (RATE_POS.includes(pos) ? pos : 'RB');
 
+// ---------------------------------------------------------------- no NFL season yet
+// A rookie has no 2025 stats, so every stat percentile the data file carries for him is
+// invented. It was invented in a particular and damaging way: the pipeline worked out ONE
+// rookie score and copied it into all forty-odd history sub-metrics, so a man who has
+// never played a snap read 94 for rushing efficiency, 94 for red-zone conversion and 94
+// for reliability. The rating, being the average of forty copies of one number, came out
+// 81 - higher than a proven WR1 - for a quarterback projected 84 points BELOW replacement.
+// He then went at pick 96 against an ADP of 170, and every other unexplained reach on the
+// board was another player who had never played.
+//
+// So: a man with no season is rated on the three things that are actually knowable about
+// him, and on nothing else. Everything invented is thrown away and says "no data" instead.
+const SKILL = new Set(['QB', 'RB', 'WR', 'TE']);
+
+// Kickers and defences have no stat line either, but they are not rookies and their own
+// (poor) rating is doing useful work holding them down the board. Left alone deliberately.
+export const noSeason = (p) => SKILL.has(p.pos) && !(p.a?.gp);
+
+// Components built out of 2025 stats. For a man with no 2025 these have no answer, and
+// saying so is the whole point - componentScore already returns 50 for "nothing to go on".
+export const HISTORY_COMPS = new Set(['volume', 'efficiency', 'redzone', 'explosive',
+  'production', 'reliability']);
+
+// Where he went in the NFL draft, as an expectation of opportunity rather than of talent.
+// Same steps the pipeline uses: top-ten picks play immediately, the rest of round one gets
+// every chance, day two gets a real look, day three has to earn it. Undrafted is not zero,
+// it is unproven.
+export function capitalScore(pick) {
+  if (!pick) return 25;
+  if (pick <= 10) return 100;
+  if (pick <= 32) return 85;
+  if (pick <= 64) return 65;
+  if (pick <= 100) return 45;
+  return 25;
+}
+
+// Projection first, then draft capital, then his spot on the depth chart.
+//
+// In that order on purpose. Five years of testing said the projection is the strongest
+// signal there is and that nothing else we tried added to it, so the two things a rookie
+// has instead of a season get to shade the projection rather than outvote it. The
+// projection percentile is computed per league, so a rookie in a league that pays for
+// receptions is rated on what he is worth in THAT league.
+export const ROOKIE_MIX = { proj: 0.45, capital: 0.3, role: 0.15, team: 0.1 };
+
+export function rookieRating(p, projPct) {
+  const m = p.m || {};
+  const role = Math.max(0, Math.min(100, m.role_pct ?? 0));      // share of his team's work
+  const team = Math.max(0, Math.min(100, (m.team_off ?? 0) / 14));
+  return ROOKIE_MIX.proj * (projPct ?? 50)
+    + ROOKIE_MIX.capital * capitalScore(m.draft_pick)
+    + ROOKIE_MIX.role * role
+    + ROOKIE_MIX.team * team;
+}
+
 // A player's score for one component: his sub-metric percentiles, weighted by the
 // weights for HIS position, ignoring stats switched off or weighted 0 there.
 export function componentScore(p, comp, st) {
   const q = ratePos(p.pos);
+  // Nothing to go on, so no answer - not a number borrowed from somewhere else.
+  const blank = noSeason(p);
+  if (blank && HISTORY_COMPS.has(comp.key)) return null;
+  // A few history stats live inside components that are otherwise about 2026 - games
+  // started sits with his role, for instance. They carry the same copied number, and it
+  // is recognisable BECAUSE it is the same number, so it can be dropped by name.
+  const copied = blank ? (p.m?.rookie_score ?? null) : null;
   let num = 0;
   let den = 0;
   for (const s of comp.subs) {
@@ -201,7 +268,7 @@ export function componentScore(p, comp, st) {
     if (!cfg || !cfg.on) continue;
     const w = cfg.w[q] || 0;
     const v = p.sub[s.key];
-    if (!w || v == null) continue;
+    if (!w || v == null || (copied != null && v === copied)) continue;
     num += v * w;
     den += w;
   }
@@ -551,9 +618,12 @@ export function buildBoard(data, st, cache) {
     // 3rd best defence" dressed up on the same 0-100 scale a receiver uses, which made
     // the best defence read 56 and look like a real opinion. There isn't one, so say so.
     r.rated = (data.ratePos || RATE_POS).includes(r.p.pos);
-    r.rating = r.rated
-      ? Object.entries(cw).reduce((a, [k, w]) => a + (r.scores[k] ?? 50) * w, 0) / cwTotal
-      : null;
+    // And a man with no season does not get an average of the stats he has not got. He
+    // gets the rookie rating - his projection, where he was drafted, and how much of his
+    // team's work he has been handed - which is all there honestly is.
+    r.rating = !r.rated ? null
+      : noSeason(r.p) ? rookieRating(r.p, r.scores.projection)
+        : Object.entries(cw).reduce((a, [k, w]) => a + (r.scores[k] ?? 50) * w, 0) / cwTotal;
     r.need = needFor(r.p.pos);
     const posx = st.posx[r.p.pos] ?? 1;
     // The rating is ADDED, not multiplied: multiplying erases it when VOR is 0 and
@@ -570,6 +640,8 @@ export function buildBoard(data, st, cache) {
       ? st.tilt * 40 * ((r.rating - 50) / 50) + FIT_BAND * ((r.fit - 50) / 50)
       : 0;
     let s = (r.vorPct + lean) * posx + r.need;
+    // An extra nudge for rookies, ON TOP of a rating that already counts where he was
+    // drafted. Deliberately small for that reason.
     if (st.rookie && r.p.rookie) {
       const c = r.p.m.rookie_conf || '';
       const conf = c.startsWith('HIGH') ? 1 : c.startsWith('MED') ? 0.6 : 0.3;
