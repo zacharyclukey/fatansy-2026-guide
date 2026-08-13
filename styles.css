@@ -542,9 +542,10 @@ span.nm:hover { text-decoration: none; }
   font-style: normal; font-size: 10px; font-weight: 700; letter-spacing: .04em;
   border-radius: 3px; padding: 2px 6px;
 }
-.kind.safe { background: var(--goodSoft); color: var(--good); }
+.kind.steal { background: var(--goodSoft); color: var(--good); }
+.kind.safe { background: var(--fieldSoft); color: var(--field); }
 .kind.swing { background: var(--accentSoft); color: var(--accent); }
-.kind.skip { background: var(--panel2); color: var(--ink3); }
+.kind.reach { background: var(--badSoft); color: var(--bad); }
 .kindLine { margin: 0 0 8px; font-size: 13px; color: var(--ink2); display: flex; align-items: center; gap: 9px; }
 
 /* Fit: four preference sliders, the primary control on the ratings page. */
@@ -560,12 +561,9 @@ span.nm:hover { text-decoration: none; }
 /* The value window. A range of picks, coloured by how it compares with the room's ADP.
    Tabular figures so the ranges line up down the column and can be scanned. */
 .win {
-  font-style: normal; font-variant-numeric: tabular-nums; font-weight: 600;
-  font-size: 12px; border-radius: 3px; padding: 2px 5px; white-space: nowrap;
+  font-style: normal; font-variant-numeric: tabular-nums;
+  font-size: 12px; color: var(--ink2); white-space: nowrap;
 }
-.win.bargain { background: var(--goodSoft); color: var(--good); }
-.win.fair { color: var(--ink2); }
-.win.costly { background: var(--panel2); color: var(--ink3); }
 
 .starBtn {
   width: 26px; padding: 0; font-size: 13px; line-height: 1; color: var(--ink3);

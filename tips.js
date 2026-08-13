@@ -6,6 +6,8 @@ export const TIPS = {
   // the two people mix up
   Worth: ['The picks where taking him costs you nothing.',
     'Everyone in that range is a coin flip with him. It stops at a tier cliff.'],
+  steal: ['He is still here past where he stops being worth it.', ''],
+  reach: ['Taking him now means passing men your board rates higher.', ''],
   Rating: ['How good he is FOR HIS POSITION, 0-100.',
     'Your weighted components. Cannot compare a QB to an RB.'],
   Score: ['Who to actually draft. Take the highest.',
@@ -86,8 +88,8 @@ export const TIPS = {
   'card:ppg': ['PPR points per game.', 'Total points / games played.'],
   'card:finish': ['Where he finished at his position in 2025.', ''],
 
-  Type: ['What kind of pick he is right now.',
-    'Read from his floor, his upside, and how your rank compares with the room.'],
+  Type: ['What kind of pick he is AT THIS PICK. It changes as the draft moves.',
+    'Steal = fallen past his range. Reach = too early. Otherwise Safe or Swing.'],
   star: ['Your own view of him. Click to cycle.',
     'Liked lifts him above anyone within 5 points, faded drops him below. Never further.'],
 

@@ -525,12 +525,15 @@ export function buildBoard(data, st, cache) {
   rows.forEach((r, i) => { r.rank = i + 1; });
 
   markTiers(rows);
-  for (const r of rows) r.kind = pickType(r);
 
   const adpOrder = [...rows].sort((a, b) => a.p.adp - b.p.adp);
   adpOrder.forEach((r, i) => { r.adpRank = i + 1; });
 
   valueWindow(rows);
+  // Last, because it needs the window, the ADP rank and the pick on the clock. It is the
+  // one label that changes as the draft moves - a man who is a reach at pick 4 is a steal
+  // at pick 40 without anything about him having changed.
+  for (const r of rows) r.kind = pickType(r, st.atPick);
 
   // where the grade alone would have put him, so the detail panel can show the gap
   // between "good for his position" and "worth this pick"
@@ -611,13 +614,31 @@ export function poolAround(rows, r, drafted, band = 6) {
 // that did not. "Swing" is a man whose points arrive in lumps this league pays big for;
 // "Safe" is a steady scorer who was also available. Bust rate repeats year to year at
 // about 0.50, which is why availability is allowed in here and boom rate is not.
-export function pickType(r) {
-  const gap = r.adpRank - r.rank;          // + = your board likes him more than the room
-  if (gap <= -20) return 'skip';           // he goes 20+ spots before you would take him
+// How far before his window a man can be and still count as a reach rather than as
+// simply not in range yet. At pick 5, taking the 100th player is technically a reach, but
+// labelling two hundred rows "Reach" tells you nothing.
+export const REACH_RANGE = 24;
+// Being one pick early is not a reach, it is a rounding error. Below this the honest
+// answer is "about right", which is what Safe and Swing say.
+export const SLACK = 3;
+
+export function pickType(r, atPick) {
+  // Before the draft starts there is no clock, so judge him against where the room takes
+  // him. Once picks are coming in, judge him against the pick actually on the clock -
+  // which is what makes this move as the board empties.
+  const at = atPick || r.adpRank;
+
+  if (!r.openEnded && at - r.worthTo >= SLACK) return 'steal';  // fallen past his range
+  const early = r.worthFrom - at;
+  if (early >= SLACK) {
+    return early <= REACH_RANGE ? 'reach' : null;          // else: simply not in range yet
+  }
+
+  // He is priced about right, so the only question left is what kind of player he is.
   const lump = r.traits?.td ?? 50;
   const avail = r.traits?.dur ?? 50;
-  if (lump >= 68) return 'swing';
-  if (lump <= 40 && avail >= 55) return 'safe';
+  if (lump >= 62) return 'swing';
+  if (avail >= 50) return 'safe';
   return null;
 }
 
@@ -669,12 +690,6 @@ export function valueWindow(rows, band = WINDOW_BAND, cap = WINDOW_MAX) {
     r.worthTo = rows[hi].rank;
     r.equals = hi - lo;                      // how many others are a coin flip with him
     r.edge = r.adpRank - r.rank;             // + = the room lets him fall past your spot
-    // Once the window is truncated both ends are guesses, so neither verdict is earned.
-    // Deep in the pool the honest answer really is "it does not much matter".
-    r.verdict = r.openEnded ? 'fair'
-      : r.adpRank > r.worthTo ? 'bargain'
-        : r.adpRank < r.worthFrom ? 'costly'
-          : 'fair';
   }
   return rows;
 }

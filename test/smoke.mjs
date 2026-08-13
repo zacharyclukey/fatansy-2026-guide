@@ -188,17 +188,28 @@ const fire = (el, type) => {
     (r) => r.worthFrom >= 1 && r.worthTo >= r.worthFrom));
   ok('the window contains his own rank', b.rows.every(
     (r) => r.rank >= r.worthFrom && r.rank <= r.worthTo));
-  ok('verdicts agree with the window', b.rows.every((r) => (r.openEnded
-    ? r.verdict === 'fair'
-    : (r.verdict === 'bargain' && r.adpRank > r.worthTo)
-      || (r.verdict === 'costly' && r.adpRank < r.worthFrom)
-      || (r.verdict === 'fair' && r.adpRank >= r.worthFrom && r.adpRank <= r.worthTo))));
+  // The label has to move with the clock. Same man, same board, different pick.
+  const early = m.buildBoard(data, { ...st, atPick: 3 });
+  const late = m.buildBoard(data, { ...st, atPick: 90 });
+  const pick = (bd, i) => bd.rows[i].kind;
+  const changed = early.rows.filter((r, i) => pick(early, i) !== pick(late, i)).length;
+  ok('the label moves as the draft moves', changed > 20, `${changed} of ${early.rows.length}`);
+  ok('early in the draft nobody deep is a steal',
+    early.rows.slice(40).every((r) => r.kind !== 'steal'));
+  ok('by pick 90 the men still on the board are steals',
+    late.rows.slice(0, 20).filter((r) => r.kind === 'steal').length >= 10);
+  ok('a reach is always meaningfully early, not off by one',
+    early.rows.filter((r) => r.kind === 'reach').every((r) => r.worthFrom - 3 >= m.SLACK));
+  ok('being a pick or two early is not a reach',
+    early.rows.some((r) => r.worthFrom > 3 && r.worthFrom - 3 < m.SLACK && r.kind !== 'reach'));
   // a window that swallowed the whole board would make the verdict meaningless
   const widest = Math.max(...b.rows.map((r) => r.worthTo - r.worthFrom));
   ok('windows stay narrow enough to mean something', widest <= m.WINDOW_MAX,
     `widest ${widest}, cap ${m.WINDOW_MAX}`);
-  ok('a truncated window claims nothing either way',
-    b.rows.every((r) => !r.openEnded || r.verdict === 'fair'));
+  ok('a truncated window is never sold as a steal',
+    b.rows.every((r) => !(r.openEnded && r.kind === 'steal')));
+  ok('nobody far out of range gets a label', b.rows.every(
+    (r) => !(r.worthFrom - r.adpRank > m.REACH_RANGE && r.kind === 'reach')));
 
   // the snake clock
   ok('snake picks', JSON.stringify(m.myPicks(12, 4, 4)) === '[4,21,28,45]');
@@ -235,9 +246,7 @@ const fire = (el, type) => {
   ok('Worth shows a pick range, not a score',
     [...d.querySelectorAll('.row .win')].slice(0, 30)
       .every((x) => /^\d+(–\d+|\+)?$/.test(x.textContent.trim())));
-  ok('every row carries a verdict',
-    [...d.querySelectorAll('.row .win')].slice(0, 30)
-      .every((x) => ['bargain', 'fair', 'costly'].some((v) => x.classList.contains(v))));
+
 
   // stat groups are additive and must not squeeze the name column
   for (const k of ['pg', 'tot', 'proj', 'rz', 'back']) {
@@ -316,8 +325,10 @@ const fire = (el, type) => {
 
   const kinds = [...d.querySelectorAll('.row.player .kind')].map((x) => x.textContent);
   ok('pick types are labelled', kinds.length > 10, `${kinds.length} in the top 100`);
-  ok('only the three known types appear',
-    kinds.every((k) => ['Safe', 'Swing', 'Skip'].includes(k)), [...new Set(kinds)].join(','));
+  ok('only the four known types appear',
+    [...new Set([...d.querySelectorAll('.kind')].map((x) => x.textContent))]
+      .every((x) => ['Steal', 'Safe', 'Swing', 'Reach'].includes(x)),
+    [...new Set([...d.querySelectorAll('.kind')].map((x) => x.textContent))].join(','));
 
   // position detail only offered once you have filtered to one position
   ok('no position detail chip on the full board', !d.querySelector('[data-col="posdetail"]'));

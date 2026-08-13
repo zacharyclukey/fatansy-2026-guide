@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName } from './engine.js?v=202608131017';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131017';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131017';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131017';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName } from './engine.js?v=202608131020';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131020';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131020';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131020';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131017';
+const BUILD = '202608131020';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -29,22 +29,21 @@ let clock = null;
 // The board always shows your rating and the room's ADP - those two are the whole
 // argument for or against a pick, so they are never behind a toggle. Everything else is
 // a group you can switch on, and several can be on at once.
+// One verdict, and it moves with the draft. A man who is a reach at pick 4 becomes a
+// steal at pick 40 without anything about him changing.
 const KINDS = {
-  safe: ['Safe', 'Steady scorer who stayed on the field. The boring correct pick.'],
-  swing: ['Swing', 'His points arrive in lumps. Wins weeks, blanks others.'],
-  skip: ['Skip', 'The room takes him 20+ spots before your board would.'],
-};
-const VERDICTS = {
-  bargain: ['Bargain', 'The room lets him fall past where he stops being worth it.'],
-  fair: ['Fair', 'The room takes him inside the range where he is worth taking.'],
-  costly: ['Costly', 'He goes before your board thinks he is worth a pick.'],
+  steal: ['Steal', 'He has fallen past the point where he stops being worth it.'],
+  safe: ['Safe', 'Priced about right, and he is a steady scorer who stays on the field.'],
+  swing: ['Swing', 'Priced about right, but his points arrive in lumps.'],
+  reach: ['Reach', 'Taking him here means passing men your board rates higher.'],
 };
 const FIXED = [
   ['Type', (r) => (r.kind
     ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>` : '<em class="soft">—</em>'), 58, ''],
   // Not a grade. The span of picks where taking him costs you nothing, because everyone
   // inside it is a player you would be equally happy with.
-  ['Worth', (r) => `<em class="win ${r.verdict}">${r.openEnded ? `${r.worthFrom}+`
+  // Plain information, no colour. The judgement is in Type, which knows the clock.
+  ['Worth', (r) => `<em class="win">${r.openEnded ? `${r.worthFrom}+`
     : r.worthFrom === r.worthTo ? r.worthFrom
       : `${r.worthFrom}–${r.worthTo}`}</em>`, 66, 'wd'],
   ['ADP', (r) => (r.p.adp ? r.p.adp.toFixed(1) : '—'), 52, ''],
@@ -397,7 +396,13 @@ function rebuild() {
     cache = subScores(data, st);
     cachedVersion = subVersion;
   }
-  board = buildBoard(data, { ...st, mine: picks().mine.map((id) => byId(id)?.pos) }, cache);
+  board = buildBoard(data, {
+    ...st,
+    mine: picks().mine.map((id) => byId(id)?.pos),
+    // however many are off the board, plus one. Feeding it in here is what makes the
+    // Type column move as the draft goes rather than sitting on its pre-draft answer.
+    atPick: picks().drafted.length + 1,
+  }, cache);
   tickClock();
   renderAll();
 }
