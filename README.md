@@ -40,9 +40,10 @@ build number shown in the footer.
 
 | File | What it does |
 |---|---|
-| `index.html` | The three views: board, my team, ratings |
+| `index.html` | The five views: board, my team, practice draft, ratings, setup |
 | `app.js` | Everything on screen, and the settings that persist in your browser |
 | `engine.js` | The rating maths — components, per-position stat weights, VOR, draft score |
+| `mock.js` | The practice draft: snake order, the simulated room, the report |
 | `data/players.json` | 259 players, their percentiles, projections and league rules |
 | `styles.css` | Layout and colours, light and dark |
 
@@ -54,11 +55,39 @@ disk as a draft-day backup. `.gitignore` keeps it out.
 ```
 npm --prefix test i jsdom
 node test/smoke.mjs
+node test/_probe.mjs   # optional: plays three practice drafts and prints what the app said
 ```
 
-39 checks against the real `index.html` in a real DOM — the engine maths, the board, the
-draft clock, the call, strategies, Sleeper import and sync, and the offline path. Run it
-after any change; it has caught several bugs that looked fine by eye.
+177 checks against the real `index.html` in a real DOM — the engine maths, the board, the
+draft clock, the call, strategies, Sleeper import and sync, and the offline path. Two of
+them play a **whole 180-pick draft**, once headlessly and once by clicking the real buttons,
+which is the best regression test in here: it covers the snake maths, the drafted list, the
+clock, the Type column and undo all at once. Run it after any change; it has caught several
+bugs that looked fine by eye.
+
+## Practice draft
+
+Your drafts have not happened yet, so nothing in this app had ever run under real
+conditions. The **Practice draft** tab fixes that: it drafts the other teams for you, using
+your real league settings, and hands you the board when it is your turn. A full mock takes
+about a minute. Nothing it does touches a real draft — and it warns you before it clears a
+board you have picks on.
+
+One control: **how disciplined is this room**. Tight means the other teams take the best
+player left by ADP almost every time; loose means they reach. The model underneath is
+deliberately small — sample from the top of the remaining board weighted by ADP, lean
+slightly toward unfilled starting slots, lean slightly toward whatever position just went
+twice in a row, and fill your empty slots once you run out of room to shop.
+
+**It is not a prediction.** It does not know your family and it cannot know who busts —
+nothing measured over 2020–2025 could. It copies the one habit every draft room really has,
+so that the interface gets used in anger before the night it matters.
+
+Three practice drafts found four real bugs, all of them in the app rather than the
+simulator: the recommendation panel was a draft behind on the first pick, a finished draft
+told you to enter your draft slot, the board could reach round 13 with nothing left on
+screen you could actually take, and picks were being priced against an ADP from beyond the
+end of the draft.
 
 ## Regenerating the data
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608131312" />
+<link rel="stylesheet" href="styles.css?v=202608131339" />
 </head>
 <body>
 
@@ -16,6 +16,7 @@
   <nav class="views" aria-label="Views">
     <button data-v="board" aria-pressed="true">Board</button>
     <button data-v="roster" aria-pressed="false">My team</button>
+    <button data-v="mock" aria-pressed="false">Practice draft</button>
     <button data-v="ratings" aria-pressed="false">Ratings</button>
     <button data-v="setup" aria-pressed="false">Setup</button>
   </nav>
@@ -55,6 +56,8 @@
     </label>
   </div>
 
+  <div id="mockBar" class="mockBar" hidden></div>
+
   <div id="advice" class="advice" data-tip="advice" tabindex="0"></div>
   <div id="lean" class="lean"></div>
 
@@ -90,6 +93,52 @@
     <div id="cost" class="cards"></div>
     <h2 class="h2">What you still need</h2>
     <div id="needs" class="board"></div>
+  </main>
+</section>
+
+<!-- ============================================================ PRACTICE DRAFT -->
+<section id="v-mock" hidden>
+  <main>
+    <p class="lede">A whole draft, against a room of pretend teams, in about a minute. You
+      pick on the normal board exactly as you will on the night — the other teams pick
+      instantly in between. Nothing here touches your real draft.</p>
+
+    <div id="mockSetup">
+      <div class="mockKnobs">
+        <label class="knob">
+          <span class="knobLabel">Your draft slot <em id="mockSlotOut">—</em></span>
+          <input id="mockSlot" type="number" min="1" max="20" placeholder="1" />
+          <span class="hint">Picking first and picking last are completely different
+            problems. Run one of each and you will feel it.</span>
+        </label>
+        <label class="knob">
+          <span class="knobLabel">How disciplined is this room? <em id="discOut"></em></span>
+          <input id="disc" type="range" min="0" max="100" step="5" value="40" />
+          <span class="fitEnds"><b>Goes by the rankings</b><b>Reaches and panics</b></span>
+          <span class="hint">The only thing this changes is how closely the other teams
+            follow the published rankings.</span>
+        </label>
+      </div>
+      <div class="rowbtns">
+        <button id="mockStart" class="primary">Start a practice draft</button>
+        <button id="mockEnd" class="ghost" hidden>End it</button>
+      </div>
+      <p id="mockMsg" class="setupMsg" hidden></p>
+    </div>
+
+    <div id="mockOut"></div>
+
+    <div class="mockHonest">
+      <h2 class="h2">What the pretend teams are doing</h2>
+      <p>Each one takes a player near the top of the published rankings, leaning a little
+        toward positions it still has to fill, and a little toward whatever position just
+        went twice in a row. Late on, it stops shopping and fills its empty slots — which is
+        why every kicker goes at the end.</p>
+      <p class="warn"><b>This is not a prediction.</b> It does not know your family, and it
+        cannot know who has a good season. It copies the one habit every draft room really
+        does have: taking players roughly in ranking order. Treat the result as practice,
+        never as a forecast.</p>
+    </div>
   </main>
 </section>
 
@@ -168,6 +217,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608131312"></script>
+<script type="module" src="app.js?v=202608131339"></script>
 </body>
 </html>

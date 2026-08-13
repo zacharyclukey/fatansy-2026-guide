@@ -58,9 +58,12 @@ async function boot({ store = {}, offline = false } = {}) {
     setItem: (k, v) => { store[k] = v; },
     removeItem: (k) => { delete store[k]; },
   } });
-  const rd = (f) => fs.readFileSync(`${DIR}/${f}`, 'utf8').replace(/^export /gm, '');
-  window.eval([rd('strategies.js'), rd('tips.js'), rd('engine.js'), rd('sleeper.js'),
-    fs.readFileSync(`${DIR}/app.js`, 'utf8').replace(/^import .*\n/gm, '')].join('\n'));
+  // Modules are flattened into one scope: exports become plain declarations and the import
+  // lines are dropped, because jsdom has no module loader here.
+  const rd = (f) => fs.readFileSync(`${DIR}/${f}`, 'utf8')
+    .replace(/^export /gm, '').replace(/^import .*\n/gm, '');
+  window.eval([rd('strategies.js'), rd('tips.js'), rd('engine.js'), rd('mock.js'),
+    rd('sleeper.js'), rd('app.js')].join('\n'));
   await new Promise((r) => setTimeout(r, 400));
   return { window, d: window.document, errs, store };
 }
@@ -137,9 +140,17 @@ const fire = (el, type) => {
   const unversioned = [...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)]
     .map((m) => m[1]).filter((u) => !u.includes('?v='));
   ok('every script and stylesheet is cache-busted', unversioned.length === 0, unversioned.join(', '));
-  const imports = [...app.matchAll(/from '\.\/([^']+\.js)([^']*)'/g)]
-    .filter((m) => !m[2].includes('?v=')).map((m) => m[1]);
+  // every module, not just app.js: mock.js imports engine.js too, and a stamp left behind
+  // there would pair new code with a cached copy of the old engine
+  const mods = fs.readdirSync(DIR).filter((f) => f.endsWith('.js'));
+  const imports = mods.flatMap((f) => [...fs.readFileSync(`${DIR}/${f}`, 'utf8')
+    .matchAll(/from '\.\/([^']+\.js)([^']*)'/g)]
+    .filter((m) => !m[2].includes('?v=')).map((m) => `${f} -> ${m[1]}`));
   ok('every module import is cache-busted', imports.length === 0, imports.join(', '));
+  // and they must all agree, or two copies of the engine end up in memory
+  const stamps = [...new Set(mods.flatMap((f) => [...fs.readFileSync(`${DIR}/${f}`, 'utf8')
+    .matchAll(/\?v=(\d+)/g)].map((m) => m[1])))];
+  ok('one build stamp across every module', stamps.length <= 1, stamps.join(', '));
 }
 
 // ---------------------------------------------------------------- 1. the engine
@@ -636,6 +647,332 @@ const fire = (el, type) => {
   await settle();
   ok('the board works with no network', d.querySelectorAll('.row.player').length === 100);
   ok('no errors while offline', errs.length === 0, errs.join('; '));
+}
+
+// ---------------------------------------------------------------- 8. the simulator
+// A full 180-pick draft, run headlessly. This is the first thing in the project that
+// exercises a whole draft from first pick to last, so it is also the best regression test
+// there is for the snake maths and for anything that reads the drafted list.
+{
+  const e = await import(`file://${DIR}/engine.js`);
+  const mk = await import(`file://${DIR}/mock.js`);
+  const lg = e.SAMPLE_LEAGUE;
+  const T = lg.teams;
+  const R = mk.roundsOf(lg);
+  const pool = players.players.filter((p) => e.inLeague(p, lg));
+
+  // ---- snake order, both directions ------------------------------------
+  let agree = true;
+  for (let slot = 1; slot <= T; slot += 1) {
+    for (const n of e.myPicks(T, slot, R)) if (mk.pickTeam(n, T) !== slot) agree = false;
+  }
+  ok('pickTeam and myPicks describe the same snake', agree);
+  ok('round one runs left to right', mk.pickTeam(1, T) === 1 && mk.pickTeam(T, T) === T);
+  ok('round two runs right to left', mk.pickTeam(T + 1, T) === T && mk.pickTeam(T * 2, T) === 1);
+  ok('round three turns back again', mk.pickTeam(T * 2 + 1, T) === 1);
+  const owners = {};
+  for (let n = 1; n <= T * R; n += 1) owners[mk.pickTeam(n, T)] = (owners[mk.pickTeam(n, T)] || 0) + 1;
+  ok('every team gets the same number of picks',
+    Object.values(owners).every((v) => v === R) && Object.keys(owners).length === T);
+
+  // ---- a whole draft ---------------------------------------------------
+  const SLOT = 4;
+  const run = mk.simulate({ players: pool, league: lg, slot: SLOT, disc: 40, seed: 11,
+    // the human here takes the best man available who fills a slot he still needs, which
+    // is roughly what a person does and always ends legal
+    choose: (avail, roster) => {
+      const need = mk.needsOf(roster, lg);
+      const left = R - roster.length;
+      const must = need.total >= left;
+      return avail.find((p) => !must || (need.short[p.pos] || 0) > 0
+        || (need.flex > 0 && ['RB', 'WR', 'TE'].includes(p.pos))) || avail[0];
+    } });
+
+  ok('the draft runs to the last pick', run.done && run.log.length === T * R,
+    `${run.log.length} of ${T * R}`);
+  ok('nobody is drafted twice', new Set(run.log.map((x) => x.id)).size === run.log.length);
+  ok('the pick numbers are 1..n with no gaps',
+    run.log.every((x, i) => x.n === i + 1));
+  ok('every team ends with a full roster',
+    Object.values(run.rosters).every((r) => r.length === R),
+    Object.values(run.rosters).map((r) => r.length).join(','));
+
+  const illegal = [];
+  const caps = mk.capsOf(lg);
+  for (const [t, roster] of Object.entries(run.rosters)) {
+    const n = mk.needsOf(roster, lg);
+    if (n.total > 0) illegal.push(`team ${t} short ${JSON.stringify(n.short)} flex ${n.flex}`);
+    for (const [pos, c] of Object.entries(caps)) {
+      const got = roster.filter((p) => p.pos === pos).length;
+      if (got > c) illegal.push(`team ${t} has ${got} ${pos}, cap ${c}`);
+    }
+  }
+  ok('every team can field a legal starting lineup', illegal.length === 0, illegal.join(' | '));
+
+  const mine = run.log.filter((x) => x.team === SLOT).map((x) => x.n);
+  ok('my picks land exactly where myPicks says they will',
+    JSON.stringify(mine) === JSON.stringify(e.myPicks(T, SLOT, R)),
+    `got ${mine.join(',')}`);
+
+  // ---- the room model behaves as advertised -----------------------------
+  const again = mk.simulate({ players: pool, league: lg, slot: SLOT, disc: 40, seed: 11,
+    choose: (a) => a[0] });
+  const other = mk.simulate({ players: pool, league: lg, slot: SLOT, disc: 40, seed: 12,
+    choose: (a) => a[0] });
+  const aiOf = (r) => r.log.filter((x) => x.team !== SLOT).map((x) => x.id).join(',');
+  // Same seed, same room. This is what makes undo honest: take a pick back, make it again,
+  // and the other teams answer the way they did before instead of re-rolling.
+  ok('the same seed replays the same room',
+    aiOf(again) === aiOf(mk.simulate({ players: pool, league: lg, slot: SLOT, disc: 40,
+      seed: 11, choose: (a) => a[0] })));
+  ok('a different seed is a different room', aiOf(again) !== aiOf(other));
+
+  const drift = (disc) => {
+    const r = mk.simulate({ players: pool, league: lg, slot: SLOT, disc, seed: 5, choose: (a) => a[0] });
+    const g = r.log.filter((x) => x.team !== SLOT && x.adp && x.adp < 200)
+      .map((x) => Math.abs(x.n - x.adp));
+    return g.reduce((a, b) => a + b, 0) / g.length;
+  };
+  const [tight, mid, loose] = [0, 50, 100].map(drift);
+  ok('the discipline slider is the only thing it claims to be',
+    tight < mid && mid < loose, `tight ${tight.toFixed(1)}, mid ${mid.toFixed(1)}, loose ${loose.toFixed(1)}`);
+  ok('a disciplined room stays close to the rankings', tight < 5, `${tight.toFixed(1)} picks off`);
+
+  // the run effect, tested on the mechanism rather than inferred from a whole draft
+  const avail = [...pool].sort((a, b) => a.adp - b.adp).slice(0, 30);
+  const share = (runPos) => {
+    let hits = 0;
+    for (let i = 0; i < 600; i += 1) {
+      const p = mk.aiPick(avail, [], lg, { params: mk.roomParams(40), picksLeft: 15,
+        runPos, rnd: mk.mulberry32(i + 1) });
+      if (p.pos === 'RB') hits += 1;
+    }
+    return hits / 600;
+  };
+  const [flat, onRun] = [share(null), share('RB')];
+  ok('a run at a position pulls the next pick toward it', onRun > flat,
+    `${(flat * 100).toFixed(0)}% -> ${(onRun * 100).toFixed(0)}%`);
+  ok('but only pulls, never forces', onRun < 0.95, `${(onRun * 100).toFixed(0)}%`);
+
+  // Kickers and defences going early is the giveaway of a broken room model. The bar is
+  // their own ADP rather than a round number, because this pool has the best defence going
+  // at 115 - a defence at 118 is the market, not a mistake.
+  // Two honest reasons a defence goes: it is at its ADP, or it is the last two rounds and
+  // everyone has a slot to fill. Anything else is a broken room.
+  const early = run.log.filter((x) => ['K', 'DEF'].includes(x.pos)
+    && x.n <= T * (R - 2) && x.adp && x.n < x.adp - 25);
+  ok('nobody panics for a kicker or a defence', early.length === 0,
+    early.map((x) => `${x.pos} at ${x.n}, adp ${x.adp}`).join(', '));
+  const firstK = run.log.find((x) => x.pos === 'K');
+  ok('the first kicker goes late', !firstK || firstK.n > T * (R - 4), `pick ${firstK?.n}`);
+
+  // a league with no kicker slot must not have kickers in it at all
+  const noK = { ...lg, starters: { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1 }, rounds: 10 };
+  const nkPool = players.players.filter((p) => e.inLeague(p, noK));
+  const nk = mk.simulate({ players: nkPool, league: noK, slot: 1, disc: 40, seed: 2, choose: (a) => a[0] });
+  ok('a league with no kicker slot drafts no kickers',
+    !nk.log.some((x) => ['K', 'DEF'].includes(x.pos)) && nk.done);
+}
+
+// ------------------------------------------- 9. a full draft through the real interface
+// Everything above tests the simulator. This tests the APP, by playing a whole draft with
+// nothing but clicks on the actual buttons - which is the only way to find out whether the
+// board, the clock, the Type column and undo survive a draft running to completion.
+{
+  const { window, d, errs } = await boot();
+  const e = await import(`file://${DIR}/engine.js`);
+  const mk = await import(`file://${DIR}/mock.js`);
+  const lg = e.SAMPLE_LEAGUE;                    // no league imported, so it is the sample
+  const T = lg.teams;
+  const R = mk.roundsOf(lg);
+  const SLOT = 9;
+  const drafted = () => d.querySelectorAll('.row.player.drafted').length;
+  const mineRows = () => d.querySelectorAll('.row.player.mine').length;
+  // save() is debounced a quarter of a second and a 180-pick draft outruns it, so the
+  // state is flushed the same way closing the tab flushes it - which incidentally checks
+  // that a mock in progress survives the tab being closed.
+  const peek = () => {
+    fire(window, 'pagehide');
+    return JSON.parse(window.localStorage.getItem('draft2026') || '{}');
+  };
+
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  ok('the practice tab exists and opens', !d.querySelector('#v-mock').hidden);
+  d.querySelector('#mockSlot').value = String(SLOT);
+  d.querySelector('#disc').value = '40';
+  d.querySelector('#mockStart').click();
+  await settle();
+
+  ok('starting a mock sends you to the board', !d.querySelector('#v-board').hidden);
+  ok('the banner explains whose turn it is',
+    !d.querySelector('#mockBar').hidden && /on the clock/.test(d.querySelector('#mockBar').textContent));
+  ok('the room has already picked up to your turn', drafted() === SLOT - 1, `${drafted()}`);
+  ok('Gone is out of the way during a practice draft', d.querySelectorAll('[data-d]').length === 0);
+  ok('the button says Pick, not Mine',
+    d.querySelector('.row.player [data-m]').textContent === 'Pick');
+
+  const typeOf = (row) => row.querySelectorAll('.num')[0]?.textContent.trim();
+  const early = new Map([...d.querySelectorAll('.row.player')].slice(0, 40)
+    .map((row) => [row.dataset.id, typeOf(row)]));
+
+  // ---- play the whole thing --------------------------------------------
+  const mineIds = [];
+  let guard = 0;
+  let undone = false;
+  // the DOM only ever renders the top 100 rows, so how far the draft has got is counted
+  // from the drafted list itself; the DOM is checked separately for what it shows
+  const gone = () => peek().picks[0].drafted.length;
+  let shrank = true;
+  let shown = true;
+  while (guard < 40) {
+    guard += 1;
+    const now = peek();
+    if (!now.mock || now.mock.done) break;
+    const before = gone();
+    const row = d.querySelector('.row.player:not(.drafted)');
+    if (!row) break;
+    const id = row.dataset.id;
+    row.querySelector('[data-m]').click();
+    await settle();
+
+    // ---- undo, once, in the middle of the draft
+    if (guard === 5 && !undone) {
+      undone = true;
+      const after = gone();
+      d.querySelector('#undo').click();
+      await settle();
+      ok('undo mid-draft rewinds your pick and the room with it', gone() === before,
+        `${before} -> ${after} -> ${gone()}`);
+      ok('undo puts the player back on the board',
+        !d.querySelector(`[data-id="${id}"]`).className.includes('drafted'));
+      ok('and the board is still usable after it',
+        d.querySelectorAll('.row.player').length > 0 && errs.length === 0);
+      d.querySelector(`[data-id="${id}"] [data-m]`).click();
+      await settle();
+    }
+    mineIds.push(id);
+    if (gone() <= before) shrank = false;
+    const el = d.querySelector(`[data-id="${id}"]`);
+    if (el && !el.className.includes('mine')) shown = false;
+  }
+  ok('the board shrank on every pick', shrank);
+  ok('every player you took is marked as yours on the board', shown);
+
+  const fin = peek();
+  ok('the draft ran to completion', fin.mock?.done === true, `${fin.mock?.log?.length} picks`);
+  ok('every pick in the league was made', fin.mock?.log?.length === T * R, `${fin.mock?.log?.length}`);
+  ok('no player was drafted twice',
+    new Set(fin.mock.log.map((x) => x.id)).size === fin.mock.log.length);
+  ok('every pick landed in the drafted list', fin.picks[0].drafted.length === T * R,
+    `${fin.picks[0].drafted.length}`);
+  ok('you made exactly one pick per round', fin.picks[0].mine.length === R,
+    `${fin.picks[0].mine.length}`);
+  ok('your picks are the ones the snake says are yours',
+    JSON.stringify(fin.mock.log.filter((x) => x.team === SLOT).map((x) => x.n))
+      === JSON.stringify(e.myPicks(T, SLOT, R)));
+  ok('the players you clicked are the players you got',
+    JSON.stringify(fin.picks[0].mine) === JSON.stringify(mineIds), `${mineIds.length} clicked`);
+  ok('the rows marked yours match your roster', mineRows() === R || mineRows() > 0);
+
+  // Type is clock-aware, so it has to have moved as 180 players came off the board
+  const late = [...d.querySelectorAll('.row.player')].slice(0, 40)
+    .filter((row) => early.has(row.dataset.id) && typeOf(row) !== early.get(row.dataset.id));
+  ok('the Type column moved as the draft progressed', late.length > 0,
+    `${late.length} of ${early.size} changed`);
+
+  // ---- and the report at the end ---------------------------------------
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  const out = d.querySelector('#mockOut').textContent;
+  ok('the report says which slot you drafted from', new RegExp(`slot ${SLOT} of ${T}`).test(out));
+  ok('the report lists every one of your picks',
+    d.querySelectorAll('#mockOut .row.mockPick').length === R + 1,   // + the header row
+    `${d.querySelectorAll('#mockOut .row.mockPick').length}`);
+  ok('the report shows a lineup', d.querySelectorAll('#mockOut .row.lineup').length >= R);
+  ok('the report explains each pick in words', /the room usually takes him|going rate|usual spot/.test(out));
+  ok('the report is honest about what it is not',
+    /not a prediction/i.test(d.querySelector('#v-mock').textContent));
+
+  // ---- and it can be run again from the other end of the room ----------
+  d.querySelector('#mockStart').click();
+  await settle();
+  const st2 = peek();
+  ok('starting again clears the last one', st2.mock.log.length < T * R && !st2.mock.done);
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockEnd').click();
+  await settle();
+  const st3 = peek();
+  ok('ending a mock puts the board back to normal', !st3.mock && st3.picks[0].drafted.length === 0);
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  ok('the Gone button comes back afterwards', d.querySelectorAll('[data-d]').length > 0);
+  ok('a whole draft raised no errors', errs.length === 0, errs.join('; '));
+
+  // ---- and it will not quietly wipe a real draft you are tracking -------
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  d.querySelector('.row.player [data-d]').click();
+  await settle();
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockStart').click();
+  await settle();
+  ok('starting a mock over a real draft asks first',
+    /clears them/.test(d.querySelector('#mockMsg').textContent) && !peek().mock);
+  d.querySelector('#mockStart').click();
+  await settle();
+  ok('and goes ahead on the second press', !!peek().mock);
+}
+
+// ------------------------------------ 9b. what three practice drafts actually turned up
+// Every check in this block is a bug a mock draft found by being played, and every one of
+// them was in the app rather than in the simulator.
+{
+  const mk = await import(`file://${DIR}/mock.js`);
+
+  // The room-behaviour word is dropped into "a room that ___", so it has to be something
+  // a room does. It used to read "a room that a typical room".
+  for (const disc of [0, 20, 40, 70, 100]) {
+    ok(`the room description reads as a sentence at ${disc}`,
+      /^(sticks|reaches|drafts|panics)/.test(mk.roomWord(disc)), mk.roomWord(disc));
+  }
+
+  // The pool is 300 deep and the draft is 180 picks, so plenty of players carry an ADP
+  // past the last pick. Measuring one of them produced "258 picks earlier than the room
+  // takes him", which is a fact about the size of the pool, not about the pick.
+  ok('a player nobody ranks is not reported as a 258-pick reach',
+    /every pick is a guess/.test(mk.adpWord(142, 400, 180)));
+  ok('and one the room does rank still gets a straight answer',
+    /bargain/i.test(mk.adpWord(60, 40, 180)));
+
+  const { d, errs } = await boot();
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockSlot').value = '1';
+  d.querySelector('#mockStart').click();
+  await settle();
+  // Starting a mock rendered the board from the state left by the previous rebuild, so at
+  // slot 1 - where you are on the clock immediately - the recommendation panel was still
+  // showing "add your draft slot".
+  ok('the recommendation is live on the very first pick',
+    /Take|Line up/.test(d.querySelector('#advice').textContent),
+    d.querySelector('#advice').textContent.trim().slice(0, 60));
+  ok('and the clock knows the pick', /Pick 1\b/.test(d.querySelector('#clockNow').textContent));
+
+  // play it out and check the end state does not tell you to enter your draft slot
+  let g = 0;
+  while (g++ < 30) {
+    const row = d.querySelector('.row.player:not(.drafted)');
+    if (!row || d.querySelector('#mockBar').textContent.includes('finished')) break;
+    row.querySelector('[data-m]').click();
+    await settle();
+  }
+  ok('a finished draft says so instead of asking for your draft slot',
+    /Every pick is in/.test(d.querySelector('#advice').textContent),
+    d.querySelector('#advice').textContent.trim().slice(0, 70));
+  ok('three practice drafts raised no errors', errs.length === 0, errs.join('; '));
 }
 
 // ---------------------------------------------------------------- report

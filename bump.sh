@@ -5,7 +5,9 @@
 # the old file for hours after a push. A changing ?v= makes the URL itself different, so
 # there is nothing cached to reuse. Run this before committing a change.
 V=$(date +%Y%m%d%H%M)
-sed -i -E "s/\?v=[0-9]+/?v=$V/g" index.html app.js
+# every top-level module, not just app.js - mock.js imports engine.js and its stamp has to
+# move too, or the browser pairs new code with a cached copy of the old engine
+sed -i -E "s/\?v=[0-9]+/?v=$V/g" index.html *.js
 # data/players.json is fetched with ?v=${BUILD}, so bumping BUILD busts it too
 sed -i -E "s/const BUILD = '[^']*'/const BUILD = '$V'/" app.js
 echo "build $V"

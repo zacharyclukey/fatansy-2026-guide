@@ -1,11 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName } from './engine.js?v=202608131312';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131312';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131312';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131312';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague } from './engine.js?v=202608131339';
+import { simulate, pickTeam, roundOf, roundsOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf } from './mock.js?v=202608131339';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131339';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131339';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131339';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131312';
+const BUILD = '202608131339';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -329,9 +330,17 @@ function renderAdvice() {
     const p = byId(id);
     if (p) have[p.pos] = (have[p.pos] || 0) + 1;
   }
-  if (!clock?.target) {
+  // Two different silences, and they were saying the same thing. No slot means we cannot
+  // help yet; no target with a slot set means the draft is over, and telling someone who
+  // has just finished a draft to enter their draft slot reads as a bug.
+  if (!clock) {
     box.innerHTML = '<p class="hint">Add your draft slot above and this will tell you '
       + 'what to do with each pick.</p>';
+    return;
+  }
+  if (!clock.target) {
+    box.innerHTML = '<p class="hint">Every pick is in. Your team is on the '
+      + '<b>My team</b> tab.</p>';
     return;
   }
   const ranked = costOfWaiting(board.rows, clock, drafted, board.league, have, { need: st.need })
@@ -376,6 +385,126 @@ ${cheap.length
 <div class="advCost">${ranked.slice(0, 5).map((x) => `<span class="costPill${x === top ? ' hot' : ''}">
 <b>${x.pos}</b>${x.cost.toFixed(0)}</span>`).join('')}
 <span class="hint">cost of waiting, by position</span></div>`;
+}
+
+// ---------------------------------------------------------------- practice draft
+// The simulator does not have its own board, its own clock or its own idea of whose turn
+// it is. It writes into exactly the same drafted/mine lists the live draft writes into, so
+// every part of the app - the Type column, cost of waiting, the roster page, undo - carries
+// on working without knowing a mock is happening at all. The log is the source of truth
+// and the two lists are rebuilt from it, which is why they cannot drift apart.
+const mock = () => (st.mock && st.mock.league === st.league ? st.mock : null);
+
+function syncMockPicks() {
+  const m = mock();
+  if (!m) return;
+  st.picks[st.league] = {
+    drafted: m.log.map((x) => x.id),
+    mine: m.log.filter((x) => x.team === m.slot).map((x) => x.id),
+  };
+}
+
+function advanceMock() {
+  const m = mock();
+  if (!m || m.done) return;
+  const lg = data.leagues[st.league];
+  const pool = data.players.filter((p) => inLeague(p, lg));
+  const res = simulate({ players: pool, league: lg, slot: m.slot, disc: m.disc,
+    seed: m.seed, log: m.log });
+  m.done = res.done;
+  syncMockPicks();
+}
+
+// A practice draft clears the board it runs on. If there is anything on it - and on draft
+// night there will be - that has to be an explicit second press, not a surprise.
+let mockArmed = false;
+
+function startMock() {
+  const lg = data.leagues[st.league];
+  if (!mock() && picks().drafted.length && !mockArmed) {
+    mockArmed = true;
+    msg('#mockMsg', `Careful — ${picks().drafted.length} players are already ticked off on `
+      + `${lg.name}. A practice draft clears them. Press start again to go ahead.`, 'bad');
+    return;
+  }
+  mockArmed = false;
+  msg('#mockMsg', '');
+  const slot = Math.max(1, Math.min(teamsOf(lg), +($('#mockSlot')?.value) || 1));
+  remember('starting a practice draft');
+  st.slots ||= {};
+  st.slots[st.league] = slot;          // one slot, shared with the real clock
+  st.mock = { league: st.league, slot, disc: +($('#disc')?.value ?? 40),
+    seed: Math.floor(Math.random() * 1e6) + 1, log: [], done: false };
+  st.picks[st.league] = { drafted: [], mine: [] };
+  lastCols = '';                       // the row buttons change wording during a mock
+  advanceMock();
+  save();
+  renderChrome();
+  show('board');
+  // show() renders with whatever the last rebuild left behind, and that was computed
+  // before the room made the picks ahead of yours - so the clock, the Type column and the
+  // recommendation would all be a draft behind until you made your first pick.
+  rebuild();
+}
+
+function endMock(keep) {
+  if (!st.mock) return;
+  st.mock = null;
+  if (!keep) st.picks[st.league] = { drafted: [], mine: [] };
+  lastCols = '';
+  save();
+  renderChrome();
+  rebuild();
+}
+
+// A pick made by the person, from the real board. Everything else follows from it.
+function mockTake(id) {
+  const m = mock();
+  if (!m || m.done) return false;
+  const lg = data.leagues[st.league];
+  const n = m.log.length + 1;
+  if (pickTeam(n, teamsOf(lg)) !== m.slot) return false;
+  const p = byId(id);
+  if (!p || m.log.some((x) => x.id === id)) return false;
+  remember(`${p.name} in the practice draft`);
+  m.log.push({ n, team: m.slot, id, pos: p.pos, adp: p.adp ?? null });
+  advanceMock();
+  save();
+  rebuild();
+  return true;
+}
+
+// The banner across the top of the board while a mock is running. It has one job: someone
+// who has never done this should be able to read it and know what to do next.
+function renderMockBar() {
+  const bar = $('#mockBar');
+  if (!bar) return;
+  const m = mock();
+  document.body.classList.toggle('mocking', !!m);
+  bar.hidden = !m;
+  if (!m) return;
+  const lg = board.league;
+  const total = totalPicks(lg);
+  const n = m.log.length + 1;
+
+  if (m.done) {
+    bar.innerHTML = `<span class="mockTag done">Practice draft finished</span>
+<b>All ${total} picks are in.</b>
+<span class="hint">Your team is on the Practice draft tab.</span>
+<button data-v="mock" class="chipBtn">See how you did</button>`;
+    return;
+  }
+
+  // what went while it was not your turn - the thing you would have watched happen
+  const mineAt = [...m.log].reverse().find((x) => x.team === m.slot);
+  const since = m.log.filter((x) => x.n > (mineAt?.n ?? 0));
+  const names = since.slice(0, 4).map((x) => byId(x.id)?.name).filter(Boolean);
+  bar.innerHTML = `<span class="mockTag">Practice</span>
+<b>Round ${roundOf(n, teamsOf(lg))}, pick ${n} of ${total}.</b>
+<b class="good">You are on the clock</b> — press <b>Pick</b> on the row you want.
+${since.length ? `<span class="hint">${since.length} went since your last pick${
+  names.length ? `: ${names.join(', ')}${since.length > names.length ? '…' : ''}` : ''}</span>` : ''}
+<button id="mockQuit" class="chipBtn">End</button>`;
 }
 
 function tickClock() {
@@ -426,8 +555,9 @@ function scheduleRebuild() {
 }
 
 function renderAll() {
-  if (view === 'board') { renderBoard(); renderAdvice(); renderLean(); }
+  if (view === 'board') { renderMockBar(); renderBoard(); renderAdvice(); renderLean(); }
   if (view === 'roster') renderRoster();
+  if (view === 'mock') renderMock();
   if (view === 'ratings') renderRatings();
   if (view === 'setup') renderSetup();
   const age = Math.floor((Date.now() - new Date(data.generated).getTime()) / 86400000);
@@ -462,8 +592,8 @@ ${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
 <button class="starBtn ${r.star ? 'on' : ''}${r.fade ? ' off' : ''}" data-star="${r.p.id}"
  aria-label="Your view of ${r.p.name}" data-tip="star">${starMark(r)}</button>
-<button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>
-<button data-m="${r.p.id}" aria-pressed="${m}">Mine</button></span>`;
+${mock() ? '' : `<button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>`}
+<button data-m="${r.p.id}" aria-pressed="${m}">${mock() ? 'Pick' : 'Mine'}</button></span>`;
 }
 
 function renderBoard() {
@@ -483,11 +613,24 @@ function renderBoard() {
     lastCols = colKey;
   }
 
-  const rows = board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
+  const all = board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
     && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
     && (!st.cols?.starsonly || r.star || r.fade)
-    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q))
-    .slice(0, limit);
+    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
+
+  // Late in a draft the entire top of the board is gone, and with "hide drafted" off the
+  // first hundred rows can be a hundred players somebody else already owns - a screen with
+  // nothing on it you could actually take. The practice draft walked straight into this in
+  // round 13 and could not make a pick. So the cut extends until there are ten players
+  // still available, however far down that is.
+  let cut = 0;
+  let want = 10;
+  while (cut < all.length && want > 0) {
+    if (!drafted.has(all[cut].p.id)) want -= 1;
+    cut += 1;
+  }
+  cut = Math.max(limit, cut);
+  const rows = all.slice(0, cut);
 
   const host = $('#rows');
   const frag = document.createDocumentFragment();
@@ -526,14 +669,18 @@ function renderBoard() {
       } else if (r.lastOfTier && badge) {
         badge.textContent = `last ${r.p.pos}${r.tier}`;
       } else if (badge) { badge.remove(); }
-      const [sb, gb, mb] = el.querySelectorAll('.acts button');
+      // During a practice draft there is no Gone button, so this cannot assume three.
+      const acts = el.querySelectorAll('.acts button');
+      const sb = acts[0];
+      const gb = el.querySelector('.acts [data-d]');
+      const mb = el.querySelector('.acts [data-m]');
       const mark = starMark(r);
       if (sb.textContent !== mark) {
         sb.textContent = mark;
         sb.className = `starBtn ${r.star ? 'on' : ''}${r.fade ? ' off' : ''}`;
       }
-      if (gb.getAttribute('aria-pressed') !== String(d)) gb.setAttribute('aria-pressed', String(d));
-      if (mb.getAttribute('aria-pressed') !== String(m)) mb.setAttribute('aria-pressed', String(m));
+      if (gb && gb.getAttribute('aria-pressed') !== String(d)) gb.setAttribute('aria-pressed', String(d));
+      if (mb && mb.getAttribute('aria-pressed') !== String(m)) mb.setAttribute('aria-pressed', String(m));
     }
     // The rule under a tier cliff is drawn ONLY in a single-position view.
     //
@@ -561,11 +708,11 @@ function renderBoard() {
     }
   }
   for (const [id, el] of rowEls) if (!keep.has(id)) { el.remove(); rowEls.delete(id); }
-  if (rows.length < board.rows.length) {
+  if (rows.length < all.length) {
     const more = document.createElement('div');
     more.className = 'more';
-    more.innerHTML = `<button id="more">Show ${Math.min(100, board.rows.length - limit)} more`
-      + ` <span class="hint">(${limit} shown)</span></button>`;
+    more.innerHTML = `<button id="more">Show ${Math.min(100, all.length - rows.length)} more`
+      + ` <span class="hint">(${rows.length} shown)</span></button>`;
     frag.appendChild(more);
   }
   host.replaceChildren(frag);
@@ -609,10 +756,10 @@ Projected <b>${r.pts.toFixed(1)}</b> points, <b>${r.vor.toFixed(1)}</b> above a 
 }
 
 // ---------------------------------------------------------------- my team
-function renderRoster() {
-  const lg = board.league;
-  renderAdvice2();
-  const mine = picks().mine;
+// Who starts, who sits, and which of them fills the flex. Pulled out of the roster page so
+// the practice draft can show the same lineup at the end of a mock without a second, and
+// eventually different, copy of the rules.
+function lineupOf(mine, lg) {
   const rows = mine.map((id) => board.rows.find((r) => r.p.id === id)).filter(Boolean);
   const order = data.positions;
   rows.sort((a, b) => order.indexOf(a.p.pos) - order.indexOf(b.p.pos) || b.score - a.score);
@@ -635,11 +782,12 @@ function renderRoster() {
       }
     }
     const pick = mine.indexOf(r.p.id) + 1;
-    const vsAdp = r.adpRank - pick;
-    return { r, n, role, pick, vsAdp };
+    return { r, n, role, pick, vsAdp: r.adpRank - pick };
   });
+  return cards;
+}
 
-  $('#lineup').innerHTML = cards.length ? `<div class="board">
+const lineupTable = (cards) => (cards.length ? `<div class="board">
 <div class="row head lineup"><span>Slot</span><span>Player</span><span>Bye</span><span>Risk</span><span>Role</span></div>
 ${cards.map(({ r, n, role }) => `<div class="row lineup${role === 'Bench' ? ' drafted' : ''}">
 <span class="rk">${r.p.pos}${n}</span>
@@ -647,9 +795,10 @@ ${cards.map(({ r, n, role }) => `<div class="row lineup${role === 'Bench' ? ' dr
 <span class="num">${r.p.bye || '—'}</span>
 <span class="risk">${riskOf(r)}</span>
 <span class="role ${role}">${role}</span></div>`).join('')}</div>`
-    : '<p class="empty">Tick <b>Mine</b> on the board and your team appears here.</p>';
+  : '<p class="empty">Tick <b>Mine</b> on the board and your team appears here.</p>');
 
-  // bye coverage - starters and flex only, a bench player costs you nothing
+// bye coverage - starters and flex only, a bench player costs you nothing
+function byesHTML(cards) {
   const byes = {};
   for (const c of cards) {
     if (c.role === 'Bench' || !c.r.p.bye) continue;
@@ -657,12 +806,21 @@ ${cards.map(({ r, n, role }) => `<div class="row lineup${role === 'Bench' ? ' dr
   }
   const weeks = Object.keys(byes).map(Number).sort((a, b) => a - b);
   const worst = Math.max(0, ...Object.values(byes));
-  $('#byes').innerHTML = weeks.length
+  return weeks.length
     ? weeks.map((w) => `<span class="bye${byes[w] >= 3 ? ' hot' : ''}"><b>${w}</b>${byes[w]} out</span>`).join('')
       + `<p class="facts">${worst >= 3
         ? `Week ${weeks.find((w) => byes[w] === worst)} costs you ${worst} starters. Spread the byes or plan a waiver week.`
         : 'No week costs you more than two starters.'}</p>`
     : '<p class="facts">Nothing drafted yet.</p>';
+}
+
+function renderRoster() {
+  const lg = board.league;
+  renderAdvice2();
+  const cards = lineupOf(picks().mine, lg);
+
+  $('#lineup').innerHTML = lineupTable(cards);
+  $('#byes').innerHTML = byesHTML(cards);
 
   const withPick = cards.filter((c) => c.pick);
   const avg = withPick.length
@@ -684,6 +842,114 @@ ${cards.map(({ r, n, role }) => `<div class="row lineup${role === 'Bench' ? ' dr
 <span class="num">${want}</span><span class="num">${got}</span>
 <span class="${got < want ? 'dn' : 'up'}">${got < want ? `Need ${want - got} more` : `Filled — ${got} drafted`}</span></div>`;
     }).join('');
+}
+
+// ---------------------------------------------------------------- practice results
+// Written for someone who has never drafted before. Every number on this page is followed
+// by a sentence saying what it means, and the whole thing leads with what happened rather
+// than with a table.
+function renderMock() {
+  const lg = data.leagues[st.league];
+  const m = mock();
+  const disc = m ? m.disc : (st.disc ?? 40);
+  if ($('#disc')) { $('#disc').value = disc; $('#disc').disabled = !!m; }
+  if ($('#discOut')) $('#discOut').textContent = roomWord(disc);
+  if ($('#mockSlot')) {
+    $('#mockSlot').max = teamsOf(lg);
+    $('#mockSlot').value = m ? m.slot : (st.slots?.[st.league] ?? 1);
+    $('#mockSlot').disabled = !!m;
+  }
+  if ($('#mockSlotOut')) {
+    const s = m ? m.slot : (st.slots?.[st.league] ?? 1);
+    $('#mockSlotOut').textContent = `${s} of ${teamsOf(lg)}`;
+  }
+  if ($('#mockStart')) $('#mockStart').textContent = m ? 'Start a fresh one' : 'Start a practice draft';
+  if ($('#mockEnd')) $('#mockEnd').hidden = !m;
+  const out = $('#mockOut');
+  if (!out) return;
+
+  if (!m) {
+    out.innerHTML = `<p class="facts">Nothing running. Pick a slot, choose how sensible the
+other teams are, and press start — you will be sent to the board with the first pick that
+is yours already on the clock. ${lg.sample ? '<b>You have not imported a league yet, so this '
+      + 'uses a standard 12-team setup.</b>' : `Using your <b>${lg.name}</b> settings: `
+      + `${teamsOf(lg)} teams, ${roundsOf(lg)} rounds.`}</p>`;
+    return;
+  }
+
+  const total = totalPicks(lg);
+  if (!m.done) {
+    const n = m.log.length + 1;
+    out.innerHTML = `<div class="mockRun"><b>In progress — round ${roundOf(n, teamsOf(lg))},
+pick ${n} of ${total}.</b> It is your turn. Go to the board and press <b>Pick</b> on the
+player you want.<div class="rowbtns"><button data-v="board" class="primary">Back to the board</button></div></div>`;
+    return;
+  }
+
+  // ---- finished. What happened?
+  const cards = lineupOf(picks().mine, lg);
+  const roster = picks().mine.map((id) => byId(id)).filter(Boolean);
+  const need = needsOf(roster, lg);
+  const mineLog = m.log.filter((x) => x.team === m.slot);
+  // Only players the market actually ranks inside this draft. The pool is 300 deep and a
+  // fifteen-round draft is 180 picks, so several of everyone's last picks have an ADP past
+  // the end of the draft - averaging those in produced "average vs ranking: -80", which is
+  // arithmetic about the size of the pool rather than anything about the picks.
+  const rated = mineLog.filter((x) => isRanked(x.adp, total));
+  const gaps = rated.map((x) => vsAdp(x.n, x.adp));
+  const avg = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
+  const best = [...rated].sort((a, b) => (b.n - b.adp) - (a.n - a.adp))[0];
+  const worst = [...rated].sort((a, b) => (a.n - a.adp) - (b.n - b.adp))[0];
+  const short = Object.entries(need.short).filter(([, v]) => v > 0)
+    .map(([p, v]) => `${v} ${p}`);
+  if (need.flex > 0) short.push(`${need.flex} flex`);
+
+  const card = (label, val, note) => `<div class="card"><span class="cardV">${val}</span>
+<span class="cardL">${label}</span><span class="hint">${note}</span></div>`;
+
+  out.innerHTML = `<h2 class="h2">What happened</h2>
+<p class="mockLede">You drafted from <b>slot ${m.slot} of ${teamsOf(lg)}</b> against a room that
+${roomWord(m.disc)}. ${short.length
+    ? `<b class="bad">You finished without a full starting lineup — no ${short.join(', no ')}.</b>
+That is the one mistake worth avoiding: an empty slot scores zero every week.`
+    : '<b class="good">You filled every starting slot.</b>'}
+${best && best.n - best.adp >= 6
+    ? ` Your best bit of business was <b>${byId(best.id)?.name}</b>, who lasted
+${Math.round(best.n - best.adp)} picks past his usual spot.` : ''}
+${worst && worst.n - worst.adp <= -10
+    ? ` You paid up for <b>${byId(worst.id)?.name}</b>, ${Math.round(-(worst.n - worst.adp))}
+picks before the room normally takes him — fine if you meant it.` : ''}</p>
+
+<div class="cards">${card('Average vs ranking', `${avg > 0 ? '+' : ''}${avg.toFixed(1)}`,
+    `Above zero means players tended to fall to you. Counts the ${rated.length} of your `
+    + `${mineLog.length} picks the room ranks inside a ${total}-pick draft.`)
++ card('Bargains', gaps.filter((g) => g >= 12).length, 'Taken 12+ picks past their usual spot.')
++ card('Reaches', gaps.filter((g) => g <= -12).length, 'Taken 12+ picks early.')
++ card('Starting slots', short.length ? `${need.total} empty` : 'Full', 'Empty slots score nothing.')}</div>
+
+<h2 class="h2">Every pick you made</h2>
+<div class="board mockPicks">
+<div class="row head mockPick"><span>Rd</span><span>Pick</span><span>Player</span><span>Ranked</span><span>What it cost</span></div>
+${mineLog.map((x) => {
+    const p = byId(x.id);
+    const g = isRanked(x.adp, total) ? vsAdp(x.n, x.adp) : null;
+    return `<div class="row mockPick">
+<span class="rk">${roundOf(x.n, teamsOf(lg))}</span>
+<span class="num">${x.n}</span>
+<span class="who">${posTag(p?.pos || '')}<span class="nm">${p?.name || x.id}
+<span class="tm">${p?.team || ''}</span></span></span>
+<span class="num">${x.adp ? x.adp.toFixed(0) : '—'}</span>
+<span class="cost ${g == null ? '' : g >= 4 ? 'up' : g <= -4 ? 'dn' : ''}">${adpWord(x.n, x.adp, total)}</span></div>`;
+  }).join('')}</div>
+<p class="hint">"Ranked" is where the whole fantasy world usually takes him. Later than that
+means he fell to you; earlier means you wanted him more than everyone else did.</p>
+
+<h2 class="h2">Your lineup</h2>
+${lineupTable(cards)}
+<h2 class="h2">Bye weeks</h2>
+<div class="byes">${byesHTML(cards)}</div>
+<p class="facts">Run it again from a different slot and see how different the same board
+feels. Nothing you do here touches your real draft.</p>`;
 }
 
 // ---------------------------------------------------------------- ratings
@@ -972,8 +1238,8 @@ function renderLean() {
   const box = $('#lean');
   if (!box) return;
   if (!clock?.target) {
-    box.innerHTML = '<p class="hint">Set your draft slot above and the board will tell you '
-      + 'whether a position is worth leaning into.</p>';
+    box.innerHTML = clock ? '' : '<p class="hint">Set your draft slot above and the board '
+      + 'will tell you whether a position is worth leaning into.</p>';
     return;
   }
   const drafted = new Set(picks().drafted);
@@ -1010,7 +1276,7 @@ function readouts() {
 
 function show(v) {
   view = v;
-  for (const s of ['board', 'roster', 'ratings', 'setup']) $(`#v-${s}`).hidden = s !== v;
+  for (const s of ['board', 'roster', 'mock', 'ratings', 'setup']) $(`#v-${s}`).hidden = s !== v;
   document.querySelectorAll('[data-v]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
   renderAll();
 }
@@ -1085,7 +1351,9 @@ function wire() {
   $('#reset').onclick = () => {
     remember('cleared the draft');
     st.picks[st.league] = { drafted: [], mine: [] };
-    save(); rebuild();
+    st.mock = st.mock?.league === st.league ? null : st.mock;
+    lastCols = '';
+    save(); renderChrome(); rebuild();
   };
   $('#undo').onclick = undo;
   // ctrl/cmd-Z anywhere that is not a text field
@@ -1117,6 +1385,24 @@ function wire() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') saveNow();
   });
+  // ---- practice draft
+  if ($('#mockStart')) $('#mockStart').onclick = startMock;
+  if ($('#mockEnd')) $('#mockEnd').onclick = () => { endMock(false); renderMock(); };
+  if ($('#disc')) {
+    $('#disc').oninput = (e) => {
+      st.disc = +e.target.value;
+      $('#discOut').textContent = roomWord(st.disc);
+      save();
+    };
+  }
+  if ($('#mockSlot')) {
+    $('#mockSlot').oninput = (e) => {
+      const lg = data.leagues[st.league];
+      const v = Math.max(1, Math.min(teamsOf(lg), +e.target.value || 1));
+      $('#mockSlotOut').textContent = `${v} of ${teamsOf(lg)}`;
+    };
+  }
+
   $('#importL').onclick = doImport;
   $('#syncOnce').onclick = doSync;
   $('#syncAuto').onclick = toggleAuto;
@@ -1177,7 +1463,8 @@ function wire() {
     } else if (b.dataset.lean) {
       st.posx = { ...LEANS.find((l) => l.key === b.dataset.lean).posx };
       save(); rebuild();
-    } else if (b.id === 'more') { limit += 100; renderBoard(); }
+    } else if (b.id === 'mockQuit') { endMock(false); }
+    else if (b.id === 'more') { limit += 100; renderBoard(); }
     else if (b.dataset.v) show(b.dataset.v);
     else if (b.dataset.f) {
       filter = b.dataset.f;
@@ -1201,6 +1488,9 @@ function wire() {
       remember(`${byId(b.dataset.d)?.name || 'a player'} off the board`);
       toggle('drafted', b.dataset.d);
     } else if (b.dataset.m) {
+      // In a practice draft this button IS the pick: it hands the choice to the simulator,
+      // which records it and then runs every other team up to your next turn.
+      if (mock()) { mockTake(b.dataset.m); return; }
       remember(`${byId(b.dataset.m)?.name || 'a player'} to your team`);
       const on = toggle('mine', b.dataset.m);
       const dl = picks().drafted;
@@ -1216,6 +1506,10 @@ function remember(label) {
     league: st.league,
     drafted: [...picks().drafted],
     mine: [...picks().mine],
+    // A practice pick is really several picks - yours, then every team up to your next
+    // turn. Snapshotting the log means undo rewinds the room's replies with it, which is
+    // the only sensible reading of "take that pick back".
+    mockSnap: st.mock ? { ...st.mock, log: [...st.mock.log] } : null,
   });
   if (pickHistory.length > 30) pickHistory.shift();
 }
@@ -1225,6 +1519,9 @@ function undo() {
   if (!last) return;
   st.league = last.league;
   st.picks[last.league] = { drafted: last.drafted, mine: last.mine };
+  if (last.mockSnap) st.mock = { ...last.mockSnap, log: [...last.mockSnap.log] };
+  else if (st.mock?.league === last.league) st.mock = null;
+  lastCols = '';
   save();
   renderChrome();
   rebuild();

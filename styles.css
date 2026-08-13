@@ -597,3 +597,54 @@ span.nm:hover { text-decoration: none; }
 .countList em, .spare em { font-style: normal; color: var(--ink3); font-variant-numeric: tabular-nums; }
 .spare { display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .check.tiny { font-size: 12px; }
+
+/* ---------------------------------------------------------------- practice draft */
+/* The banner has one job: tell someone who has never done this what to do next. It sits
+   where the eye already goes for the clock, and it uses the strongest colour on the page
+   because while it is showing, nothing else on the board matters. */
+.mockBar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 14px 22px 0; padding: 11px 14px;
+  background: var(--fieldSoft); border: 1px solid var(--field);
+  border-left: 4px solid var(--field); border-radius: 0 var(--r) var(--r) 0;
+  font-size: 13px; color: var(--ink2);
+}
+.mockBar b { color: var(--ink); font-weight: 600; }
+.mockBar b.good { color: var(--good); }
+.mockBar .hint { flex-basis: 100%; margin: 0; }
+.mockBar button { margin-left: auto; }
+.mockTag {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  background: var(--field); color: var(--chalk); border-radius: 4px; padding: 4px 9px;
+}
+.mockTag.done { background: var(--good); }
+
+.mockKnobs { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 22px; margin-bottom: 18px; }
+.mockKnobs input[type="number"] { width: 70px; height: 32px; text-align: center; }
+button.primary { background: var(--field); color: var(--chalk); border-color: var(--field); font-weight: 600; }
+button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDeep); }
+.mockRun {
+  padding: 13px 15px; background: var(--fieldSoft); border: 1px solid var(--field);
+  border-radius: var(--r); font-size: 14px;
+}
+.mockRun .rowbtns { margin: 12px 0 0; }
+.mockLede { font-size: 14px; max-width: 78ch; line-height: 1.55; }
+.mockLede b.good { color: var(--good); }
+.mockLede b.bad { color: var(--bad); }
+.row.mockPick, .row.head.mockPick {
+  grid-template-columns: 38px 52px minmax(0, 1fr) 62px minmax(0, 1.5fr);
+}
+.cost { font-size: 13px; color: var(--ink2); }
+.cost.up { color: var(--good); }
+.cost.dn { color: var(--bad); }
+.mockPicks { margin-bottom: 8px; }
+.mockHonest { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line2); }
+.mockHonest p { font-size: 13px; color: var(--ink2); max-width: 78ch; line-height: 1.6; }
+.mockHonest p.warn { color: var(--ink2); }
+.mockHonest p.warn b { color: var(--bad); }
+@media (max-width: 720px) {
+  /* the verdict is the column worth keeping on a phone; the raw ranking is not */
+  .row.mockPick, .row.head.mockPick { grid-template-columns: 32px 44px minmax(0, 1fr) minmax(0, 1.3fr); }
+  .row.mockPick > :nth-child(4) { display: none; }
+  .mockBar { margin: 12px 12px 0; }
+}
