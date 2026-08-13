@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130819';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130819';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608130819';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130819';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130825';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130825';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608130825';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130825';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608130819';
+const BUILD = '202608130825';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -707,7 +707,11 @@ ${(st.customs || []).length ? `<p class="hint">Added: ${(st.customs || [])
   const biggest = Object.entries(infl).sort((a2, b2) => b2[1].mean - a2[1].mean)[0];
   const lab = (k) => data.components.find((c) => c.key === k)?.label || k;
   const churn = Object.values(infl).reduce((a2, x) => a2 + x.top50, 0);
-  $('#inflNote').innerHTML = `The <b>±</b> column is how far the board moves if you switch a `
+  $('#inflNote').innerHTML = `<b class="warn">Measured 2024 → 2025, this blend was beaten by `
+    + `“last year's points per game” at all four positions</b> (0.64–0.72 against 0.71–0.78 `
+    + `rank correlation). Treat the weights below as a way to express what you care about, `
+    + `not as a better forecast than the simple number. `
+    + `The <b>±</b> column is how far the board moves if you switch a `
     + `component off — measured, not guessed. <b>${lab(biggest[0])}</b> moves it most `
     + `(±${biggest[1].mean.toFixed(1)} places). ${churn === 0
       ? 'Switching any single one off changes <b>nobody</b> in your top 50: the components '

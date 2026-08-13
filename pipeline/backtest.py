@@ -81,6 +81,44 @@ def hit_rate(pairs, top=24):
     return len(picked & actual) / top
 
 
+def component_scores(stats, pos):
+    """Every component's percentile score per player, so each can be judged on its own."""
+    groups = {pid: row for pid, row in stats.items() if row.get('pos') == pos}
+    if len(groups) < 12:
+        return {}, {}
+
+    pct = {pid: {} for pid in groups}
+    for _ck, _label, _desc, subs in SM.COMPONENTS:
+        for key, _lbl, fn, higher, _w, needs_hist, on in subs:
+            if not on or not needs_hist:
+                continue
+            vals = []
+            for pid, row in groups.items():
+                try:
+                    vals.append((pid, float(fn(row['a'], {}, {}) or 0)))
+                except Exception:
+                    vals.append((pid, 0.0))
+            vals.sort(key=lambda kv: kv[1], reverse=not higher)
+            n = len(vals)
+            for i, (pid, _v) in enumerate(vals):
+                pct[pid][key] = (i / (n - 1)) * 100 if n > 1 else 50.0
+
+    comps = {pid: {} for pid in groups}
+    for ck, _label, _desc, subs in SM.COMPONENTS:
+        for pid in groups:
+            num = den = 0.0
+            for key, _lbl, _fn, _hi, w, needs_hist, on in subs:
+                if not on or not needs_hist:
+                    continue
+                pw = SM.weight_for(key, w, pos)
+                if not pw or key not in pct[pid]:
+                    continue
+                num += pct[pid][key] * pw
+                den += pw
+            comps[pid][ck] = (num / den) if den else None
+    return comps, groups
+
+
 def rating_from(stats, pos):
     """The app's rating, built only from the season handed in.
 
@@ -206,6 +244,42 @@ def run(prior_year, target_year, prior_rows=None, target_rows=None):
 
     wins = sum(1 for _p, _n, m in report
                if m['the rating'][0] > max(m[k][0] for k in names if k != 'the rating'))
+    # -------- which components actually predict, one at a time --------
+    print('\n\nEach component on its own, against the same outcome')
+    print('(a component that cannot beat noise is costing you weight)\n')
+    per = {}
+    for pos in ['QB', 'RB', 'WR', 'TE']:
+        comps, groups = component_scores(prior, pos)
+        if not comps:
+            continue
+        for ck, label, _d, _s in SM.COMPONENTS:
+            pairs = []
+            for pid, row in groups.items():
+                if float(row['a'].get('gp') or 0) < MIN_GAMES:
+                    continue
+                v = comps[pid].get(ck)
+                if v is None:
+                    continue
+                t = target.get(pid)
+                got = (float(t['a'].get('pts_ppr') or 0) / max(float(t['a'].get('gp') or 1), 1)) if t else 0.0
+                pairs.append((v, got))
+            if len(pairs) >= 20:
+                per.setdefault(label, {})[pos] = spearman(pairs)
+
+    cols = [p for p in ['QB', 'RB', 'WR', 'TE'] if any(p in v for v in per.values())]
+    print(f"{'':<16}" + ''.join(f'{c:>8}' for c in cols) + f"{'mean':>9}")
+    ranked = sorted(per.items(),
+                    key=lambda kv: -sum(kv[1].values()) / max(len(kv[1]), 1))
+    for label, byp in ranked:
+        line = f'{label:<16}'
+        for c in cols:
+            line += f'{byp[c]:>8.2f}' if c in byp else f"{'-':>8}"
+        line += f'{sum(byp.values()) / len(byp):>9.2f}'
+        print(line)
+    print('\nThe app currently weights them:')
+    print('  ' + ', '.join(f'{lbl} {SM.COMPONENT_WEIGHTS.get(k, 0)}'
+                           for k, lbl, _d, _s in SM.COMPONENTS))
+
     print(f'\nThe rating is the best predictor at {wins} of {len(report)} positions.')
     if wins <= len(report) / 2:
         print('That is not a good result. The blend is not beating the naive baselines,')

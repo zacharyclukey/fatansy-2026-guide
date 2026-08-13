@@ -70,6 +70,36 @@ the result, so the board is current on draft day without anyone doing anything. 
 Workflow permissions → **Read and write permissions**. Without it the Action can rebuild
 the data but not commit it.
 
+## The backtest result, which is not flattering
+
+Run 2024 → 2025, the rating loses to a single number at every position:
+
+| Spearman vs next-season points/game | QB | RB | WR | TE |
+|---|---|---|---|---|
+| the rating | 0.72 | 0.67 | 0.72 | 0.64 |
+| **last year's points per game** | 0.71 | **0.74** | **0.78** | **0.76** |
+| last year's finish | **0.73** | 0.74 | 0.78 | **0.77** |
+| snap share alone | 0.70 | 0.70 | 0.74 | 0.71 |
+
+Fifty stats and ten components, beaten by "he scored a lot last year" at four positions
+out of four. That is worth stating plainly rather than burying: **the blend is not a
+better forecast than the naive baseline.**
+
+Two honest caveats, neither of which rescues it:
+
+- The projection component is excluded, because no projection exists for a past season.
+  In the live app that component has by far the largest influence, so what the backtest
+  condemns is the *stats* half of the rating.
+- Players who vanished are kept as zeros, which lifts every metric's correlation equally.
+  The comparison between metrics is still like for like.
+
+What it does **not** mean is that the ratings are useless. They decide order within a
+tier and they are what makes a pick "yours" rather than the room's. But they should not
+be sold as a sharper prediction, and the default trust level should reflect that.
+
+`python backtest.py 2024 2025` also now reports every component's predictive power on its
+own, which is the evidence needed to re-weight rather than guess.
+
 ## An honest note on how much the ratings move anything
 
 The Ratings Lab shows a **±** figure per component: how far the board moves if you switch
