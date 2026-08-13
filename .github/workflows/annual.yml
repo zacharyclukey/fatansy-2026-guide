@@ -1,0 +1,58 @@
+name: Who beats their preseason projection
+
+# You draft a man because a number says 240 points. He scores 310, or 90. Is there
+# anything visible in August that says which?
+#
+# Checks first whether the season projection Sleeper returns for an old season is really
+# the preseason number, or one quietly updated afterwards - because if it is the latter
+# every result here would be contaminated and would look like a finding.
+#
+# Reads weekly data for the history, so it takes several minutes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'First season'
+        default: '2021'
+      to:
+        description: 'Last season'
+        default: '2025'
+
+jobs:
+  annual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compare projections with reality
+        working-directory: pipeline
+        run: python annual.py "${{ inputs.from }}" "${{ inputs.to }}" | tee /tmp/out.txt
+
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "### Who beats their preseason projection — ${{ inputs.from }} to ${{ inputs.to }}"
+            echo ''
+            echo '```'
+            cat /tmp/out.txt || echo 'the run produced no output'
+            echo '```'
+            echo ''
+            echo '**Read the integrity check first.** If it says SUSPECT, the season'
+            echo 'projection has been updated with hindsight and the week-1 version was'
+            echo 'substituted; if it says that for every season, treat the rest carefully.'
+            echo ''
+            echo '**The calibration table is the likely payoff.** If the top buckets beat'
+            echo 'their projection well under half the time, the top of the board is priced'
+            echo 'too confidently — every year, for everybody — and that is usable on draft'
+            echo 'day without predicting any individual player.'
+            echo ''
+            echo '**Check the named players last.** If the beats and misses do not match'
+            echo 'what you remember of that season, something is wrong upstream and none of'
+            echo 'the numbers above should be trusted.'
+          } >> $GITHUB_STEP_SUMMARY
