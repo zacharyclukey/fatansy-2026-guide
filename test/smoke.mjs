@@ -113,6 +113,17 @@ const fire = (el, type) => {
   ok('the app imports nothing that is not exported', broken.length === 0, broken.join(', '));
 }
 
+// --------------------------------------------- 0b2. no duplicate element ids
+// The strategy block ended up rendered twice - once on the board, once on the Ratings
+// tab - because a removal silently did not apply. querySelector only ever finds the
+// first, so the Ratings copy was never populated and the move looked like it failed.
+{
+  const html = fs.readFileSync(`${DIR}/index.html`, 'utf8');
+  const ids = [...html.matchAll(/id="([^"]+)"/g)].map((m) => m[1]);
+  const dupes = [...new Set(ids.filter((i) => ids.filter((x) => x === i).length > 1))];
+  ok('no element id appears twice', dupes.length === 0, dupes.join(', '));
+}
+
 // --------------------------------------------- 0c. every asset is cache-busted
 // New code paired with a stale cached data file is a silent, confusing failure: the
 // quarterback columns came back blank because players.json had no version stamp.
@@ -135,7 +146,10 @@ const fire = (el, type) => {
   const st = { ...m.DEFAULT_SETTINGS(data), mine: [] };
   data.leagues = [m.SAMPLE_LEAGUE];
   const b = m.buildBoard(data, st);
-  ok('board builds', b.rows.length === 259, `${b.rows.length} rows`);
+  // never hardcode the pool size - the nightly refresh changes it
+  ok('board builds', b.rows.length === players.players.length,
+    `${b.rows.length} of ${players.players.length}`);
+  ok('the pool is a real season', players.players.length >= 200, `${players.players.length}`);
 
   // replacement level must be derived from who really fills the flex, not a fixed guess
   const ff = m.flexFill(data.players, m.SAMPLE_LEAGUE);
@@ -190,8 +204,10 @@ const fire = (el, type) => {
   let created = 0;
   const real = d.createElement.bind(d);
   d.createElement = (t) => { created += 1; return real(t); };
-  const sl = d.querySelector('#style');
-  for (let i = 0; i <= 40; i += 1) { sl.value = String(i * 2); fire(sl, 'input'); }
+  // Need bonus is the slider that still lives on the board; the rating knobs moved to
+  // the Ratings tab where they belong
+  const sl = d.querySelector('#need');
+  for (let i = 0; i <= 40; i += 1) { sl.value = String(i % 21); fire(sl, 'input'); }
   await settle();
   ok('slider reuses rows', created < 60, `${created} elements created over a 40-step drag`);
   ok('rows survived the drag', d.querySelectorAll('.row.player').length === 100);
@@ -478,7 +494,7 @@ const fire = (el, type) => {
   d.querySelector('[data-strat="upside"]').click(); await settle();
   d.querySelector('[data-v="ratings"]').click();
   ok('a preset leaves position values alone', JSON.stringify(st_posx(d)) === before);
-  const need = d.querySelector('#need'); need.value = '15'; fire(need, 'input');
+  const tw = d.querySelector('#tilt2'); tw.value = '175'; fire(tw, 'input');
   await settle();
   d.querySelector('[data-v="ratings"]').click();
   ok('editing a slider drops the preset label',

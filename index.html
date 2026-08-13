@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608130807" />
+<link rel="stylesheet" href="styles.css?v=202608130819" />
 </head>
 <body>
 
@@ -31,32 +31,13 @@
   </div>
 
   <div id="settings" class="panel" hidden>
-    <div class="strat">
-      <span class="stratLabel" data-tip="strat" tabindex="0">Strategy</span>
-      <span id="stratChips" class="chips"></span>
-      <p id="stratWhy" class="hint"></p>
-    </div>
     <div class="knobs">
-      <label class="knob">
-        <span class="knobLabel"><span data-tip="style" tabindex="0">Safe <em id="styleOut">balanced</em> Upside</span></span>
-        <input id="style" type="range" min="0" max="100" step="5" value="50" />
-        <span class="hint">What kind of player wins your league</span>
-      </label>
-      <label class="knob">
-        <span class="knobLabel"><span data-tip="tilt" tabindex="0">Trust my ratings</span> <em id="tiltOut">50%</em></span>
-        <input id="tilt" type="range" min="0" max="200" step="5" value="50" />
-        <span class="hint">0 = pure value, 100 = trust the rating</span>
-      </label>
       <label class="knob">
         <span class="knobLabel"><span data-tip="need" tabindex="0">Need bonus</span> <em id="needOut">8</em></span>
         <input id="need" type="range" min="0" max="20" step="1" value="8" />
         <span class="hint">Nudge toward positions you still have to fill</span>
       </label>
       <div class="checks">
-        <label class="check">
-          <input id="rookie" type="checkbox" checked />
-          <span data-tip="rookie" tabindex="0">Rookie upside<span class="hint">Pay up for rookies you trust</span></span>
-        </label>
         <label class="check">
           <input id="hideGone" type="checkbox" />
           <span data-tip="hideGone" tabindex="0">Hide drafted<span class="hint">Clear players already off the board</span></span>
@@ -133,6 +114,10 @@
         <input id="style2" type="range" min="0" max="100" step="5" value="50" />
         <span class="hint">Moves weight between the steady components and Upside.</span>
       </label>
+      <label class="check">
+        <input id="rookie" type="checkbox" checked />
+        <span data-tip="rookie" tabindex="0">Rookie upside<span class="hint">Pay up for rookies you trust</span></span>
+      </label>
     </div>
     <div class="rowbtns">
       <button id="exportR">Export my ratings</button>
@@ -194,6 +179,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608130807"></script>
+<script type="module" src="app.js?v=202608130819"></script>
 </body>
 </html>

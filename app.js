@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130807';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130807';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608130807';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130807';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130819';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130819';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608130819';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130819';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608130807';
+const BUILD = '202608130819';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -883,8 +883,6 @@ function renderChrome() {
     .map((l, i) => `<option value="${i}"${i === st.league ? ' selected' : ''}>${l.name}</option>`).join('');
   $('#filters').innerHTML = ['ALL', ...data.positions]
     .map((p) => `<button data-f="${p}" aria-pressed="${p === filter}">${p === 'ALL' ? 'All' : p}</button>`).join('');
-  $('#style').value = st.style;
-  $('#tilt').value = Math.round(st.tilt * 100);
   $('#need').value = st.need;
   st.cols ||= { bye: true };
   const groups = GROUPS.map(([k, label]) => `<label class="chip">
@@ -901,6 +899,7 @@ function renderChrome() {
   $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
   if ($('#tilt2')) $('#tilt2').value = Math.round(st.tilt * 100);
   if ($('#style2')) $('#style2').value = st.style;
+  if ($('#rookie')) $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
   readouts();
 }
@@ -950,8 +949,6 @@ ${LEANS.map((l) => `<button class="chipBtn" data-lean="${l.key}" aria-pressed="$
 }
 
 function readouts() {
-  $('#styleOut').textContent = styleWord(st.style);
-  $('#tiltOut').textContent = `${Math.round(st.tilt * 100)}%`;
   if ($('#styleOut2')) $('#styleOut2').textContent = styleWord(st.style);
   if ($('#tiltOut2')) $('#tiltOut2').textContent = `${Math.round(st.tilt * 100)}%`;
   $('#needOut').textContent = st.need;
@@ -1048,20 +1045,13 @@ function wire() {
       undo();
     }
   });
-  for (const [id, fn] of [['style', (v) => { st.style = +v; }],
-    ['tilt', (v) => { st.tilt = +v / 100; }], ['need', (v) => { st.need = +v; }],
+  for (const [id, fn] of [['need', (v) => { st.need = +v; }],
     ['style2', (v) => { st.style = +v; }], ['tilt2', (v) => { st.tilt = +v / 100; }]]) {
     const el = $(`#${id}`);
     if (!el) continue;
-    el.oninput = (e) => {
-      fn(e.target.value);
-      readouts();
-      if (id === 'style2') $('#style').value = st.style;
-      if (id === 'tilt2') $('#tilt').value = Math.min(100, Math.round(st.tilt * 100));
-      save(); scheduleRebuild();
-    };
+    el.oninput = (e) => { fn(e.target.value); readouts(); save(); scheduleRebuild(); };
   }
-  $('#rookie').onchange = (e) => { st.rookie = e.target.checked; save(); rebuild(); };
+  if ($('#rookie')) $('#rookie').onchange = (e) => { st.rookie = e.target.checked; save(); rebuild(); };
   $('#slot').oninput = (e) => {
     st.slots ||= {};
     st.slots[st.league] = +e.target.value || null;
