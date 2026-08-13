@@ -29,7 +29,10 @@ cache, so Chrome keeps the old copies. Three things to check, in order:
    if it matches the newest one you are looking at current code.
 3. Only then look at the repo's **Actions** tab for a failed `pages build and deployment`.
 
-Every asset URL carries a `?v=` stamp to defeat that caching. Run `./bump.sh` before
+Every asset URL carries a `?v=` stamp to defeat that caching — **including
+`data/players.json`**, which was missed at first and caused a genuinely confusing bug:
+new code paired with a week-old cached data file, so columns that depended on newly added
+fields silently rendered blank. Run `./bump.sh` before
 committing any change to css or js — it rewrites the stamp everywhere and updates the
 build number shown in the footer.
 

@@ -1,11 +1,11 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130757';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130757';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608130757';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130757';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, influence, subScores, SAMPLE_LEAGUE, RAW_FIELDS, applyCustomStats, unusedStats, draftContext, availability, poolAround, costOfWaiting, floorScore, STAR_BAND } from './engine.js?v=202608130804';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608130804';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608130804';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608130804';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608130757';
+const BUILD = '202608130804';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -17,6 +17,7 @@ let query = '';
 let open = null;
 let timer = null;
 let cache = null;
+let history = [];      // recent pick changes, so a mis-click is one click to undo
 let subVersion = 0;
 let cachedVersion = -1;
 let frame = null;
@@ -54,6 +55,24 @@ const POS_COLS = {
 };
 // one button, three states: no view -> I like him more -> I trust him less
 const starMark = (r) => (r.star ? '★' : r.fade ? '✕' : '☆');
+
+// How many of your likely starters already sit on this player's bye week.
+// Bench players are ignored - a third back on your bye costs you nothing.
+function byeClash(bye) {
+  if (!bye) return 0;
+  const lg = board.league;
+  const counts = {};
+  const seen = {};
+  for (const id of picks().mine) {
+    const p = byId(id);
+    if (!p) continue;
+    seen[p.pos] = (seen[p.pos] || 0) + 1;
+    const slots = (lg.starters[p.pos] || 0) + (['RB', 'WR', 'TE'].includes(p.pos)
+      ? (lg.starters.FLEX || 0) : 0);
+    if (seen[p.pos] <= slots && p.bye) counts[p.bye] = (counts[p.bye] || 0) + 1;
+  }
+  return counts[bye] || 0;
+}
 
 const catchRate = (r) => (r.p.a?.rec_tgt ? (r.p.a.rec / r.p.a.rec_tgt) * 100 : null);
 
@@ -389,6 +408,11 @@ function renderAll() {
   if (view === 'setup') renderSetup();
   const age = Math.floor((Date.now() - new Date(data.generated).getTime()) / 86400000);
   const stale = age > 7;
+  const u = $('#undo');
+  if (u) {
+    u.disabled = !history.length;
+    u.textContent = history.length ? `Undo ${history[history.length - 1].label}` : 'Undo';
+  }
   $('#meta').innerHTML = `${board.rows.length} players · ${board.league.name} · `
     + `${picks().mine.length} on your roster · build ${BUILD} · `
     + `<span class="age${stale ? ' stale' : ''}" data-tip="age" tabindex="0">`
@@ -408,7 +432,8 @@ function rowHTML(r, cols, d, m) {
 <span class="who">${posTag(r.p.pos)}
 <button class="nm" data-open="${r.p.id}" title="Show detail">${r.p.name} <span class="tm">${r.p.team || ''}</span></button>
 ${r.p.rookie ? '<span class="rook">R</span>' : ''}${injBadge(r.p)}
-${r.lastOfTier ? `<span class="tierEnd" data-tip="cliff">last ${r.p.pos}${r.tier}</span>` : ''}</span>
+${r.lastOfTier ? `<span class="tierEnd" data-tip="cliff">last ${r.p.pos}${r.tier}</span>` : ''}
+${byeClash(r.p.bye) >= 2 ? `<span class="byeClash" data-tip="byeclash">bye ${r.p.bye} ×${byeClash(r.p.bye) + 1}</span>` : ''}</span>
 ${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
 <button class="starBtn ${r.star ? 'on' : ''}${r.fade ? ' off' : ''}" data-star="${r.p.id}"
@@ -463,6 +488,13 @@ function renderBoard() {
         if (nums[i] && nums[i].innerHTML !== v) nums[i].innerHTML = v;
       });
       const who = el.querySelector('.who');
+      const clash = byeClash(r.p.bye);
+      const cb = who.querySelector('.byeClash');
+      if (clash >= 2 && !cb) {
+        who.insertAdjacentHTML('beforeend',
+          `<span class="byeClash" data-tip="byeclash">bye ${r.p.bye} ×${clash + 1}</span>`);
+      } else if (clash >= 2 && cb) { cb.textContent = `bye ${r.p.bye} ×${clash + 1}`; }
+      else if (cb) { cb.remove(); }
       const badge = who.querySelector('.tierEnd');
       if (r.lastOfTier && !badge) {
         who.insertAdjacentHTML('beforeend',
@@ -1000,7 +1032,20 @@ function wire() {
     if (e.target.dataset.col === 'starsonly') renderChrome();
     renderBoard();
   });
-  $('#reset').onclick = () => { st.picks[st.league] = { drafted: [], mine: [] }; save(); rebuild(); };
+  $('#reset').onclick = () => {
+    remember('cleared the draft');
+    st.picks[st.league] = { drafted: [], mine: [] };
+    save(); rebuild();
+  };
+  $('#undo').onclick = undo;
+  // ctrl/cmd-Z anywhere that is not a text field
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'
+        && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) {
+      e.preventDefault();
+      undo();
+    }
+  });
   for (const [id, fn] of [['style', (v) => { st.style = +v; }],
     ['tilt', (v) => { st.tilt = +v / 100; }], ['need', (v) => { st.need = +v; }],
     ['style2', (v) => { st.style = +v; }], ['tilt2', (v) => { st.tilt = +v / 100; }]]) {
@@ -1160,6 +1205,26 @@ function wire() {
   });
 }
 
+function remember(label) {
+  history.push({
+    label,
+    league: st.league,
+    drafted: [...picks().drafted],
+    mine: [...picks().mine],
+  });
+  if (history.length > 30) history.shift();
+}
+
+function undo() {
+  const last = history.pop();
+  if (!last) return;
+  st.league = last.league;
+  st.picks[last.league] = { drafted: last.drafted, mine: last.mine };
+  save();
+  renderChrome();
+  rebuild();
+}
+
 function toggle(list, id) {
   const arr = picks()[list];
   const i = arr.indexOf(id);
@@ -1170,7 +1235,10 @@ function toggle(list, id) {
 }
 
 // ---------------------------------------------------------------- go
-fetch('data/players.json')
+// The data file needs the cache stamp as much as the code does. Without it a browser
+// happily pairs brand new JavaScript with a players.json from last week - which is what
+// made the quarterback columns come back blank: new code, old data, no passing stats.
+fetch(`data/players.json?v=${BUILD}`)
   .then((r) => r.json())
   .then((d) => {
     data = d;

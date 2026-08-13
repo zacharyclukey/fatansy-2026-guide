@@ -78,6 +78,9 @@ export const TIPS = {
   star: ['Your own view of him. Click to cycle.',
     'Liked lifts him above anyone within 5 points, faded drops him below. Never further.'],
 
+  byeclash: ['This bye week already costs you starters.',
+    'Counts only players filling a starting or flex slot, not your bench.'],
+
   cliff: ['The last player of his tier.',
     'The next one at his position is a clear step down, not a small one.'],
 

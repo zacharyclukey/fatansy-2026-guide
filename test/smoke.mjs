@@ -45,7 +45,7 @@ async function boot({ store = {}, offline = false } = {}) {
   window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
   window.fetch = (u) => {
     const s = String(u);
-    if (s.endsWith('players.json')) {
+    if (s.includes('players.json')) {          // the URL carries a ?v= cache stamp
       return Promise.resolve({ json: () => Promise.resolve(JSON.parse(JSON.stringify(players))) });
     }
     if (offline) return Promise.reject(new TypeError('Failed to fetch'));
@@ -111,6 +111,21 @@ const fire = (el, type) => {
     .split(',').map((x) => x.trim()).filter(Boolean)];
   const broken = imported.filter((n) => !exported.includes(n));
   ok('the app imports nothing that is not exported', broken.length === 0, broken.join(', '));
+}
+
+// --------------------------------------------- 0c. every asset is cache-busted
+// New code paired with a stale cached data file is a silent, confusing failure: the
+// quarterback columns came back blank because players.json had no version stamp.
+{
+  const app = fs.readFileSync(`${DIR}/app.js`, 'utf8');
+  const html = fs.readFileSync(`${DIR}/index.html`, 'utf8');
+  ok('the data file is cache-busted', /players\.json\?v=/.test(app));
+  const unversioned = [...html.matchAll(/(?:src|href)="([^"]+\.(?:js|css))"/g)]
+    .map((m) => m[1]).filter((u) => !u.includes('?v='));
+  ok('every script and stylesheet is cache-busted', unversioned.length === 0, unversioned.join(', '));
+  const imports = [...app.matchAll(/from '\.\/([^']+\.js)([^']*)'/g)]
+    .filter((m) => !m[2].includes('?v=')).map((m) => m[1]);
+  ok('every module import is cache-busted', imports.length === 0, imports.join(', '));
 }
 
 // ---------------------------------------------------------------- 1. the engine
@@ -206,6 +221,21 @@ const fire = (el, type) => {
   ok('tier cliffs are marked', cliffs.length > 0, `${cliffs.length} visible in the top 100`);
   ok('cliff labels name the position and tier', cliffs.every((c) => /^last [A-Z]{2,3}\d+$/.test(c.textContent)),
     cliffs.slice(0, 3).map((c) => c.textContent).join(', '));
+
+  // bye clashes and undo
+  d.querySelector('[data-f="ALL"]').click();
+  const q2 = d.querySelector('#search'); q2.value = ''; fire(q2, 'input');
+  await settle();
+  const before = d.querySelectorAll('.row.mine').length;
+  d.querySelectorAll('.row.player [data-m]')[0].click();
+  await settle();
+  ok('a pick lands on your team', d.querySelectorAll('.row.mine').length === before + 1);
+  ok('undo offers to take it back', /Undo .+/.test(d.querySelector('#undo').textContent),
+    d.querySelector('#undo').textContent);
+  d.querySelector('#undo').click();
+  await settle();
+  ok('undo puts it back', d.querySelectorAll('.row.mine').length === before);
+  ok('and disables itself when there is nothing left', d.querySelector('#undo').disabled);
 
   ok('data age is shown', /data .*(today|day)/.test(d.querySelector('#meta').textContent),
     d.querySelector('#meta').textContent.slice(-60));

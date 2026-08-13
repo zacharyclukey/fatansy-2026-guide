@@ -560,3 +560,12 @@ span.nm:hover { text-decoration: none; }
 
 #statFind { width: 260px; }
 .statRow.hit { background: var(--fieldSoft); border-radius: 4px; }
+
+.byeClash {
+  font-size: 9px; font-weight: 700; color: var(--bad); border: 1px solid var(--bad);
+  border-radius: 3px; padding: 0 4px; line-height: 14px; flex: none; cursor: help;
+  white-space: nowrap;
+}
+.footBtns { display: flex; gap: 8px; }
+#undo:disabled { opacity: .45; cursor: default; }
+#undo:disabled:hover { background: var(--card); border-color: var(--line2); }
