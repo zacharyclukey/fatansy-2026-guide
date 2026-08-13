@@ -648,3 +648,9 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
   .row.mockPick > :nth-child(4) { display: none; }
   .mockBar { margin: 12px 12px 0; }
 }
+.autoMark {
+  font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--ink3); border: 1px solid var(--line2); border-radius: 3px;
+  padding: 0 4px; line-height: 14px; flex: none;
+}
+.mockHint { max-width: 78ch; margin: -8px 0 16px; }

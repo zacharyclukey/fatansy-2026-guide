@@ -108,6 +108,7 @@ const fire = (el, type) => {
     'projectedPoints', 'inLeague', 'flexFill', 'replacementLevels', 'SAMPLE_LEAGUE',
     'subScores', 'RAW_FIELDS', 'applyCustomStats', 'unusedStats', 'buildBoard', 'pickType',
     'markTiers', 'myPicks', 'draftContext', 'availability', 'poolAround', 'costOfWaiting',
+    'roundsOf',
     'influence', 'priorityOrder'];
   const missing = needed.filter((n) => !exported.includes(n));
   ok('every engine export the app imports still exists', missing.length === 0, missing.join(', '));
@@ -658,7 +659,7 @@ const fire = (el, type) => {
   const mk = await import(`file://${DIR}/mock.js`);
   const lg = e.SAMPLE_LEAGUE;
   const T = lg.teams;
-  const R = mk.roundsOf(lg);
+  const R = e.roundsOf(lg);
   const pool = players.players.filter((p) => e.inLeague(p, lg));
 
   // ---- snake order, both directions ------------------------------------
@@ -784,7 +785,7 @@ const fire = (el, type) => {
   const mk = await import(`file://${DIR}/mock.js`);
   const lg = e.SAMPLE_LEAGUE;                    // no league imported, so it is the sample
   const T = lg.teams;
-  const R = mk.roundsOf(lg);
+  const R = e.roundsOf(lg);
   const SLOT = 9;
   const drafted = () => d.querySelectorAll('.row.player.drafted').length;
   const mineRows = () => d.querySelectorAll('.row.player.mine').length;
@@ -924,6 +925,138 @@ const fire = (el, type) => {
   d.querySelector('#mockStart').click();
   await settle();
   ok('and goes ahead on the second press', !!peek().mock);
+}
+
+// --------------------------------------------- 9a. the app drafting for you
+// "Draft it all for me" takes the top of your board every time, so the team it builds is a
+// picture of your settings. That only means anything if the team is legal and if changing
+// the settings changes the team.
+{
+  const e = await import(`file://${DIR}/engine.js`);
+  const mk = await import(`file://${DIR}/mock.js`);
+  const lg = e.SAMPLE_LEAGUE;
+  const T = lg.teams;
+  const R = e.roundsOf(lg);
+  const SLOT = 5;
+
+  // ---- the need bonus must not turn the middle of the board into kickers ----
+  // This was a live bug, not a simulator one: with your starters full, every other
+  // position took -need/2 while an empty kicker slot still paid +need, and ranks 68-80
+  // came out a solid block of kickers and defences.
+  const data = JSON.parse(JSON.stringify(players));
+  data.leagues = [lg];
+  const base = e.DEFAULT_SETTINGS(data);
+  const filled = ['RB', 'RB', 'WR', 'WR', 'WR', 'TE', 'QB'];
+  const kdIn = (b) => b.rows.slice(0, 100).filter((r) => ['K', 'DEF'].includes(r.p.pos)).length;
+  // The bar: the need mechanism must never push a kicker HIGHER than his own value alone
+  // would. With the bonus switched off entirely, two of them sit in the top 100 on pure
+  // VOR - a starting kicker really is worth more than the 250th receiver. That is the
+  // ceiling. The bug had fourteen.
+  const pure = kdIn(e.buildBoard(data, { ...base, need: 0, mine: [] }));
+  const mid = e.buildBoard(data, { ...base, need: 8, mine: filled });
+  ok('filling your starters does not lift kickers up the board', kdIn(mid) <= pure,
+    `${pure} in the top 100 on value alone, ${kdIn(mid)} once your starters are full`);
+  ok('and a kicker is never a need with eight picks left',
+    (mid.rows.find((r) => r.p.pos === 'K')?.need ?? 0) <= 0,
+    `need ${mid.rows.find((r) => r.p.pos === 'K')?.need}`);
+  // but at the end of the draft they are exactly what you need
+  const late = e.buildBoard(data, { ...base, need: 8, mine: [...filled, ...Array(6).fill('WR')] });
+  const kLate = late.rows.find((r) => r.p.pos === 'K');
+  ok('and is one when the picks run out', kLate.need === 8, `need ${kLate.need}`);
+
+  // ---- the sample league used to score every kicker at zero ----
+  // Kicker and defence points are precomputed per league by NAME, because their scoring
+  // cannot be derived from a stat line. Any league the data file has never heard of - the
+  // built-in sample, or the league of anyone who is not the person the file was built for
+  // - fell through to zero, which tied all sixty-six of them and ordered them by nothing.
+  const kPts = players.players.filter((p) => p.pos === 'K').map((p) => e.projectedPoints(p, lg));
+  ok('kickers are not all tied on zero in an unknown league',
+    new Set(kPts).size > 5 && Math.max(...kPts) > 0, `${new Set(kPts).size} distinct scores`);
+  const bestK = players.players.filter((p) => p.pos === 'K')
+    .sort((a, b) => e.projectedPoints(b, lg) - e.projectedPoints(a, lg))[0];
+  ok('and the best kicker is one the room rates too', bestK.adp < 200,
+    `${bestK.name}, adp ${bestK.adp}`);
+
+  // ---- a full draft where the app makes your picks too ----
+  const pool = players.players.filter((p) => e.inLeague(p, lg));
+  const caps = mk.capsOf(lg);
+  const settings = { ...base, mine: [] };
+  const autoRun = (st0) => {
+    const mine = [];
+    const run = mk.simulate({ players: pool, league: lg, slot: SLOT, disc: 40, seed: 21,
+      choose: (avail, roster) => {
+        // the app rebuilds the board between your picks, because the need bonus moves
+        const b = e.buildBoard(data, { ...st0, mine: roster.map((p) => p.pos) });
+        const gone = new Set(pool.filter((p) => !avail.includes(p)).map((p) => p.id));
+        const p = mk.autoPick(b.rows, gone, roster, lg, R - roster.length, caps);
+        mine.push(p);
+        return p;
+      } });
+    return { run, mine };
+  };
+
+  const { run, mine } = autoRun(settings);
+  ok('the app can draft a whole team for you', run.done && mine.length === R, `${mine.length}`);
+  const need = mk.needsOf(mine, lg);
+  ok('and it is always a legal starting lineup', need.total === 0, JSON.stringify(need.short));
+  const overCap = Object.entries(caps)
+    .filter(([pos, c]) => mine.filter((p) => p.pos === pos).length > c);
+  ok('and never stacks a position past sense', overCap.length === 0, overCap.join(', '));
+  const kd = run.log.filter((x) => x.team === SLOT && ['K', 'DEF'].includes(x.pos));
+  ok('the kicker and defence go in the last rounds', kd.length === 2
+    && kd.every((x) => x.n > T * (R - 2)), kd.map((x) => `${x.pos} rd ${Math.ceil(x.n / T)}`).join(', '));
+
+  // ---- and the settings are what decide it ----
+  // A position lean is the bluntest setting there is, so if that does not change the team
+  // then nothing on the ratings page is reaching the simulator.
+  const leaned = autoRun({ ...settings, posx: { QB: 1.6, RB: 0.7 } });
+  const same = leaned.mine.filter((p, i) => p.id === mine[i]?.id).length;
+  ok('changing your settings changes the team the app builds', same < R,
+    `${same} of ${R} picks identical`);
+  const qbs = (list) => list.filter((p) => p.pos === 'QB').length;
+  ok('and leaning on a position pulls that position forward',
+    qbs(leaned.mine) >= qbs(mine) || leaned.mine.findIndex((p) => p.pos === 'QB')
+      < mine.findIndex((p) => p.pos === 'QB'),
+    `first QB at pick ${leaned.mine.findIndex((p) => p.pos === 'QB') + 1} vs ${mine.findIndex((p) => p.pos === 'QB') + 1}`);
+
+  // ---- through the real interface ----
+  const { d, errs } = await boot();
+  const peek = (w) => {
+    fire(w, 'pagehide');
+    return JSON.parse(w.localStorage.getItem('draft2026') || '{}');
+  };
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockSlot').value = '3';
+  d.querySelector('#mockAll').click();
+  await settle();
+  const st = peek(d.defaultView);
+  ok('one press drafts the whole thing', st.mock?.done === true && st.picks[0].mine.length === R,
+    `${st.picks[0].mine.length} picks`);
+  ok('every one of them is marked as the app\'s',
+    st.mock.log.filter((x) => x.team === 3).every((x) => x.by === 'app'));
+  ok('and it lands you on the report', !d.querySelector('#v-mock').hidden);
+  ok('which says the app made the picks',
+    /Every pick was made by the app/.test(d.querySelector('#mockOut').textContent));
+  ok('drafting for you raised no errors', errs.length === 0, errs.join('; '));
+
+  // handing over mid-draft: pick once yourself, then let the app finish
+  d.querySelector('#mockSlot').value = '3';
+  d.querySelector('#mockStart').click();
+  await settle();
+  d.querySelector('.row.player:not(.drafted) [data-m]').click();
+  await settle();
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockFinish').click();
+  await settle();
+  const st2 = peek(d.defaultView);
+  const mineLog = st2.mock.log.filter((x) => x.team === 3);
+  ok('you can hand over half way through', st2.mock.done && mineLog.length === R);
+  ok('and the report separates your picks from the app\'s',
+    mineLog.filter((x) => x.by === 'you').length === 1
+    && /You made 1 of these picks/.test(d.querySelector('#mockOut').textContent),
+    `${mineLog.filter((x) => x.by === 'you').length} yours`);
 }
 
 // ------------------------------------ 9b. what three practice drafts actually turned up

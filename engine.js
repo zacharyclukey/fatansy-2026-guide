@@ -211,12 +211,36 @@ export function componentScore(p, comp, st) {
 // ---------------------------------------------------------------- league maths
 export function projectedPoints(p, league) {
   // Kickers and defences are scored by their own league-specific rules rather than by a
-  // stat line, so their points come across already computed.
-  if (p.ppts != null) return p.ppts[league.name] ?? 0;
+  // stat line, so their points come across already computed, keyed by league NAME.
+  if (p.ppts != null) {
+    const exact = p.ppts[league.name];
+    if (exact != null) return exact;
+    // A league whose name is not in the data file - the built-in sample, or the league of
+    // anyone who is not the person the file was built for - used to put every kicker and
+    // defence on zero. That does not merely under-rate them, it ties all sixty-six of them
+    // on the same score and then orders them by nothing at all, so the "best" kicker on
+    // the sample board was whoever happened to sort first. Averaging what we do have is an
+    // approximation of his points, but it gets the order right, which is the part that
+    // decides anything.
+    const vals = Object.values(p.ppts);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+  }
   let t = 0;
   for (const [k, v] of Object.entries(league.scoring)) t += v * (p.proj[k] || 0);
   return t;
 }
+
+// How many rounds this draft runs. A league imported before its draft exists does not say,
+// so fall back to the roster size and then to a standard fifteen.
+export function roundsOf(league) {
+  if (league.rounds) return league.rounds;
+  const start = Object.values(league.starters || {}).reduce((a, b) => a + b, 0);
+  return (start + (league.bench || 0)) || 15;
+}
+
+// How close to the end a kicker or a defence starts counting as something you need. They
+// are always there, so wanting one in round 4 is not a need, it is a mistake.
+export const LATE = 3;
 
 export function inLeague(p, league) {
   // A league with no K or DEF slot simply has no kickers or defences in it.
@@ -478,10 +502,29 @@ export function buildBoard(data, st, cache) {
   const pool = (have.RB || 0) + (have.WR || 0) + (have.TE || 0);
   const req = (league.starters.RB || 0) + (league.starters.WR || 0)
     + (league.starters.TE || 0) + (league.starters.FLEX || 0);
+  // Picks you have left. Only used to decide when a kicker becomes a need.
+  const left = roundsOf(league) - (st.mine || []).length;
   const needFor = (pos) => {
     const want = league.starters[pos] || 0;
     if (!want) return 0;
-    if ((have[pos] || 0) < want) return st.need;
+    if ((have[pos] || 0) < want) {
+      // The bug this fixes was ugly and it was on the live board, not just in the
+      // simulator. Once your starters were full every other position took -need/2 while an
+      // empty kicker slot still paid +need - a swing of one and a half need bonuses - and
+      // ranks 68 to 80 came out a solid block of kickers and defences. The board was
+      // telling you to take six of them before your next receiver.
+      //
+      // A kicker is not a need in round four. He is there in round four, he is there in
+      // round fifteen, and waiting on him costs nothing - which is exactly what the cost
+      // of waiting panel already says about him. So the bonus arrives when the picks run
+      // out and not before.
+      // It has to be the same penalty everyone else gets, not zero. Zero still moved them
+      // up: with every real position on -need/2 and a kicker on nothing, filling your
+      // starters lifted fourteen kickers and defences into the top hundred without a
+      // single thing about them having changed.
+      if (['K', 'DEF'].includes(pos) && left > LATE) return -st.need / 2;
+      return st.need;
+    }
     // starters filled: still worth something while a flex slot is open, then a penalty
     if (['RB', 'WR', 'TE'].includes(pos)) return pool < req ? st.need / 2 : -st.need / 2;
     return -st.need / 2;

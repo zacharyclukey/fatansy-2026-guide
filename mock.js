@@ -10,7 +10,7 @@
 // models is the ONE thing a draft room reliably does - take players roughly in ADP order,
 // with need and herd behaviour pulling on it - and it says so on screen.
 
-import { myPicks } from './engine.js?v=202608131339';
+import { myPicks, roundsOf } from './engine.js?v=202608131359';
 
 // ---------------------------------------------------------------- randomness
 // Seeded, so a mock can be replayed. The seed is mixed with the pick number rather than
@@ -42,12 +42,6 @@ export const roundOf = (n, teams) => Math.ceil(n / teams);
 // A league imported before its draft exists can be missing either of these. Falling back
 // to a standard twelve-team, fifteen-round draft is far better than NaN picks.
 export const teamsOf = (league) => league.teams || 12;
-
-export function roundsOf(league) {
-  if (league.rounds) return league.rounds;
-  const start = Object.values(league.starters || {}).reduce((a, b) => a + b, 0);
-  return (start + (league.bench || 0)) || 15;
-}
 
 export const totalPicks = (league) => teamsOf(league) * roundsOf(league);
 
@@ -159,6 +153,43 @@ export function aiPick(avail, roster, league, opts) {
     if (r <= 0) return pool[i];
   }
   return pool[pool.length - 1];
+}
+
+// ---------------------------------------------------------------- picking for you
+// The other half of the simulator: let the app make YOUR picks too, from your own board.
+//
+// There is no second opinion in here and there is deliberately no cleverness. It walks
+// your board from the top and takes the first man it is allowed to take. Everything that
+// decides the order - the projections, the need bonus, your four preferences, your
+// strategy, your position lean, anyone you have starred or faded - has already been
+// applied by buildBoard before these rows arrive. So the team it builds is not the app's
+// opinion of a good team. It is a picture of YOUR settings, played out.
+//
+// Two rules stop it being silly, and they are the same two the pretend teams follow:
+// never carry more of a position than anyone sensibly carries, and once your remaining
+// picks equal your empty starting slots, fill them.
+export function autoPick(rows, gone, roster, league, picksLeft, caps) {
+  const need = needsOf(roster, league);
+  const cap = caps || capsOf(league);
+  const forced = need.total >= picksLeft;
+  for (const r of rows) {
+    const p = r.p || r;
+    if (gone.has(p.id)) continue;
+    if ((need.have[p.pos] || 0) >= (cap[p.pos] ?? 99)) continue;
+    if (forced && !wants(p.pos, need)) continue;
+    // A kicker and a defence go last, always. Not because the board is wrong about them -
+    // a starting kicker really is worth more than the sixtieth receiver - but because the
+    // board has no sense of time and they do not go anywhere. Waiting on one costs nothing,
+    // which is what the cost-of-waiting panel says about them every single pick.
+    if (!forced && ['K', 'DEF'].includes(p.pos)) continue;
+    return p;
+  }
+  // Caps have painted us into a corner - take the best man left rather than stalling.
+  for (const r of rows) {
+    const p = r.p || r;
+    if (!gone.has(p.id)) return p;
+  }
+  return null;
 }
 
 // Two of the same position back to back and the next team feels it. Mild by design - a run

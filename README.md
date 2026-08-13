@@ -56,9 +56,10 @@ disk as a draft-day backup. `.gitignore` keeps it out.
 npm --prefix test i jsdom
 node test/smoke.mjs
 node test/_probe.mjs   # optional: plays three practice drafts and prints what the app said
+node test/_auto.mjs    # optional: lets the app draft for itself and prints the teams
 ```
 
-177 checks against the real `index.html` in a real DOM — the engine maths, the board, the
+195 checks against the real `index.html` in a real DOM — the engine maths, the board, the
 draft clock, the call, strategies, Sleeper import and sync, and the offline path. Two of
 them play a **whole 180-pick draft**, once headlessly and once by clicking the real buttons,
 which is the best regression test in here: it covers the snake maths, the drafted list, the
@@ -73,6 +74,11 @@ your real league settings, and hands you the board when it is your turn. A full 
 about a minute. Nothing it does touches a real draft — and it warns you before it clears a
 board you have picks on.
 
+**Draft it all for me** plays the whole thing in one press, taking the top of your board
+every time — the quickest way to see what your ratings and preferences actually build, and
+what they build from slot 1 against slot 12. You can also hand over half way through, and
+the report marks which picks were yours and which were the app's.
+
 One control: **how disciplined is this room**. Tight means the other teams take the best
 player left by ADP almost every time; loose means they reach. The model underneath is
 deliberately small — sample from the top of the remaining board weighted by ADP, lean
@@ -83,11 +89,13 @@ twice in a row, and fill your empty slots once you run out of room to shop.
 nothing measured over 2020–2025 could. It copies the one habit every draft room really has,
 so that the interface gets used in anger before the night it matters.
 
-Three practice drafts found four real bugs, all of them in the app rather than the
-simulator: the recommendation panel was a draft behind on the first pick, a finished draft
-told you to enter your draft slot, the board could reach round 13 with nothing left on
-screen you could actually take, and picks were being priced against an ADP from beyond the
-end of the draft.
+Playing practice drafts has found seven real bugs so far, every one of them in the app
+rather than the simulator: the recommendation panel was a draft behind on the first pick, a
+finished draft told you to enter your draft slot, the board could reach round 13 with
+nothing left on screen you could actually take, picks were priced against an ADP from
+beyond the end of the draft, filling your starters lifted kickers and defences into the
+middle rounds of the board, the app drafted a kicker in round 8, and any league the data
+file has not heard of scored every kicker and defence at zero.
 
 ## Regenerating the data
 

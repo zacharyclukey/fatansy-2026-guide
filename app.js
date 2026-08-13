@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague } from './engine.js?v=202608131339';
-import { simulate, pickTeam, roundOf, roundsOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf } from './mock.js?v=202608131339';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131339';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131339';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131339';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131359';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131359';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131359';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608131359';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131359';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131339';
+const BUILD = '202608131359';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -458,7 +458,7 @@ function endMock(keep) {
 }
 
 // A pick made by the person, from the real board. Everything else follows from it.
-function mockTake(id) {
+function mockTake(id, by) {
   const m = mock();
   if (!m || m.done) return false;
   const lg = data.leagues[st.league];
@@ -466,12 +466,49 @@ function mockTake(id) {
   if (pickTeam(n, teamsOf(lg)) !== m.slot) return false;
   const p = byId(id);
   if (!p || m.log.some((x) => x.id === id)) return false;
-  remember(`${p.name} in the practice draft`);
-  m.log.push({ n, team: m.slot, id, pos: p.pos, adp: p.adp ?? null });
+  if (by !== 'app') remember(`${p.name} in the practice draft`);
+  m.log.push({ n, team: m.slot, id, pos: p.pos, adp: p.adp ?? null, by: by || 'you' });
   advanceMock();
   save();
   rebuild();
   return true;
+}
+
+// Let the app pick for you - one pick, or all the way to the end.
+//
+// This is the honest way to see what your settings actually build. It takes the top of
+// YOUR board every time, so whatever comes out is a picture of the ratings page rather
+// than of anybody's draft-day judgement, and the report says which picks were yours.
+function autoDraft(all) {
+  const m = mock();
+  if (!m || m.done) return;
+  const lg = data.leagues[st.league];
+  const caps = capsOf(lg);
+  const rounds = roundsOf(lg);
+  let guard = 0;
+  do {
+    advanceMock();                       // the room, up to your turn or to the end
+    if (m.done) break;
+    rescore();                           // your need bonus has moved since the last pick
+    const roster = picks().mine.map((id) => byId(id)).filter(Boolean);
+    const p = autoPick(board.rows, new Set(picks().drafted), roster, lg,
+      rounds - roster.length, caps);
+    if (!p) break;
+    m.log.push({ n: m.log.length + 1, team: m.slot, id: p.id, pos: p.pos,
+      adp: p.adp ?? null, by: 'app' });
+    syncMockPicks();
+    guard += 1;
+  } while (all && !m.done && guard < rounds + 2);
+  advanceMock();
+  save();
+  rebuild();
+}
+
+// Start one and play the whole thing through in one press. The fastest way to ask "what
+// does this ratings page actually build?" - and to ask it again from a different slot.
+function simulateAll() {
+  startMock();
+  if (mock()) { autoDraft(true); show('mock'); }
 }
 
 // The banner across the top of the board while a mock is running. It has one job: someone
@@ -504,6 +541,7 @@ function renderMockBar() {
 <b class="good">You are on the clock</b> — press <b>Pick</b> on the row you want.
 ${since.length ? `<span class="hint">${since.length} went since your last pick${
   names.length ? `: ${names.join(', ')}${since.length > names.length ? '…' : ''}` : ''}</span>` : ''}
+<button id="mockAuto" class="chipBtn" title="Take the top of your board">Pick for me</button>
 <button id="mockQuit" class="chipBtn">End</button>`;
 }
 
@@ -528,7 +566,10 @@ function tickClock() {
   }
 }
 
-function rebuild() {
+// Score the board without drawing anything. Split out because the app drafting for you
+// needs a fresh board between every one of your picks - the need bonus depends on what you
+// already have - and re-rendering fifteen times to get there would be absurd.
+function rescore() {
   if (cachedVersion !== subVersion) {
     cache = subScores(data, st);
     cachedVersion = subVersion;
@@ -540,6 +581,10 @@ function rebuild() {
     // Type column move as the draft goes rather than sitting on its pre-draft answer.
     atPick: picks().drafted.length + 1,
   }, cache);
+}
+
+function rebuild() {
+  rescore();
   tickClock();
   renderAll();
 }
@@ -864,6 +909,7 @@ function renderMock() {
     $('#mockSlotOut').textContent = `${s} of ${teamsOf(lg)}`;
   }
   if ($('#mockStart')) $('#mockStart').textContent = m ? 'Start a fresh one' : 'Start a practice draft';
+  if ($('#mockAll')) $('#mockAll').textContent = m ? 'Draft a fresh one for me' : 'Draft it all for me';
   if ($('#mockEnd')) $('#mockEnd').hidden = !m;
   const out = $('#mockOut');
   if (!out) return;
@@ -882,7 +928,8 @@ is yours already on the clock. ${lg.sample ? '<b>You have not imported a league 
     const n = m.log.length + 1;
     out.innerHTML = `<div class="mockRun"><b>In progress — round ${roundOf(n, teamsOf(lg))},
 pick ${n} of ${total}.</b> It is your turn. Go to the board and press <b>Pick</b> on the
-player you want.<div class="rowbtns"><button data-v="board" class="primary">Back to the board</button></div></div>`;
+player you want.<div class="rowbtns"><button data-v="board" class="primary">Back to the board</button>
+<button id="mockFinish">Finish the rest for me</button></div></div>`;
     return;
   }
 
@@ -903,13 +950,22 @@ player you want.<div class="rowbtns"><button data-v="board" class="primary">Back
   const short = Object.entries(need.short).filter(([, v]) => v > 0)
     .map(([p, v]) => `${v} ${p}`);
   if (need.flex > 0) short.push(`${need.flex} flex`);
+  // Who actually made these picks matters more than anything else on the page. A team the
+  // app built is a picture of the ratings page; a team you built is a picture of you.
+  const auto = mineLog.filter((x) => x.by === 'app').length;
+  const whose = auto === mineLog.length
+    ? 'Every pick was made by the app, straight off the top of your board — so this team is '
+      + 'a picture of your ratings and preferences, not of anybody\'s judgement on the night.'
+    : auto === 0 ? 'You made every pick yourself.'
+      : `You made ${mineLog.length - auto} of these picks and the app made ${auto} off the top `
+        + 'of your board.';
 
   const card = (label, val, note) => `<div class="card"><span class="cardV">${val}</span>
 <span class="cardL">${label}</span><span class="hint">${note}</span></div>`;
 
   out.innerHTML = `<h2 class="h2">What happened</h2>
 <p class="mockLede">You drafted from <b>slot ${m.slot} of ${teamsOf(lg)}</b> against a room that
-${roomWord(m.disc)}. ${short.length
+${roomWord(m.disc)}. ${whose} ${short.length
     ? `<b class="bad">You finished without a full starting lineup — no ${short.join(', no ')}.</b>
 That is the one mistake worth avoiding: an empty slot scores zero every week.`
     : '<b class="good">You filled every starting slot.</b>'}
@@ -937,7 +993,8 @@ ${mineLog.map((x) => {
 <span class="rk">${roundOf(x.n, teamsOf(lg))}</span>
 <span class="num">${x.n}</span>
 <span class="who">${posTag(p?.pos || '')}<span class="nm">${p?.name || x.id}
-<span class="tm">${p?.team || ''}</span></span></span>
+<span class="tm">${p?.team || ''}</span></span>${x.by === 'app' && auto < mineLog.length
+      ? '<span class="autoMark" title="The app made this pick">auto</span>' : ''}</span>
 <span class="num">${x.adp ? x.adp.toFixed(0) : '—'}</span>
 <span class="cost ${g == null ? '' : g >= 4 ? 'up' : g <= -4 ? 'dn' : ''}">${adpWord(x.n, x.adp, total)}</span></div>`;
   }).join('')}</div>
@@ -1387,6 +1444,7 @@ function wire() {
   });
   // ---- practice draft
   if ($('#mockStart')) $('#mockStart').onclick = startMock;
+  if ($('#mockAll')) $('#mockAll').onclick = simulateAll;
   if ($('#mockEnd')) $('#mockEnd').onclick = () => { endMock(false); renderMock(); };
   if ($('#disc')) {
     $('#disc').oninput = (e) => {
@@ -1464,6 +1522,8 @@ function wire() {
       st.posx = { ...LEANS.find((l) => l.key === b.dataset.lean).posx };
       save(); rebuild();
     } else if (b.id === 'mockQuit') { endMock(false); }
+    else if (b.id === 'mockAuto') { autoDraft(false); }
+    else if (b.id === 'mockFinish') { autoDraft(true); show('mock'); }
     else if (b.id === 'more') { limit += 100; renderBoard(); }
     else if (b.dataset.v) show(b.dataset.v);
     else if (b.dataset.f) {
