@@ -10,7 +10,7 @@
 // models is the ONE thing a draft room reliably does - take players roughly in ADP order,
 // with need and herd behaviour pulling on it - and it says so on screen.
 
-import { myPicks, roundsOf } from './engine.js?v=202608141339';
+import { myPicks, roundsOf } from './engine.js?v=202608141402';
 
 // ---------------------------------------------------------------- randomness
 // Seeded, so a mock can be replayed. The seed is mixed with the pick number rather than
@@ -101,7 +101,36 @@ const wants = (pos, need) => (need.short[pos] || 0) > 0 || (need.flex > 0 && FLE
 export function roomParams(disc = 40) {
   const d = Math.max(0, Math.min(100, disc));
   const tau = 0.6 + 0.06 * d;
-  return { tau, need: 0.9 * tau, run: 0.45 * tau };
+  // How many standard deviations early the room will cheerfully go. See adpSurprise below
+  // for why this is measured in an ADP spread rather than in ranks.
+  // Tolerance for going early, in spreads. 0.5 at the disciplined end, 2.5 at the wild
+  // end. It is deliberately NOT folded into tau: dividing the surprise by the temperature
+  // let the discipline slider soften the one rule that has to stay hard, and an ADP-26
+  // player still went second overall.
+  const reach = 0.5 + 0.02 * d;
+  return { tau, reach, need: 0.9 * tau, run: 0.45 * tau };
+}
+
+// How startling it would be for the market to take this man RIGHT NOW.
+//
+// The room used to be modelled on rank alone: weight by how far down the remaining board
+// a player sits, at one flat temperature for the whole draft. That treats "sixteen spots
+// early at pick 2" and "sixteen spots early at pick 100" as the same event, and they are
+// nothing like it - which is how a man with an ADP of 18 ended up going second overall.
+//
+// Real drafts do not work in ranks. Consensus is extremely tight at the top and gets
+// looser the deeper you go, and the app already models exactly that shape for "will he
+// last": sd = 2 + 0.18 x ADP. The same spread is what the room should be judged against.
+//
+// Positive z means taking him EARLY, in units of his own spread. At pick 2 a man with an
+// ADP of 18 has sd 5.2, so he is 3.1 spreads early - something a room does roughly never.
+// The same 16 picks early on a man with an ADP of 100 is 0.8 spreads, which happens all
+// the time. A faller costs nothing: z is floored at zero, because rooms are perfectly
+// happy to take a man who has slid past his price.
+export function adpSurprise(adp, pickNo) {
+  if (!adp || !pickNo) return 0;
+  const sd = (2 + 0.18 * adp) / 1.81;         // the same spread used for availability
+  return Math.max(0, (adp - pickNo) / sd);
 }
 
 // Phrased as something a room DOES, so it reads correctly both as the slider's readout
@@ -118,6 +147,9 @@ export function roomWord(disc = 40) {
 // tau, and scanning 300 players 180 times is wasted work.
 const WINDOW = 30;
 
+// Rounds from the end at which an empty kicker or defence slot becomes a real problem.
+const LATE_ROUNDS = 3;
+
 // One pick by one simulated team.
 //
 // Weight each still-available player by how far down the ADP board he sits, then nudge for
@@ -131,26 +163,59 @@ export function aiPick(avail, roster, league, opts) {
   // Room to be greedy, or down to the wire? Once a team has exactly as many picks left as
   // it has empty starting slots, it stops shopping and fills them. Real rooms do this too;
   // it is why kickers all go in the last two rounds.
-  const forced = need.total >= picksLeft;
+  // An empty kicker slot is not a reason to panic in round ten - there is always a kicker.
+  // Counting streamed slots as urgency made teams "forced" halfway through the draft, and
+  // once forced they only look at positions they still need, which is how a kicker went at
+  // pick 115 against an ADP of 140. They start counting inside the last few rounds, which
+  // is exactly when they are a real problem.
+  const streamedShort = ['K', 'DEF']
+    .reduce((a, p) => a + (need.short[p] || 0), 0);
+  const urgent = picksLeft > LATE_ROUNDS ? need.total - streamedShort : need.total;
+  const forced = urgent >= picksLeft;
 
+  const legal = [];                    // respects the caps, whatever else happens
   const pool = [];
   for (const p of avail) {
     if ((have[p.pos] || 0) >= (caps[p.pos] ?? 99)) continue;
+    if (legal.length < WINDOW) legal.push(p);
     if (forced && !wants(p.pos, need)) continue;
     pool.push(p);
     if (pool.length >= WINDOW) break;
   }
-  // Nothing legal left under the caps - take the best man available and let the roster be
-  // lopsided rather than returning nothing and stalling the draft.
+  // Nothing WANTED is left, but something legal is: take the best legal man rather than
+  // the best man overall. Falling back to `avail[0]` ignored the caps entirely, which is
+  // how a team finished with three quarterbacks against a cap of two.
+  if (!pool.length && legal.length) return legal[0];
+  // Nothing legal at all - let the roster be lopsided rather than stalling the draft.
   if (!pool.length) return avail[0] || null;
 
-  const w = pool.map((p, i) => {
-    let x = -i;
-    if (wants(p.pos, need)) x += params.need;
+  // Weights are built in LOG space and normalised before exponentiating. Squaring the
+  // market surprise makes the exponents large and negative deep in the pool, and computing
+  // exp() on them directly underflowed every weight to zero - at which point the draw fell
+  // through, teams ended up with three quarterbacks against a cap of two, and a kicker
+  // went twenty-five picks early. Subtracting the maximum first is the standard fix and
+  // changes none of the relative odds.
+  const logw = pool.map((p, i) => {
+    let x = -i * 0.35;
+    // An empty kicker slot is worth a 2.5x nudge from round one under `wants`, which is
+    // what actually put a kicker at pick 115 against an ADP of 140 - not the forced check,
+    // which had already been fixed. Nobody wants a kicker in round ten. The nudge waits
+    // until the picks are running out, which is what `forced` means.
+    const streamed = ['K', 'DEF'].includes(p.pos);
+    if (wants(p.pos, need) && (forced || !streamed)) x += params.need;
     if (p.pos === runPos) x += params.run;
-    return Math.exp(x / params.tau);
+    // How far ahead of his own market price this would be, in spreads. Punished by the
+    // SQUARE, so a mild reach is ordinary and a wild one is effectively impossible - which
+    // is what stops the room taking the 18th-ranked man with the second pick. A faller
+    // costs nothing; adpSurprise floors at zero.
+    const z = opts.pickNo ? adpSurprise(p.adp, opts.pickNo) : 0;
+    const tol = params.reach || 1.3;
+    return x / params.tau - (z * z) / (2 * tol * tol);
   });
+  const top = Math.max(...logw);
+  const w = logw.map((v) => Math.exp(v - top));
   const sum = w.reduce((a, b) => a + b, 0);
+  if (!(sum > 0)) return pool[0];        // cannot happen once normalised, but never stall
   let r = rnd() * sum;
   for (let i = 0; i < pool.length; i += 1) {
     r -= w[i];
@@ -265,6 +330,7 @@ export function simulate({ players, league, slot, disc = 40, seed = 1, log = [],
         caps,
         picksLeft: rounds - rosters[team].length,
         runPos: runPosOf(log),
+        pickNo: n,
         rnd: mulberry32(seed * 7919 + n),
       });
     }

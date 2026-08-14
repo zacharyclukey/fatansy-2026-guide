@@ -1048,14 +1048,24 @@ const fire = (el, type) => {
   // ---- a whole draft ---------------------------------------------------
   const SLOT = 4;
   const run = mk.simulate({ players: pool, league: lg, slot: SLOT, disc: 40, seed: 11,
-    // the human here takes the best man available who fills a slot he still needs, which
-    // is roughly what a person does and always ends legal
+    // The stand-in human. He takes the best man available who fills a slot he still needs
+    // - roughly what a person does. Two rules that were missing and that a person would
+    // never break: he respects the roster caps (he does not end up with three
+    // quarterbacks), and an empty kicker slot does not make him panic until the last few
+    // rounds, because there is always a kicker. Without those he was the one producing the
+    // illegal rosters and the round-ten kicker, not the simulated room.
     choose: (avail, roster) => {
       const need = mk.needsOf(roster, lg);
+      const cap = mk.capsOf(lg);
+      const held = {};
+      for (const p of roster) held[p.pos] = (held[p.pos] || 0) + 1;
+      const legal = avail.filter((p) => (held[p.pos] || 0) < (cap[p.pos] ?? 99));
       const left = R - roster.length;
-      const must = need.total >= left;
-      return avail.find((p) => !must || (need.short[p.pos] || 0) > 0
-        || (need.flex > 0 && ['RB', 'WR', 'TE'].includes(p.pos))) || avail[0];
+      const streamed = ['K', 'DEF'].reduce((a, p) => a + (need.short[p] || 0), 0);
+      const urgent = left > 3 ? need.total - streamed : need.total;
+      const must = urgent >= left;
+      return legal.find((p) => !must || (need.short[p.pos] || 0) > 0
+        || (need.flex > 0 && ['RB', 'WR', 'TE'].includes(p.pos))) || legal[0] || avail[0];
     } });
 
   ok('the draft runs to the last pick', run.done && run.log.length === T * R,
@@ -1120,6 +1130,30 @@ const fire = (el, type) => {
     return hits / 600;
   };
   const [flat, onRun] = [share(null), share('RB')];
+  // ---- the room reaches in MARKET terms, not in ranks ------------------
+  // It used to weight candidates by how far down the remaining board they sat, at one flat
+  // temperature for the whole draft - so "sixteen spots early at pick 2" and "sixteen
+  // spots early at pick 100" were the same event. They are nothing like it, and a man with
+  // an ADP of 18 went second overall. Surprise is now measured in each player's own ADP
+  // spread and punished by its square.
+  ok('going early is measured in spreads, not in ranks',
+    mk.adpSurprise(18, 2) > 2.5 && mk.adpSurprise(116, 100) < 1.5,
+    `adp18@2 = ${mk.adpSurprise(18, 2).toFixed(1)} spreads, `
+    + `adp116@100 = ${mk.adpSurprise(116, 100).toFixed(1)}`);
+  ok('a faller costs nothing', mk.adpSurprise(10, 40) === 0);
+  {
+    // the whole point: an elite-ADP man cannot go near the top of the draft
+    let worst = 0;
+    for (let s2 = 1; s2 <= 25; s2 += 1) {
+      const r2 = mk.simulate({ players: pool, league: lg, slot: 6, disc: 40, seed: s2 });
+      for (const x of r2.log) {
+        if (x.n <= 12 && x.adp) worst = Math.max(worst, x.adp - x.n);
+      }
+    }
+    ok('nobody reaches wildly in the first round', worst <= 12,
+      `worst first-round reach across 25 drafts: ${worst.toFixed(0)} picks`);
+  }
+
   ok('a run at a position pulls the next pick toward it', onRun > flat,
     `${(flat * 100).toFixed(0)}% -> ${(onRun * 100).toFixed(0)}%`);
   ok('but only pulls, never forces', onRun < 0.95, `${(onRun * 100).toFixed(0)}%`);

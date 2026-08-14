@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141339';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141339';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141339';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608141339';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141339';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141402';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141402';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141402';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608141402';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141402';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608141339';
+const BUILD = '202608141402';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
