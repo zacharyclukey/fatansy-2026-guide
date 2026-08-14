@@ -420,8 +420,24 @@ const fire = (el, type) => {
     `${injured[0].name} (${injured[0].inj})`);
   d.querySelectorAll('.row.player [data-open]')[0].click();
   await settle();
-  ok('injury leads the risk line', /Injury question|Not playing/
-    .test(d.querySelector('.detail .verdict').textContent));
+  // Injury used to be a clause inside a paragraph. It is a chip at the top of the card
+  // now, next to his tier, because on draft night it is a yes/no you read in a glance.
+  const injChip = d.querySelector('.detail .chip.inj');
+  ok('injury is a chip at the top of the card', !!injChip
+    && injChip.textContent.includes(injured[0].inj), injChip?.textContent);
+  ok('the card leads with the numbers', (() => {
+    const nums = [...d.querySelectorAll('.detail .dNum i')].map((x) => x.textContent);
+    return nums.some((x) => /on your board/.test(x))
+      && nums.some((x) => /projected points/.test(x))
+      && nums.some((x) => /above a replacement/.test(x));
+  })());
+  ok('every section says what it is',
+    [...d.querySelectorAll('.detail .dSec')].every((s2) => s2.querySelector('h4')?.textContent.trim()));
+  // The wait line answers a question. It used to say "Take him now", which reads as an
+  // instruction and was the opposite of what it measures - whether he lasts, not whether
+  // he is worth taking.
+  ok('nothing on the card orders you to draft anyone',
+    !/take him now/i.test(d.querySelector('.detail').textContent));
   // tier cliffs: the last man before a real step down at his position
   const cliffs = [...d.querySelectorAll('.tierEnd')];
   ok('tier cliffs are marked', cliffs.length > 0, `${cliffs.length} visible in the top 100`);
@@ -551,8 +567,13 @@ const fire = (el, type) => {
     .find((r) => r.querySelector('.nm').textContent.startsWith(leave));
   row.querySelector('[data-open]').click();
   await settle();
-  const tag = d.querySelector('.detail .callTag').textContent;
+  // There used to be two verdicts on this card - a Safe/Swing/Reach chip on one line and
+  // a separate Fair/Value/Reach chip on the next, computed differently and often
+  // disagreeing. They are one line now, led by the clock-aware label.
+  const tag = d.querySelector('.detail .dCall .kind')?.textContent;
   ok('a faller you rate is a steal', tag === 'Steal', `got "${tag}"`);
+  ok('and there is only one verdict on the card',
+    d.querySelectorAll('.detail .kind').length === 1);
   ok('advice names a position', /Take|Line up/.test(d.querySelector('#advice .advTag')?.textContent || ''));
   ok('cost of waiting is shown', d.querySelectorAll('#advice .costPill').length >= 3);
 }

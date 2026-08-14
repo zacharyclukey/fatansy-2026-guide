@@ -695,3 +695,44 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
 .tag em { font-style: normal; font-weight: 400; opacity: .8; }
 .tag.want { background: var(--goodSoft); color: var(--good); }
 .tag.against { background: var(--badSoft); color: var(--bad); }
+
+/* ---------------------------------------------------------------- player card
+   Read top to bottom in five seconds: the numbers, the standing facts, the call,
+   whether he lasts, then the slower detail. Every block says what it is. */
+.dHead {
+  display: flex; flex-wrap: wrap; gap: 8px 26px;
+  padding: 2px 0 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.dNum { display: flex; flex-direction: column; line-height: 1.15; }
+.dNum b {
+  font-size: 22px; font-weight: 650; color: var(--ink);
+  font-variant-numeric: tabular-nums; letter-spacing: -.01em;
+}
+.dNum i {
+  font-style: normal; font-size: 11px; color: var(--ink3);
+  text-transform: uppercase; letter-spacing: .05em; margin-top: 2px;
+}
+
+.dChips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+.chip {
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  border-radius: 3px; padding: 3px 7px;
+  background: var(--panel2); color: var(--ink2); white-space: nowrap;
+}
+.chip.tier { background: var(--fieldSoft); color: var(--field); }
+.chip.cliffChip { background: var(--accentSoft); color: var(--accent); }
+.chip.inj { background: var(--badSoft); color: var(--bad); }
+.chip.inj.out { background: var(--bad); color: var(--chalk); }
+
+.dSec { margin: 0 0 16px; }
+.dSec h4 {
+  margin: 0 0 6px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .07em; color: var(--ink3);
+}
+.dCall { margin: 0 0 4px; font-size: 14px; color: var(--ink); }
+.dCall .kind { margin-right: 7px; }
+.dCall .kind.soft { background: var(--panel2); color: var(--ink3); }
+.dSub { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.5; }
+.dNote { margin: 7px 0 0; font-size: 12px; color: var(--ink3); line-height: 1.5; }
+.dSec .tags { margin: 0; }
+.dSec .tag { font-size: 12px; padding: 4px 9px; }

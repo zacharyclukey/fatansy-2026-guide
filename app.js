@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608140906';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140906';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140906';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608140906';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140906';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608140919';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140919';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140919';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608140919';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140919';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608140906';
+const BUILD = '202608140919';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -299,13 +299,13 @@ function waitAdvice(r, drafted) {
   const alone = pool === 0 ? ' Nobody close to him is left.' : '';
 
   if (clock.onClock) {
-    if (n >= 65) return `<b class="good">You can wait.</b> ${v}% he comes back to you at ${at}.${similar}`;
-    if (n >= 35) return `<b class="warn">Coin flip.</b> ${v}% he lasts to ${at}.${similar || alone}`;
-    return `<b class="bad">Take him now.</b> Only ${v}% he lasts to ${at}.${similar || alone}`;
+    if (n >= 65) return `<b class="good">Probably, ${v}%</b> — he should come back to you at ${at}.${similar}`;
+    if (n >= 35) return `<b class="warn">Coin flip, ${v}%</b> — he may or may not last to ${at}.${similar || alone}`;
+    return `<b class="bad">Probably not, ${v}%</b> — he is unlikely to last to ${at}.${similar || alone}`;
   }
-  if (n >= 65) return `<b class="good">Should reach you.</b> ${v}% he is still there at ${at}.${similar}`;
-  if (n >= 35) return `<b class="warn">Might reach you.</b> ${v}% he lasts to ${at}.${similar || alone}`;
-  return `<b class="bad">Will not reach you.</b> Only ${v}% he lasts to ${at}.${similar || alone}`;
+  if (n >= 65) return `<b class="good">Probably, ${v}%</b> — he should still be there at ${at}.${similar}`;
+  if (n >= 35) return `<b class="warn">Coin flip, ${v}%</b> — he may or may not last to ${at}.${similar || alone}`;
+  return `<b class="bad">Probably not, ${v}%</b> — he is unlikely to last to ${at}.${similar || alone}`;
 }
 
 function verdict(r) {
@@ -832,31 +832,73 @@ function detail(r) {
     m.last_ppg ? `${m.last_ppg.toFixed(1)} points a game` : null,
     m.draft_pick ? `NFL pick ${m.draft_pick}` : null,
   ].filter(Boolean);
-  const [call, why] = callFor(r);
+  const [, why] = callFor(r);
   const drafted = new Set(picks().drafted);
   const wait = waitAdvice(r, drafted);
+
+  // ---- the numbers, first, because they are what the argument rests on ----
+  // They used to be the last line of a paragraph at the bottom of the card. Where he sits,
+  // what he is projected for and how far that is above a replacement is the whole case for
+  // taking him, so it goes at the top and it is read at a glance rather than parsed.
+  const head = [
+    [`#${r.rank}`, 'on your board'],
+    [r.pts.toFixed(0), 'projected points'],
+    [`${r.vor >= 0 ? '+' : ''}${r.vor.toFixed(0)}`, `above a replacement ${r.p.pos}`],
+    r.rated ? [`${r.p.pos}${r.posRated}`, `of ${r.posCount} by your grade`] : null,
+  ].filter(Boolean).map(([n, l]) => `<span class="dNum"><b>${n}</b><i>${l}</i></span>`).join('');
+
+  // ---- chips: the standing facts, condensed ----
+  // Tier and injury were each a sentence buried in a paragraph. They are one word each.
+  const chips = [
+    r.tier ? `<span class="chip tier" data-tip="cliff">Tier ${r.tier} ${r.p.pos}</span>` : '',
+    r.lastOfTier ? '<span class="chip cliffChip" data-tip="cliff">Last of his tier</span>' : '',
+    r.p.inj ? `<span class="chip inj${INJ_BAD.includes(r.p.inj) ? ' out' : ''}">${r.p.inj}`
+      + `${r.p.injPart ? ` — ${r.p.injPart}` : ''}</span>` : '',
+    r.p.rookie ? '<span class="chip">Rookie</span>' : '',
+    r.p.bye ? `<span class="chip">Bye ${r.p.bye}</span>` : '',
+  ].filter(Boolean).join('');
+
+  const window = r.openEnded ? `${r.worthFrom} onwards`
+    : r.worthFrom === r.worthTo ? `pick ${r.worthFrom}`
+      : `picks ${r.worthFrom}–${r.worthTo}`;
+
+  const sec = (title, body, cls = '') => (body
+    ? `<section class="dSec ${cls}"><h4>${title}</h4>${body}</section>` : '');
+
   return `<div class="detail">
-${r.kind ? `<p class="kindLine"><em class="kind ${r.kind}">${KINDS[r.kind][0]}</em> ${KINDS[r.kind][1]}</p>` : ''}
-<p class="call"><span class="callTag ${call.replace(/\s+/g, '')}" data-tip="call" tabindex="0">${call}</span> ${why}</p>
-${wait ? `<p class="wait" data-tip="wait" tabindex="0">${wait}</p>` : ''}
-<p class="verdict"><b>${riskOf(r)}.</b> ${verdict(r)}
-${r.lastOfTier ? ` <b class="warn">He is the last ${r.p.pos} of his tier</b> — the next one down is a clear step worse.` : ''}</p>
-<div class="bars">${bars}</div>
-${statCards(r)}
-<p class="facts">${facts.length ? `2025: <b>${facts.join('</b> · <b>')}</b>`
-    : 'No 2025 data — rated off the projection.'}</p>
-${r.tags?.length ? `<p class="tags">${r.tags.map((t) => `<span class="tag${
-    t.match === true ? ' want' : t.match === false ? ' against' : ''}" title="${t.why}">${t.tag}${
-    t.detail ? ` <em>${t.detail}</em>` : ''}</span>`).join('')}</p>` : ''}
-<p class="facts hint">These labels come from your own preferences, not from a forecast.
-They nudge the order by a few places at most — the projection is untouched.</p>
-<p class="facts">${r.rated
-    ? `Your grade <b>${r.rating.toFixed(0)}</b> ranks him <b>${r.posRated}</b> of ${r.posCount} ${r.p.pos}s.`
-    : `No grade — there are no ${r.p.pos} stats worth rating, so this is pure value.`}
-Projected <b>${r.pts.toFixed(1)}</b> points, <b>${r.vor.toFixed(1)}</b> above a replacement ${r.p.pos} — which is why the board has him at <b>#${r.rank}</b> overall.
-${STREAMED.includes(r.p.pos) ? `<br />Everyone streams this position off waivers, so “replacement”
-here means a good one you could pick up in-season, not the last one drafted. That is why the
-board takes ${r.p.pos}s later than the room does.` : ''}</p>
+<div class="dHead">${head}</div>
+${chips ? `<p class="dChips">${chips}</p>` : ''}
+
+${sec('Is he worth this pick?', `
+<p class="dCall">${r.kind
+    ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em> ${KINDS[r.kind][1]}`
+    : '<em class="kind soft">Not yet</em> His range is still a long way off.'}</p>
+<p class="dSub">Worth <b>${window}</b>. The room takes him around <b>pick ${r.adpRank}</b>.
+${why ? ` ${why}` : ''}</p>`)}
+
+${sec('Will he still be there next time you pick?', wait
+    ? `<p class="dSub">${wait}</p>` : '')}
+
+${sec('How he matches what you said you like', r.tags?.length
+    ? `<p class="tags">${r.tags.map((t) => `<span class="tag${
+      t.match === true ? ' want' : t.match === false ? ' against' : ''}" title="${t.why}">${t.tag}${
+      t.detail ? ` <em>${t.detail}</em>` : ''}</span>`).join('')}</p>
+<p class="dNote">Your preferences, not a forecast. They move him a few places at most.</p>`
+    : '<p class="dNote">Nothing stands out either way against your preferences.</p>')}
+
+${sec(r.rated ? `How he rates among ${r.p.pos}s` : 'Rating', r.rated
+    ? `<div class="bars">${bars}</div>
+<p class="dNote"><b>${riskOf(r)}.</b> ${verdict(r)}</p>`
+    : `<p class="dNote">No grade — there are no ${r.p.pos} stats worth rating, so his place `
+      + `on the board is pure value.${STREAMED.includes(r.p.pos)
+        ? ` Everyone streams this position off waivers, so “replacement” means a good one `
+        + `you could pick up in-season — which is why the board takes ${r.p.pos}s later than `
+        + 'the room does.' : ''}</p>`)}
+
+${sec('Last season', `${statCards(r)}
+<p class="dNote">${facts.length ? facts.join(' · ')
+    : 'No 2025 data — his place on the board comes from the projection.'}
+Describes last season; it is not what predicts this one.</p>`)}
 </div>`;
 }
 
