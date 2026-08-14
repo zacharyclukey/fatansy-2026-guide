@@ -737,3 +737,10 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
 .dNote { margin: 7px 0 0; font-size: 12px; color: var(--ink3); line-height: 1.5; }
 .dSec .tags { margin: 0; }
 .dSec .tag { font-size: 12px; padding: 4px 9px; }
+
+/* The plan's own working, shown under the reason: which slot it fills at which pick. It
+   is deliberately quiet - it is there to be checked against your instinct, not read. */
+.advPath {
+  display: block; margin-top: 4px; font-size: 12px; color: var(--ink3, var(--ink2));
+  opacity: 0.85;
+}

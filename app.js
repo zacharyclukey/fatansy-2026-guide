@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141402';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141402';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141402';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608141402';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141402';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141502';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141502';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141502';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608141502';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141502';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608141402';
+const BUILD = '202608141502';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -345,77 +345,112 @@ function syncCustoms() {
 // practice draft is a test of the thing you will actually lean on come draft night.
 function recommendation(drafted, have) {
   if (!clock?.target) return null;
-  const ranked = costOfWaiting(board.rows, clock, drafted, board.league, have, { need: st.need })
-    .filter((x) => !['K', 'DEF'].includes(x.pos) || x.shortfall > 0);
-  if (!ranked.length) return null;
 
-  // WHICH PLAYER, and this is the whole argument of the panel.
+  // WHICH PLAYER, and this is the whole argument of the panel. Four versions have been
+  // tried and the first three each got a real draft wrong:
   //
-  // Three versions of this have now been tried, and the difference between them is where
-  // the reasoning happens.
+  // 1. The position with the highest cost of waiting. Scarcity with the level difference
+  //    thrown away - it gave up ten points of player for three of scarcity.
+  // 2. The best PAIR of positions. Right in principle, still aggregated by position, and
+  //    at a turn it kept picking the scarce position when nothing was at risk.
+  // 3. The best PAIR of players. Fixed the turn, because "will THIS man last" is the
+  //    question a drafter actually has. But two picks is not a long enough horizon: when
+  //    both men vanish before your next pick, the second term is identical in both
+  //    branches and cancels, and a quarterback cliff twenty picks further on is invisible.
+  // 4. This one. `planDraft` rolls the whole remaining draft forward, filling every
+  //    starting slot you still need, and takes whoever leaves the best roster. See the
+  //    long note above planDraft in engine.js for the draft that forced it.
   //
-  // 1. `ranked[0]` - the position with the highest cost of waiting. Scarcity with the
-  //    level difference thrown away. From a real draft at pick 24 off the first slot it
-  //    recommended Josh Allen (score 60.9, cost 3.6) over Nico Collins (70.9, cost 0.5):
-  //    ten points of player surrendered for three and a half points of scarcity.
-  //
-  // 2. The best PAIR of positions - take one now, expect the best other next turn. Right
-  //    in principle, but still aggregated by position, and at a turn it kept picking the
-  //    scarce position when nothing was actually at risk.
-  //
-  // 3. This one. The question a drafter actually has is not "does receiver decay" but
-  //    "will THIS man be there when I pick again". Nico Collins was 92% to last one pick;
-  //    A.J. Brown, invisible inside the same position, was 75%. Aggregating hides the man
-  //    who is genuinely at risk and invents risk for the man who is not.
-  //
-  // So: for each candidate, take him now and let the next pick go to the best man who
-  // survives. Pick whichever pair is worth most. Checked against the position rule at five
-  // points of a draft - they agree at every normal gap and part company only at a turn,
-  // where this one is right and the other is not.
-  const pool = board.rows.filter((r) => !drafted.has(r.p.id)
-    && (!['K', 'DEF'].includes(r.p.pos)
-      || ranked.some((x) => x.pos === r.p.pos && x.shortfall > 0)))
-    .slice(0, 14);
-  if (!pool.length) return null;
-  const surv = new Map(pool.map((r) => [r.p.id,
-    availability(r.p.adp, clock.target, clock.currentPick) ?? 1]));
+  // costOfWaiting is still here for the board reading and the strategy blurbs, but it no
+  // longer decides anything: the panel's numbers and the panel's pick come from one sum.
+  const res = planDraft(board.rows, clock, drafted, board.league, have,
+    { candidates: 10, horizon: PLAN_HORIZON });
+  if (!res?.plan?.length) return null;
 
-  const plan = pool.slice(0, 10).map((mine) => {
-    // what the next pick is worth: walk down by score, the first man who survives is yours
-    let later = 0;
-    let allGone = 1;
-    let heir = null;
-    for (const other of pool) {
-      if (other.p.id === mine.p.id) continue;
-      const p = surv.get(other.p.id);
-      if (!heir && p >= 0.5) heir = other;
-      later += other.score * p * allGone;
-      allGone *= 1 - p;
-      if (allGone < 0.001) break;
-    }
-    return { row: mine, heir, total: mine.score + later };
-  }).sort((a, b) => b.total - a.total);
-
-  const pick = plan[0];
-  // keep the position entry so the cost pills and the shortfall wording still work, but
-  // the man named is the one the pair maths actually chose
-  const base = ranked.find((x) => x.pos === pick.row.p.pos) || ranked[0];
-  const top = { ...base, best: pick.row };
-  const runnerUp = pick.heir ? { best: pick.heir, survivor: pick.heir } : null;
+  const top = { pos: res.top.row.p.pos, best: res.top.row, total: res.top.total };
 
   // Your own liked and faded men, applied to the chosen player rather than to a position.
   // If you have starred someone within touching distance, he is the recommendation - that
   // is the entire point of a star. And never lead with a man you have said you distrust
-  // when there is a real alternative.
-  const near = pool.find((r) => r.star && r.p.id !== top.best.p.id
-    && r.score >= top.best.score - STAR_BAND);
-  if (near) top.best = near;
+  // when there is a real alternative. Judged on plan total, which is what the plan ranks.
+  const near = res.plan.find((c) => c.row.star && c.row.p.id !== top.best.p.id
+    && c.total >= res.top.total - STAR_BAND);
+  if (near) { top.best = near.row; top.pos = near.row.p.pos; top.total = near.total; }
   if (top.best.fade) {
-    const alt = pool.find((r) => !r.fade && r.p.id !== top.best.p.id
-      && r.score >= top.best.score - STAR_BAND * 2);
-    if (alt) top.best = alt;
+    const alt = res.plan.find((c) => !c.row.fade && c.row.p.id !== top.best.p.id
+      && c.total >= res.top.total - STAR_BAND * 2);
+    if (alt) { top.best = alt.row; top.pos = alt.row.p.pos; top.total = alt.total; }
   }
-  return { ranked, top, near, plan, runnerUp };
+  // "then X at your next pick" has to come from the plan for the man actually named. Read
+  // off res.top it would describe the pick you were talked out of by your own star.
+  const chosen = res.plan.find((c) => c.row.p.id === top.best.p.id) || res.top;
+  top.shortfall = res.slots.filter((s) => s === top.pos).length;
+  return { res, top, near: near?.row || null, plan: res.plan,
+    first: chosen.steps[0] || null, steps: chosen.steps };
+}
+
+// Plain words for the panel. Zach's fiancee reads this too, and "the last good QB goes
+// here" is a sentence about quarterbacks, not about a two-letter code.
+const POS_WORD = { QB: ['quarterback', 'quarterbacks'], RB: ['running back', 'running backs'],
+  WR: ['receiver', 'receivers'], TE: ['tight end', 'tight ends'],
+  K: ['kicker', 'kickers'], DEF: ['defence', 'defences'] };
+const word = (pos, many) => (POS_WORD[pos]?.[many ? 1 : 0] || pos);
+// How big a drop has to be before the panel calls it a cliff and says so in words. On this
+// scale the top of the board is around 120 and a startable man is around 40, so ten points
+// is roughly a tier - the same order as the gaps markTiers looks for.
+const CLIFF = 10;
+
+// Why this man and not the obvious one. Both halves of the trade in one sentence: what
+// you lose at HIS position by waiting, and what you lose at the position you are passing
+// on.
+//
+// Both numbers are read straight out of the two branches being compared. What you would
+// get at his position if you waited is whatever the RIVAL's plan pays for that slot -
+// because the rival's plan is the one that waits. And what you get at the rival's position
+// is what the WINNER's plan pays for it. So the sentence is not a second opinion about the
+// pick; it is the pick, read back out.
+function planWhy(res, top) {
+  const rival = res.cost.find((c) => c.pos !== top.pos && c.best);
+  const at = res.later[0];
+  if (!rival || !at || !res.drop[top.pos] || !res.drop[rival.pos]) {
+    return 'Best of what is left, counting every pick you have between now and the end.';
+  }
+  const branch = (id) => res.plan.find((c) => c.row.p.id === id);
+  // a slot the plan never scheduled fell past the horizon, so it is priced where the plan
+  // stops looking - which is what the planner charged it too
+  const waited = (b, pos) => b?.fill?.[pos] ?? res.drop[pos].later;
+  const mine = { now: res.drop[top.pos].now, later: waited(branch(rival.best.p.id), top.pos) };
+  const theirs = { now: rival.best.score, later: waited(branch(top.best.p.id), rival.pos) };
+  const gap = (d) => Math.round(Math.max(0, d.now - d.later));
+  const mineGap = gap(mine);
+  const theirGap = gap(theirs);
+  const cliff = `The last ${word(top.pos)} at this level goes about here — wait and the best `
+    + `one left is worth <b>${mine.later.toFixed(0)}</b> instead of ${mine.now.toFixed(0)}, `
+    + `and you carry that all season.`;
+  const deep = `${word(rival.pos, true)[0].toUpperCase()}${word(rival.pos, true).slice(1)} `
+    + `this good keep coming: pass now and you still get about `
+    + `<b>${theirs.later.toFixed(0)}</b> instead of ${theirs.now.toFixed(0)}.`;
+  const up = (s) => s[0].toUpperCase() + s.slice(1);
+  const both = `waiting costs about <b>${mineGap}</b> at ${word(top.pos, true)} and `
+    + `<b>${theirGap}</b> at ${word(rival.pos, true)}`;
+  // A cliff has to be steep in itself, not merely steeper than the next thing. Comparing
+  // the two gaps alone printed "neither falls off a cliff" above a pair of sixty-point
+  // drops, because they happened to be sixty-point drops of the same size.
+  if (mineGap >= CLIFF && mineGap > theirGap + 3) return `${cliff} ${deep}`;
+  if (mineGap >= CLIFF && theirGap >= CLIFF) {
+    return `Everything thins out from here — ${both}. He is the best of what is going.`;
+  }
+  if (mineGap + 3 < theirGap) {
+    const ahead = Math.round(top.best.score - rival.best.score);
+    return `Nothing is urgent at ${word(top.pos)} — he is simply the best man left once `
+      + `every pick you have is counted. ${up(word(rival.pos, true))} thin out faster, `
+      // and sometimes the man taken is not even the higher score, which is the plan saying
+      // the rest of the draft pays it back. "give up -12 points" is not a sentence.
+      + (ahead > 0
+        ? `but not by enough to give up ${ahead} point${ahead === 1 ? '' : 's'} here.`
+        : `but you get them back at your next picks and the whole roster comes out ahead.`);
+  }
+  return `Nothing here falls off a cliff — ${both}, so this is simply the better player.`;
 }
 
 // The recommendation panel: what to do with THIS pick, and why.
@@ -443,12 +478,24 @@ function renderAdvice() {
   }
   const rec = recommendation(drafted, have);
   if (!rec) { box.innerHTML = ''; return; }
-  const { ranked, top, near, runnerUp } = rec;
+  const { res, top, near, first, steps } = rec;
   const cliff = top.best.lastOfTier;
-  // kickers and defences always "can wait" - saying so is noise
-  const cheap = ranked.filter((x) => x.cost < top.cost * 0.55 && x.pos !== top.pos
-    && !['K', 'DEF'].includes(x.pos)).slice(0, 2);
   const when = clock.onClock ? 'Take' : 'Line up';
+
+  // The pills used to be a position-level cost of waiting sitting next to a player-level
+  // recommendation - two different sums side by side, and the pills were the more
+  // believable-looking of the two, so they got read as the reason for the pick. They are
+  // now the plan's own arithmetic: how much worse your finished roster is if you open with
+  // this position instead of the one named above.
+  // Kickers and defences are dropped unless one of them IS the pick. "Starting with a
+  // defence costs you 25 points" is true and nobody needed telling.
+  const pills = res.cost
+    .filter((x) => !STREAMED.includes(x.pos) || x.pos === top.pos).slice(0, 5);
+  // what the plan does with your later picks, so the reasoning is inspectable rather than
+  // asserted - "then RB at 48, WR at 49" is checkable against your own instinct
+  const path = steps
+    .map((s) => `${s.slot === 'FLEX' ? 'flex' : s.slot === 'ANY' ? 'best left' : s.slot} at ${s.pick}`)
+    .join(', ');
 
   box.innerHTML = `<div class="advHead">
 <span class="advTag">${when} ${top.pos}</span>
@@ -456,21 +503,12 @@ function renderAdvice() {
 <span class="hint">score ${top.best.score.toFixed(1)}${top.shortfall ? ` · you still need ${top.shortfall}` : ''}${near ? ' · your pick, and close enough to take' : ''}</span>
 ${cliff ? `<span class="cliffTag">last of ${top.pos} tier ${top.best.tier}</span>` : ''}
 </div>
-<p class="advWhy">${runnerUp && runnerUp.survivor
-    ? `Take him now and <b>${runnerUp.survivor.p.name}</b> should still be there at pick `
-      + `${clock.target} — taking them in that order is worth more than the other way round.`
-    : top.cost < 1
-      ? `Nothing is urgent — the best ${top.pos} should still be there at pick ${clock.target}.`
-      : `Waiting on ${top.pos} costs about <b>${top.cost.toFixed(0)}</b> points`
-        + `${top.survivor ? `; the best you could still expect is ${top.survivor.p.name}.` : '.'}`}
-${cheap.length
-    ? ` ${cheap.map((c) => c.pos).join(' and ')} can wait${cheap.every((c) => c.cost < 1)
-      ? ' — the same player should be there next turn.'
-      : ` — ${cheap.length > 1 ? 'they cost' : 'it costs'} about ${cheap.map((c) => c.cost.toFixed(0)).join(' and ')}.`}`
-    : ''}</p>
-<div class="advCost">${ranked.slice(0, 5).map((x) => `<span class="costPill${x === top ? ' hot' : ''}">
-<b>${x.pos}</b>${x.cost.toFixed(0)}</span>`).join('')}
-<span class="hint">cost of waiting, by position</span></div>`;
+<p class="advWhy">${planWhy(res, top)}${first && first.take
+    ? ` Then <b>${first.take.p.name}</b> or similar should still be there at pick ${first.pick}.`
+    : ''}${path ? `<span class="advPath">plan: ${top.pos} now, ${path}</span>` : ''}</p>
+<div class="advCost">${pills.map((x) => `<span class="costPill${x.pos === top.pos ? ' hot' : ''}">
+<b>${x.pos}</b>${x.loss < 0.5 ? 'best' : `−${x.loss.toFixed(0)}`}</span>`).join('')}
+<span class="hint">points your whole roster loses if you start with that position instead</span></div>`;
 }
 
 // ---------------------------------------------------------------- practice draft

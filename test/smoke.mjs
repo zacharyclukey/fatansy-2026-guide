@@ -594,7 +594,43 @@ const fire = (el, type) => {
   ok('and there is only one verdict on the card',
     d.querySelectorAll('.detail .kind').length === 1);
   ok('advice names a position', /Take|Line up/.test(d.querySelector('#advice .advTag')?.textContent || ''));
-  ok('cost of waiting is shown', d.querySelectorAll('#advice .costPill').length >= 3);
+  ok('the alternatives are priced', d.querySelectorAll('#advice .costPill').length >= 3);
+
+  // ---- the panel shows the numbers the panel used ------------------------
+  // It did not, and that was half the complaint. The pills said "cost of waiting, by
+  // position" - a position-level sum - while the man named above them was chosen by a
+  // player-level sum. Two different calculations side by side, and the pills were the more
+  // authoritative-looking of the two, so they got read as the reason for the pick. When
+  // they disagreed there was no way to tell which one the app had actually followed.
+  {
+    const tag = d.querySelector('#advice .advTag').textContent.trim();     // "Take WR"
+    const pos = tag.split(/\s+/).pop();
+    const hot = d.querySelector('#advice .costPill.hot');
+    ok('exactly one position is marked as the pick',
+      d.querySelectorAll('#advice .costPill.hot').length === 1);
+    ok('and it is the position of the man named above',
+      hot.querySelector('b').textContent.trim() === pos,
+      `named ${pos}, marked ${hot.querySelector('b').textContent.trim()}`);
+    // the recommended position is by construction the best one, so it must never be shown
+    // as costing something while a rival is shown as free
+    ok('the marked position reads as the best, not as a cost',
+      /best/.test(hot.textContent), hot.textContent.trim());
+    const others = [...d.querySelectorAll('#advice .costPill:not(.hot)')]
+      .map((x) => x.textContent.replace(/^\s*\w+/, '').trim());
+    ok('every alternative is priced as a loss against it',
+      others.every((t) => /^(−|-)?\d+$|^best$/.test(t)), others.join(' | '));
+    ok('and the pills say plainly what the number means',
+      /whole roster loses/.test(d.querySelector('#advice .advCost .hint').textContent));
+    ok('the plan shows its working - which slot it fills at which pick',
+      /plan:/.test(d.querySelector('#advice .advWhy')?.textContent || ''));
+
+    // Zach's fiancee reads this panel and does not know what TE means. The pills are a
+    // scoreboard and can stay in codes; the sentence that has to persuade her cannot.
+    const why = d.querySelector('#advice .advWhy').textContent.split('plan:')[0];
+    ok('the reason is written in words, not position codes',
+      !/\b(QB|RB|WR|TE|DEF|FLEX)\b/.test(why), why.slice(0, 120));
+    ok('and it names a number you can act on', /\d/.test(why));
+  }
 
   // ---- the recommendation weighs BOTH picks, not just the scarcer position ----
   // It used to take whichever position had the highest cost of waiting, full stop. In a
@@ -643,25 +679,50 @@ const fire = (el, type) => {
           .map((r, i2) => Math.round((odds[i2] ?? 1) * 10))).size >= 1);
       ok('nobody is ever given better odds than certain',
         odds.every((p) => p >= 0 && p <= 1));
+
+      // The search has to finish. It once shared one node budget across every candidate,
+      // so the men at the back of the list were scored with whatever was left over - and
+      // the best quarterback on the board, who is only ever a candidate because he is
+      // appended last, came out 79 points adrift of a field he belonged in.
+      const t0 = Date.now();
+      const full = m2.planDraft(bb.rows, ck, gone, lg, { RB: 1 }, { candidates: 10 });
+      ok('the plan searches every candidate to the end', full.exact);
+      ok('and does it fast enough to run on every keystroke', Date.now() - t0 < 300,
+        `${Date.now() - t0}ms`);
+      ok('every candidate is planned out to the same depth',
+        new Set(full.plan.map((c) => c.steps.length)).size === 1,
+        full.plan.map((c) => c.steps.length).join(','));
+      // Not asserted: that a better man always plans out better. He does not, and that is
+      // the whole algorithm - a man who is leaving can be worth more now than a better man
+      // who will still be there, which is what the turn case above is about.
+      ok('and every plan is worth at least the man it starts with',
+        full.plan.every((c) => c.total >= c.now - 0.001));
     }
   }
 
   // ---- the decision rule, on cases where the right answer is known --------
-  // The panel takes the man who maximises (him now) + (the best man who survives to your
-  // next pick). These are the situations that rule exists to get right, run through the
-  // same arithmetic with the odds fixed by hand so the answer is not a matter of opinion.
+  // The panel plans every remaining pick and every unfilled starting slot, then takes
+  // whoever leaves the best roster. These are the situations that rule exists to get
+  // right, with the odds fixed by hand so the answer is not a matter of opinion.
+  //
+  // These used to run against a copy of the arithmetic written out inside this file, which
+  // meant they pinned a RULE and not the CODE - and when the rule changed underneath them
+  // they went on passing while the app got the answer wrong. They call planDraft now.
+  //
+  // The board is one position with two starting slots and two picks, which is the smallest
+  // world in which the question exists at all: take one man now, get one more next turn.
   {
-    const plan = (cands) => cands.map((mine) => {
-      let later = 0;
-      let allGone = 1;
-      for (const o of cands) {
-        if (o.n === mine.n) continue;
-        later += o.s * o.p * allGone;
-        allGone *= 1 - o.p;
-        if (allGone < 0.001) break;
-      }
-      return { n: mine.n, total: mine.s + later };
-    }).sort((a, b) => b.total - a.total)[0].n;
+    const m2 = await import(`file://${DIR}/engine.js`);
+    const lg = { name: 'fixture', teams: 12, rounds: 15, starters: { WR: 2 } };
+    const ck = m2.draftContext(lg, 1, 1);       // on the clock at 1, next pick 24
+    const plan = (cands) => {
+      const rows = cands.map((c) => ({ score: c.s, odds: c.p,
+        p: { id: c.n, name: c.n, pos: 'WR', adp: 1 } }))
+        .sort((a, b) => b.score - a.score);
+      const res = m2.planDraft(rows, ck, new Set(), lg, {},
+        { odds: (r) => r.odds, candidates: 10 });
+      return res.top.row.p.id;
+    };
 
     // Everyone keeps: you get both, so there is nothing to be clever about.
     ok('when everyone is safe it takes the best man',
@@ -693,6 +754,135 @@ const fire = (el, type) => {
     ok('a tie on score is broken by who will not be there',
       plan([{ n: 'lasts', s: 70.9, p: 0.068 }, { n: 'going', s: 70.9, p: 0.002 },
         { n: 'filler', s: 60, p: 0.5 }]) === 'going');
+  }
+
+  // ---- the pick two picks could not see -----------------------------------
+  // A live mock, and the panel got it wrong. Twelve teams, first slot, on the clock at 25
+  // holding Bijan Robinson and Nico Collins, picks left at 48, 49 and 72.
+  //
+  //   QB  60.9 -> 33.4              one elite quarterback and then a cliff
+  //   WR  66.8 -> 57.8 55.7 54.9    a gentle slope with plenty behind it
+  //   neither of the top two lasts to 48
+  //
+  // Two picks ahead, the panel scored (man now) + (best man who survives to 48). Both of
+  // the top two vanish, so that second term is the SAME receiver in both branches and it
+  // cancels; what is left is 66.8 against 60.9 and it said take the receiver. But take the
+  // receiver and the quarterback you eventually start is worth 33.4, which is twenty-seven
+  // points gone for good, against about eleven for the receiver you settle for.
+  //
+  // The fixture below is that board, with ADPs chosen so the availability curve reproduces
+  // the odds actually seen. The first assertion is that it still reproduces the BUG under
+  // the old rule - a regression fixture that does not fail the old code proves nothing.
+  {
+    const m2 = await import(`file://${DIR}/engine.js`);
+    const lg = { name: 'fixture', teams: 12, rounds: 15,
+      starters: { QB: 1, RB: 2, WR: 2, TE: 1, FLEX: 1, K: 1, DEF: 1 } };
+    const ck = m2.draftContext(lg, 1, 25);
+    ok('the fixture is on the clock at 25 with 48 next',
+      ck.onClock && ck.target === 48, `on ${ck.onClock}, target ${ck.target}`);
+
+    const man = (name, pos, score, adp) => ({ score, p: { id: name, name, pos, adp } });
+    const rows = [
+      man('Pickens', 'WR', 66.8, 26), man('Allen', 'QB', 60.9, 26),
+      man('WR2', 'WR', 57.8, 40), man('WR3', 'WR', 55.7, 46), man('WR4', 'WR', 54.9, 52),
+      man('WR5', 'WR', 52, 60), man('WR6', 'WR', 50, 70), man('WR7', 'WR', 48, 80),
+      man('WR8', 'WR', 46, 95), man('WR9', 'WR', 44, 115),
+      man('RB1', 'RB', 52, 45), man('RB2', 'RB', 48, 55), man('RB3', 'RB', 45, 65),
+      man('RB4', 'RB', 42, 75), man('RB5', 'RB', 39, 90), man('RB6', 'RB', 36, 110),
+      man('QB2', 'QB', 33.4, 90), man('QB3', 'QB', 32, 100), man('QB4', 'QB', 31, 115),
+      man('TE1', 'TE', 44, 50), man('TE2', 'TE', 40, 70), man('TE3', 'TE', 38, 85),
+      man('K1', 'K', 8, 150), man('D1', 'DEF', 10, 145),
+    ].sort((a, b) => b.score - a.score);
+    const have = { RB: 1, WR: 1 };               // Bijan and Nico are already his
+
+    const odd = (n) => m2.availability(rows.find((r) => r.p.id === n).p.adp, 48, 25);
+    ok('neither of the top two lasts to his next pick',
+      odd('Pickens') < 0.02 && odd('Allen') < 0.02,
+      `Pickens ${(odd('Pickens') * 100).toFixed(1)}%, Allen ${(odd('Allen') * 100).toFixed(1)}%`);
+
+    // the old rule, written out, so the fixture is provably the case that broke
+    const twoPick = () => {
+      const pool = rows.slice(0, 14);
+      const surv = new Map(pool.map((r) => [r.p.id, m2.availability(r.p.adp, 48, 25) ?? 1]));
+      return pool.slice(0, 10).map((mine) => {
+        let later = 0;
+        let allGone = 1;
+        for (const o of pool) {
+          if (o.p.id === mine.p.id) continue;
+          later += o.score * surv.get(o.p.id) * allGone;
+          allGone *= 1 - surv.get(o.p.id);
+          if (allGone < 0.001) break;
+        }
+        return { n: mine.p.id, total: mine.score + later };
+      }).sort((a, b) => b.total - a.total)[0].n;
+    };
+    ok('the fixture reproduces the bug: two picks ahead says the receiver',
+      twoPick() === 'Pickens', `two-pick rule says ${twoPick()}`);
+
+    const res = m2.planDraft(rows, ck, new Set(), lg, have, { candidates: 10 });
+    ok('planning the whole draft says the quarterback',
+      res.top.row.p.id === 'Allen', `it says ${res.top.row.p.id}`);
+
+    const allen = res.plan.find((c) => c.row.p.id === 'Allen');
+    const pickens = res.plan.find((c) => c.row.p.id === 'Pickens');
+    ok('and by a margin worth having, not a rounding error',
+      allen.total - pickens.total >= 8,
+      `${(allen.total - pickens.total).toFixed(1)} points`);
+
+    // The reason, in the numbers the panel prints. Each side is read out of the branch
+    // that actually waits on it: what you would get at quarterback if you waited comes
+    // from the branch that took the receiver, and vice versa.
+    const qbIfWaited = pickens.fill.QB;
+    const wrIfWaited = allen.fill.WR;
+    ok('waiting on the quarterback costs about twenty-seven points',
+      Math.abs((res.drop.QB.now - qbIfWaited) - 27) < 4,
+      `61 -> ${qbIfWaited.toFixed(1)}`);
+    ok('and waiting on the receiver costs less than half of that',
+      66.8 - wrIfWaited < (res.drop.QB.now - qbIfWaited) / 2,
+      `66.8 -> ${wrIfWaited.toFixed(1)}`);
+
+    // A slot you never schedule is a slot you never pay for. With seven openings and four
+    // picks in the horizon, the branch holding an empty quarterback slot could simply not
+    // plan it and come out looking free - which is the same bug in a new costume.
+    ok('leaving a slot unplanned still costs you',
+      res.cost.find((c) => c.pos === 'QB').loss < res.cost.find((c) => c.pos === 'WR').loss,
+      res.cost.map((c) => `${c.pos} -${c.loss.toFixed(0)}`).join(' '));
+
+    // ONE SUM, TWO READOUTS. The pills used to be a second calculation living beside the
+    // recommendation; they are now arithmetic on the same array the recommendation was
+    // sorted out of, and this pins that.
+    ok('the pills are the recommendation, subtracted',
+      res.cost.every((c) => Math.abs(c.loss - (res.top.total - c.total)) < 1e-9));
+    ok('and the free one is the man the panel names',
+      res.cost[0].loss === 0 && res.cost[0].pos === res.top.row.p.pos,
+      `${res.cost[0].pos} ${res.cost[0].loss}`);
+    ok('nothing is ever priced better than the recommendation',
+      res.cost.every((c) => c.loss >= 0));
+
+    // ---- and the turn case is unchanged ------------------------------------
+    // Slot 1 at pick 24: your next pick is the very next one, so almost everyone comes
+    // back and the right move is to take the one man who will not. The player-level rule
+    // was introduced for this and the new planner must not undo it.
+    {
+      const ck2 = m2.draftContext(lg, 1, 24);
+      ok('a turn knows its next pick is one away', ck2.target === 25 && ck2.gap === 1);
+      // One pick is a short wait and the odds reflect that: conditional survival over a
+      // single pick bottoms out around 45% however early a man's ADP is, so "leaving" at a
+      // turn means a coin flip, never a certainty. That is the whole reason a turn is hard.
+      const turn = [
+        man('safe', 'WR', 70, 60), man('going', 'RB', 68, 2), man('third', 'TE', 58, 60),
+        man('filler', 'WR', 50, 80), man('wr3', 'WR', 46, 95), man('qb', 'QB', 40, 80),
+        man('rb2', 'RB', 40, 85), man('rb3', 'RB', 36, 105), man('te2', 'TE', 34, 100),
+        man('qb2', 'QB', 36, 110), man('k', 'K', 8, 150), man('def', 'DEF', 10, 145),
+      ].sort((a, b) => b.score - a.score);
+      const p = (n) => m2.availability(turn.find((r) => r.p.id === n).p.adp, 25, 24);
+      ok('the fixture has one man leaving and one staying',
+        p('going') < 0.55 && p('safe') > 0.9,
+        `going ${(p('going') * 100).toFixed(0)}%, safe ${(p('safe') * 100).toFixed(0)}%`);
+      const r2 = m2.planDraft(turn, ck2, new Set(), lg, {}, { candidates: 10 });
+      ok('at a turn it still takes the man who will not be there',
+        r2.top.row.p.id === 'going', `it says ${r2.top.row.p.id}`);
+    }
   }
 }
 

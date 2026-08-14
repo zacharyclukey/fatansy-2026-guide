@@ -1119,6 +1119,266 @@ export function costOfWaiting(rows, clock, drafted, league, have = {}, opts = {}
   }
   return out.sort((a, b) => b.weighted - a.weighted);
 }
+
+// ---------------------------------------------------------------- planning the draft
+// Everything above this line looks two picks ahead. That is not far enough, and here is
+// the draft that proved it.
+//
+// Twelve teams, first slot, on the clock at 25 holding Bijan Robinson and Nico Collins.
+// Picks left: 48, 49, 72. The board:
+//
+//     QB   60.9  ->  33.4                  one elite quarterback, then a cliff
+//     WR   66.8  ->  57.8  55.7  54.9      a gentle slope, plenty left
+//     odds either of the top two lasts to 48: nil
+//
+// The two-pick rule scored it as (man now) + (best man who survives to 48). Both the
+// quarterback and the receiver vanish before 48, so that second term is the SAME in both
+// branches - some receiver around 50, because receivers are deep - and it cancels. What
+// is left is 66.8 against 60.9, and the panel said take the receiver.
+//
+// Which is wrong by about seventeen points. Take the receiver and the quarterback you
+// eventually start is worth 33.4: twenty-seven points surrendered. Take the quarterback
+// and the receiver you eventually start is worth about 56 instead of 66.8: eleven. The
+// two-pick horizon cannot see it because the loss does not land at pick 48. It lands at
+// whichever pick you finally take a quarterback, and that might be pick 72.
+//
+// Note what does NOT fix it. The position-level rule this replaced would have got this
+// case right and the turn case wrong; the player-level rule got the turn right and this
+// wrong. The horizon was the problem both times, not the unit of account.
+//
+// So: plan every remaining pick and every unfilled starting slot. For each man you could
+// take now, roll the rest of your draft forward and total the roster you end up with.
+// Take whoever leaves you the best roster. The quarterback cliff now shows up wherever it
+// actually falls, because the plan has to fill that slot somewhere.
+
+// FLEX is not a position, it is a slot three positions can fill.
+export const FLEX_FILL = { RB: true, WR: true, TE: true };
+
+// How many of your later picks the plan looks at. Four covers the case above (48, 49, 72)
+// with one to spare. Past that the availability curve is guesswork - a man's odds of
+// lasting fifty picks are a number the model should not be asked for - and the search
+// grows by a factor of five per pick for no gain.
+export const PLAN_HORIZON = 4;
+
+// The starting slots you have not filled yet. Surplus bodies at a flex-eligible position
+// roll into FLEX, so a team with three receivers and two receiver slots has its FLEX
+// already covered and the plan will not spend another pick there.
+export function openSlots(league, have = {}) {
+  const want = league?.starters || {};
+  const out = [];
+  const last = [];
+  let spare = 0;
+  for (const [pos, n] of Object.entries(want)) {
+    if (pos === 'FLEX') continue;
+    const got = have[pos] || 0;
+    // kickers and defences go on the end. The order matters: whatever is still open when
+    // the plan runs out of picks is filled in this order from what is left on the shelf,
+    // and a flex spot deserves the better leftovers.
+    const to = STREAMED.includes(pos) ? last : out;
+    for (let i = got; i < n; i += 1) to.push(pos);
+    if (FLEX_FILL[pos]) spare += Math.max(0, got - n);
+  }
+  for (let i = spare; i < (want.FLEX || 0); i += 1) out.push('FLEX');
+  return out.concat(last);
+}
+
+const slotTakes = (slot, pos) => (slot === 'ANY' ? true
+  : slot === 'FLEX' ? !!FLEX_FILL[pos] : slot === pos);
+
+// Roll the whole draft forward and total the roster each opening move leaves you with.
+//
+// `rows` arrives sorted best-first. `drafted` is everyone off the board. `have` is what
+// you already own, by position. Returns every candidate scored, best first.
+export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
+  if (!clock?.picks?.length) return null;
+  // the pick being decided: this one if you are on the clock, otherwise your next
+  const at = clock.onClock ? clock.currentPick : (clock.next ?? clock.currentPick);
+  const later = clock.picks.filter((p) => p > at).slice(0, opts.horizon ?? PLAN_HORIZON);
+  const live = rows.filter((r) => !drafted.has(r.p.id));
+  if (!live.length) return null;
+
+  // Once every starting slot is filled you are drafting a bench, where there is no slot to
+  // reason about and the answer is simply the best man left. Modelled as one endless ANY
+  // slot so the same rollout code covers it.
+  let slots = openSlots(league, have);
+  const bench = !slots.length;
+  if (bench) slots = ['ANY'];
+
+  // one bucket per position, best first, so the rollout never re-filters the whole board.
+  // 25 deep is plenty: the expectation walk below multiplies by the chance everyone above
+  // has gone, which is under a thousandth long before the twenty-fifth man.
+  const byPos = new Map();
+  for (const r of live) {
+    if (!byPos.has(r.p.pos)) byPos.set(r.p.pos, []);
+    const b = byPos.get(r.p.pos);
+    if (b.length < 25) b.push(r);
+  }
+  const posFor = (slot) => (slot === 'ANY' ? [...byPos.keys()]
+    : slot === 'FLEX' ? Object.keys(FLEX_FILL) : [slot]);
+
+  // Sorted once per kind of slot, not once per node of the search. The rollout asks this
+  // question thousands of times and the answer only ever differs by the handful of men the
+  // plan has already spent, so re-sorting a hundred players inside the loop was the one
+  // thing here that could actually be felt.
+  const sorted = new Map();
+  const eligible = (slot, used) => {
+    if (!sorted.has(slot)) {
+      const all = posFor(slot).flatMap((pos) => byPos.get(pos) || []);
+      sorted.set(slot, all.sort((a, b) => b.score - a.score));
+    }
+    const list = sorted.get(slot);
+    return used.size ? list.filter((r) => !used.has(r.p.id)) : list;
+  };
+
+  // What you should EXPECT to get at this slot at this pick. Not "the best man with
+  // better-than-even odds" - that reports zero cost whenever your next pick is close, and
+  // a 55% chance of keeping the best player is not no cost. Walk down by score and weight
+  // each man by the chance he lasts AND everyone above him has gone.
+  // Where the odds come from. Always ADP in the app; the tests hand in fixed numbers so
+  // the six known-answer cases are settled by arithmetic rather than by an ADP curve.
+  const odds = opts.odds || ((r, atPick) => availability(r.p.adp, atPick, clock.currentPick) ?? 0.5);
+  const expect = (list, atPick) => {
+    let value = 0;
+    let allGone = 1;
+    let take = null;
+    for (const r of list) {
+      const p = atPick <= clock.currentPick ? 1 : odds(r, atPick);
+      if (!take && p >= 0.5) take = r;
+      value += r.score * p * allGone;
+      allGone *= 1 - p;
+      if (allGone < 0.001) break;
+    }
+    // whatever chance is left that they all went, priced at the worst man on the shelf
+    value += (list[list.length - 1]?.score ?? 0) * allGone;
+    return { value, take: take || list[0] || null };
+  };
+
+  // A slot you never plan is a slot you never pay for, and a fixed horizon hands every
+  // branch that loophole: with seven openings and four picks, the branch that has left
+  // quarterback unfilled can simply not schedule it and look free. So whatever is still
+  // open when the horizon runs out is charged here, at the last pick the plan can see.
+  //
+  // The tail flatters everyone a little - you would really be filling those slots at pick
+  // 120, not 73 - but it flatters every branch the same way, and the number that decides
+  // anything is the difference. Charging quarterback 33 and receiver 50 is the point;
+  // whether both are two points generous is not.
+  const tail = (used, left) => {
+    const atPick = later[later.length - 1] ?? clock.currentPick;
+    const mine = new Set(used);
+    let value = 0;
+    // in the order openSlots builds them, which already runs the real positions before
+    // FLEX and the streamed ones last. Not optimised - it is a tail, and every branch pays
+    // it the same way.
+    for (const slot of left) {
+      const list = eligible(slot, mine);
+      if (!list.length) continue;
+      const e = expect(list, atPick);
+      value += e.value;
+      if (e.take) mine.add(e.take.p.id);
+    }
+    return value;
+  };
+
+  // Exhaustive over which slot each later pick fills, greedy within a slot (the pick you
+  // are most likely to actually make comes off the board for the picks after it).
+  //
+  // Two things keep it small. Duplicate slots are one choice, not two - filling either of
+  // your open receiver spots is the same move. And kickers and defences are never
+  // scheduled while a real slot is open, which is not a heuristic about value so much as
+  // an admission that no plan worth printing spends pick 25 on a kicker; they are still
+  // charged in the tail, so skipping them is not the same as forgetting them. That takes a
+  // five-position league from 840 branches per candidate to 120.
+  //
+  // The budget is per candidate and generous. It was shared, once, which meant the last
+  // men on the list were scored with whatever search was left over - so a candidate's
+  // total depended on his position in the queue. That is not a tie-break, it is a bug, and
+  // it was quietly rating the best quarterback on the board 79 points below the field.
+  const budget = { n: 0 };
+  const roll = (i, used, left) => {
+    if (i >= later.length || !left.length || budget.n <= 0) {
+      return { value: bench ? 0 : tail(used, left), steps: [] };
+    }
+    let best = null;
+    const seen = new Set();
+    const real = left.some((s) => !STREAMED.includes(s));
+    for (let k = 0; k < left.length; k += 1) {
+      const slot = left[k];
+      if (seen.has(slot)) continue;             // two open WR slots are the same choice
+      if (real && STREAMED.includes(slot)) continue;
+      seen.add(slot);
+      budget.n -= 1;
+      const list = eligible(slot, used);
+      if (!list.length) continue;
+      const { value, take } = expect(list, later[i]);
+      const used2 = new Set(used);
+      if (take) used2.add(take.p.id);
+      const rest = roll(i + 1, used2, bench ? left : left.filter((_, j) => j !== k));
+      const total = value + rest.value;
+      if (!best || total > best.value) {
+        best = { value: total, steps: [{ pick: later[i], slot, value, take }, ...rest.steps] };
+      }
+    }
+    return best || { value: bench ? 0 : tail(used, left), steps: [] };
+  };
+
+  // Who is worth considering now: the best few overall who fill a slot you still need,
+  // plus the best man at EVERY position that needs a starter. That second half is the
+  // whole point - the case above turns on an elite quarterback who sat below ten better
+  // players, so any candidate list cut purely by score would never have seen him.
+  const wanted = new Set(slots.flatMap(posFor));
+  const cands = live.filter((r) => wanted.has(r.p.pos)).slice(0, opts.candidates ?? 10);
+  for (const pos of wanted) {
+    const b = (byPos.get(pos) || [])[0];
+    if (b && !cands.includes(b)) cands.push(b);
+  }
+  if (!cands.length) return null;
+
+  let exact = true;
+  const plan = cands.map((r) => {
+    const idx = slots.findIndex((s) => slotTakes(s, r.p.pos));
+    const rest = bench ? slots : slots.filter((_, j) => j !== idx);
+    budget.n = opts.budget ?? 20000;            // every candidate gets the same search
+    const out = roll(0, new Set([r.p.id]), rest);
+    if (budget.n <= 0) exact = false;
+    // what this branch ends up paying for each slot, so the panel can say "wait on
+    // quarterback and you get 33" using the branch that actually waits on quarterback -
+    // rather than a separate sum computed at your next pick, which is not where the plan
+    // fills the slot and was the source of a panel that argued against its own pick.
+    const fill = {};
+    for (const s of out.steps) if (fill[s.slot] == null) fill[s.slot] = s.value;
+    return { row: r, now: r.score, later: out.value, total: r.score + out.value,
+      steps: out.steps, fill };
+  }).sort((a, b) => b.total - a.total);
+
+  // What the recommendation actually cost each alternative, over the whole draft. This is
+  // the number the panel shows, because it is the number the decision used.
+  const top = plan[0];
+  const byPosPlan = new Map();
+  for (const c of plan) {
+    const cur = byPosPlan.get(c.row.p.pos);
+    if (!cur || c.total > cur.total) byPosPlan.set(c.row.p.pos, c);
+  }
+  const cost = [...byPosPlan.entries()]
+    .map(([pos, c]) => ({ pos, best: c.row, total: c.total, loss: top.total - c.total }))
+    .sort((a, b) => a.loss - b.loss);
+
+  // What each position is worth now versus what it is worth if you leave it to the end of
+  // the plan. Priced at the LAST pick the plan can see, not the next one, because that is
+  // where an unfilled slot actually lands: the quarterback you gave up is not the one
+  // sitting there twenty picks from now, it is the one left when you finally need a
+  // quarterback. Pricing it at the next pick is what made the panel report "nothing falls
+  // off a cliff" directly above a pick made entirely because something did.
+  const drop = {};
+  for (const pos of wanted) {
+    const b = (byPos.get(pos) || [])[0];
+    if (!b || !later.length) continue;
+    drop[pos] = { now: b.score,
+      later: expect(eligible(pos, new Set()), later[later.length - 1]).value };
+  }
+
+  return { plan, top, cost, drop, slots, later, at, bench, exact };
+}
+
 // A plain-English read of what the current weights mean, for the ratings editor.
 export function priorityOrder(data, st) {
   const cw = componentWeights(st);
