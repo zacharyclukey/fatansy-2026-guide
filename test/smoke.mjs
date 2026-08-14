@@ -130,6 +130,22 @@ const fire = (el, type) => {
     .split(',').map((x) => x.trim()).filter(Boolean)];
   const broken = imported.filter((n) => !exported.includes(n));
   ok('the app imports nothing that is not exported', broken.length === 0, broken.join(', '));
+
+  // The other direction, which is the one that actually shipped a bug. app.js used
+  // STREAMED without importing it. In the browser that is a ReferenceError thrown from
+  // inside renderBoard's loop - and because that loop MOVES rows into a fragment before
+  // reattaching them, throwing part way through leaves every row it already touched
+  // detached. Clicking a player's name made him and everyone above him vanish.
+  //
+  // This harness cannot catch it by running the app: it evals every module into one
+  // shared scope, so a missing import still resolves. It has to be read off the source.
+  const used = new Set([...app.matchAll(/\b([A-Z][A-Z0-9_]{2,})\b/g)].map((m) => m[1]));
+  const local = new Set([...app.matchAll(/^(?:const|let|var|function|class)\s+([A-Z][A-Z0-9_]{2,})/gm)]
+    .map((m) => m[1]));
+  const unimported = exported.filter((n) => /^[A-Z][A-Z0-9_]{2,}$/.test(n)
+    && used.has(n) && !imported.includes(n) && !local.has(n));
+  ok('the app imports every engine constant it uses',
+    unimported.length === 0, unimported.join(', '));
 }
 
 // --------------------------------------------- 0b2. no duplicate element ids

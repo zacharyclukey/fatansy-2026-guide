@@ -10,7 +10,7 @@
 // models is the ONE thing a draft room reliably does - take players roughly in ADP order,
 // with need and herd behaviour pulling on it - and it says so on screen.
 
-import { myPicks, roundsOf } from './engine.js?v=202608131914';
+import { myPicks, roundsOf } from './engine.js?v=202608140745';
 
 // ---------------------------------------------------------------- randomness
 // Seeded, so a mock can be replayed. The seed is mixed with the pick number rather than
@@ -65,10 +65,14 @@ export function capsOf(league) {
 
 // Starting slots this roster has not filled yet, flex counted separately because any of
 // three positions can fill it.
+//
+// A roster can arrive with a hole in it - a saved mock naming a player who is no longer in
+// the pool - and this is the function every other one leans on, so it refuses to throw over
+// one missing man. See the note on simulate() about where the holes come from.
 export function needsOf(roster, league) {
   const s = league.starters || {};
   const have = {};
-  for (const p of roster) have[p.pos] = (have[p.pos] || 0) + 1;
+  for (const p of roster) if (p && p.pos) have[p.pos] = (have[p.pos] || 0) + 1;
   const short = {};
   let spare = 0;
   for (const [pos, want] of Object.entries(s)) {
@@ -225,10 +229,22 @@ export function simulate({ players, league, slot, disc = 40, seed = 1, log = [],
   const total = teams * rounds;
   const params = roomParams(disc);
   const caps = capsOf(league);
+  // A mock in progress is saved and resumed, and the player pool is rebuilt underneath it
+  // every time the data file is refreshed. So a saved log can name somebody who is no
+  // longer in the pool. Rebuilding the rosters with a bare find() put `undefined` in a
+  // roster and the next read of p.pos threw, which killed the whole tab - a practice draft
+  // left open overnight came back as a blank page. Cut the log at the first man we cannot
+  // account for and re-simulate from there: everything before him is real history, and the
+  // draft that comes back is at least self-consistent.
+  const byId = new Map(players.map((p) => [p.id, p]));
+  const cut = log.findIndex((x) => !byId.has(x.id));
+  const dropped = cut < 0 ? 0 : log.length - cut;
+  if (cut >= 0) log.length = cut;
+
   const gone = new Set(log.map((x) => x.id));
   const rosters = {};
   for (let t = 1; t <= teams; t += 1) rosters[t] = [];
-  for (const x of log) rosters[x.team].push(players.find((p) => p.id === x.id));
+  for (const x of log) if (rosters[x.team]) rosters[x.team].push(byId.get(x.id));
 
   // one ADP-sorted copy, filtered per pick. Sorting 300 players 180 times is the kind of
   // thing that makes a simulator feel slow for no reason.
@@ -257,7 +273,13 @@ export function simulate({ players, league, slot, disc = 40, seed = 1, log = [],
     rosters[team].push(pick);
     log.push({ n, team, id: pick.id, pos: pick.pos, adp: pick.adp ?? null });
   }
-  return { log, rosters, done: log.length >= total, total, rounds, teams };
+  // Did we stop because the board emptied? An 18-team, 14-round draft is 252 picks, and a
+  // league that starts no kicker and no defence has no kickers or defences in its pool - so
+  // the pool has to be 252 deep in skill players alone or the draft cannot finish. It is
+  // not a hypothetical: it is true of one of the leagues in this file today. Saying so out
+  // loud beats handing back a draft that is quietly eleven picks short.
+  const ranOut = !(log.length >= total) && players.length - gone.size === 0;
+  return { log, rosters, done: log.length >= total, total, rounds, teams, dropped, ranOut };
 }
 
 // ---------------------------------------------------------------- reading it back

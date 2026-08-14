@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf } from './engine.js?v=202608131922';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608131922';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608131922';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608131922';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608131922';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608140745';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140745';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140745';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608140745';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140745';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608131922';
+const BUILD = '202608140745';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -787,9 +787,19 @@ function renderBoard() {
     keep.add(r.p.id);
     frag.appendChild(el);          // appendChild MOVES an existing node, it does not clone
     if (open === r.p.id) {
-      const det = document.createElement('div');
-      det.innerHTML = detail(r);
-      frag.appendChild(det.firstElementChild);
+      // Anything thrown in here strands the board. appendChild above MOVED every row so
+      // far out of the live DOM and into this fragment, so a throw before the fragment is
+      // reattached leaves them detached - which is exactly what "I clicked a name and he
+      // and everyone above him disappeared" was. One missing import did it. The panel is
+      // worth less than the board, so if it cannot be built, it is skipped.
+      try {
+        const det = document.createElement('div');
+        det.innerHTML = detail(r);
+        if (det.firstElementChild) frag.appendChild(det.firstElementChild);
+      } catch (err) {
+        console.error('detail panel failed', err);
+        open = null;
+      }
     }
   }
   for (const [id, el] of rowEls) if (!keep.has(id)) { el.remove(); rowEls.delete(id); }

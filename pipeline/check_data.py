@@ -56,6 +56,27 @@ def main():
     if not d.get('leagues'):
         okay = fail('no league configs in the file')
 
+    # Deep enough to draft from? A league that starts no kicker and no defence has none in
+    # its pool at all, so its board is only the skill players - and an 18-team, 14-round
+    # draft is 252 picks. Found by running a practice draft in that league: it stalled at
+    # 241 and eleven teams finished a man short. On the night that is not a stall, it is a
+    # board that cannot show you who your rivals took.
+    for lg in d['leagues']:
+        teams = lg.get('teams') or 12
+        starts = lg.get('starters') or {}
+        rounds = lg.get('rounds') or (sum(starts.values()) + (lg.get('bench') or 0)) or 15
+        picks = teams * rounds
+        usable = [p for p in players
+                  if p['pos'] not in ('K', 'DEF') or (starts.get(p['pos']) or 0) > 0]
+        # A WARNING, not a rejection, and the difference matters: rejecting keeps yesterday's
+        # file, and yesterday's file is exactly as shallow. Nothing about a refresh can fix
+        # this - only fetching more players can - so blocking the refresh would trade a
+        # shallow pool for a shallow AND stale one.
+        if len(usable) < picks:
+            print(f'  WARNING  {lg.get("name")} drafts {picks} players but only '
+                  f'{len(usable)} are in its pool - the board runs out {picks - len(usable)} '
+                  f'picks before the draft does. Fetch more players.')
+
     # Every player who PLAYED needs the percentiles the rating is built from. A man with
     # no 2025 season legitimately has none - he is rated on his projection, his draft
     # capital and his depth-chart spot instead - so counting him here would fail the build
