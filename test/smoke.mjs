@@ -425,6 +425,25 @@ const fire = (el, type) => {
   const injChip = d.querySelector('.detail .chip.inj');
   ok('injury is a chip at the top of the card', !!injChip
     && injChip.textContent.includes(injured[0].inj), injChip?.textContent);
+  // RB1 must mean the first back on the board. It used to show his rank BY GRADE next to
+  // his rank by score, so Jahmyr Gibbs read "#1 on your board" and "RB2" at the same time,
+  // and Christian McCaffrey read "#5" and "RB7". Two orderings, one label, no warning.
+  {
+    const e2 = await import(`file://${DIR}/engine.js`);
+    const dd = JSON.parse(JSON.stringify(players));
+    dd.leagues = [e2.SAMPLE_LEAGUE];
+    const bb = e2.buildBoard(dd, { ...e2.DEFAULT_SETTINGS(dd), mine: [] });
+    for (const pos of ['QB', 'RB', 'WR', 'TE']) {
+      const inPos = bb.rows.filter((r) => r.p.pos === pos);
+      ok(`${pos} board ranks run 1..n in board order`,
+        inPos.every((r, i) => r.posRank === i + 1),
+        inPos.slice(0, 4).map((r) => `${r.p.name} ${r.posRank}`).join(', '));
+    }
+    const firstRB = bb.rows.find((r) => r.p.pos === 'RB');
+    ok('the best back on the board is RB1', firstRB.posRank === 1,
+      `${firstRB.p.name} is RB${firstRB.posRank} at overall #${firstRB.rank}`);
+  }
+
   ok('the card leads with the numbers', (() => {
     const nums = [...d.querySelectorAll('.detail .dNum i')].map((x) => x.textContent);
     return nums.some((x) => /on your board/.test(x))

@@ -823,6 +823,17 @@ export function buildBoard(data, st, cache) {
   // at pick 40 without anything about him having changed.
   for (const r of rows) r.kind = pickType(r, st.atPick);
 
+  // RB1 means the best running back on the board. Everyone uses it that way, so it is
+  // read off board order - the same order the rows are in. It is NOT the grade ranking
+  // below: Jahmyr Gibbs is the first back on the board and the second by grade, and
+  // showing "RB2" beside "#1 on your board" reads as a contradiction rather than as two
+  // different questions.
+  const seenPos = {};
+  for (const r of rows) {
+    seenPos[r.p.pos] = (seenPos[r.p.pos] || 0) + 1;
+    r.posRank = seenPos[r.p.pos];
+  }
+
   // where the grade alone would have put him, so the detail panel can show the gap
   // between "good for his position" and "worth this pick"
   const byPos2 = {};

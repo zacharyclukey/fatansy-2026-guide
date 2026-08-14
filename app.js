@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608140919';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140919';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140919';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608140919';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140919';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608140925';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140925';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140925';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608140925';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140925';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608140919';
+const BUILD = '202608140925';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -844,7 +844,7 @@ function detail(r) {
     [`#${r.rank}`, 'on your board'],
     [r.pts.toFixed(0), 'projected points'],
     [`${r.vor >= 0 ? '+' : ''}${r.vor.toFixed(0)}`, `above a replacement ${r.p.pos}`],
-    r.rated ? [`${r.p.pos}${r.posRated}`, `of ${r.posCount} by your grade`] : null,
+    [`${r.p.pos}${r.posRank}`, `${r.p.pos} on your board`],
   ].filter(Boolean).map(([n, l]) => `<span class="dNum"><b>${n}</b><i>${l}</i></span>`).join('');
 
   // ---- chips: the standing facts, condensed ----
@@ -888,7 +888,11 @@ ${sec('How he matches what you said you like', r.tags?.length
 
 ${sec(r.rated ? `How he rates among ${r.p.pos}s` : 'Rating', r.rated
     ? `<div class="bars">${bars}</div>
-<p class="dNote"><b>${riskOf(r)}.</b> ${verdict(r)}</p>`
+<p class="dNote"><b>${riskOf(r)}.</b> ${verdict(r)}
+By your grade alone he is <b>${r.posRated}</b> of ${r.posCount} ${r.p.pos}s${
+  r.posRated !== r.posRank
+    ? `, against <b>${r.posRank}</b> on the board — the board also counts how scarce the `
+      + 'position is and what a replacement would give you.' : '.'}</p>`
     : `<p class="dNote">No grade — there are no ${r.p.pos} stats worth rating, so his place `
       + `on the board is pure value.${STREAMED.includes(r.p.pos)
         ? ` Everyone streams this position off waivers, so “replacement” means a good one `
