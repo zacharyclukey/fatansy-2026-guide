@@ -1342,15 +1342,20 @@ const fire = (el, type) => {
   ok('the pool really does contain men with no season', noSeason.length > 15,
     `${noSeason.length}`);
 
-  // ---- the invented percentiles are ignored ----------------------------
+  // ---- the invented percentiles are gone -------------------------------
+  // The pipeline used to hand a man with no season a full set of sub-metrics that were
+  // all just copies of his draft-capital score, so six components each reported the same
+  // fabricated number. This asserted the file still contained them; the refresh has since
+  // fixed it, so it now asserts the opposite - that no rookie carries a block of
+  // identical sub-metrics. If this ever fails again the pipeline has regressed.
   const fabricated = noSeason.filter((r) => {
     const v = Object.values(r.p.sub || {}).filter((x) => x != null).map(Math.round);
     const c = {};
     for (const x of v) c[x] = (c[x] || 0) + 1;
     return v.length > 5 && Math.max(...Object.values(c)) >= v.length * 0.6;
   });
-  ok('todays data file still has the invented percentiles in it', fabricated.length > 0,
-    'if this fails the pipeline fix has landed and this test can be simplified');
+  ok('no man without a season carries fabricated sub-metrics', fabricated.length === 0,
+    fabricated.slice(0, 3).map((r) => r.p.name).join(', '));
   const bars = noSeason.filter((r) => ['volume', 'efficiency', 'redzone', 'explosive',
     'production', 'reliability'].some((k) => r.scores[k] != null));
   ok('but no history component reports a score for a man with no history',
@@ -1395,20 +1400,19 @@ const fire = (el, type) => {
   ok('the rookie bonus is a nudge, not a second rating', base.rookieMax <= 5,
     `${base.rookieMax}`);
 
-  // ---- forward compatible with the fixed pipeline ------------------------
-  // Tomorrow's data file leaves those sub-metrics out entirely. The board must come out
-  // the same, which is what proves the app is not leaning on the invention.
+  // ---- the app does not lean on a rookie's sub-metrics -------------------
+  // Strip the sub block off every man with no season and the board must come out the
+  // same. That is what proves his rating comes from his projection and his draft
+  // capital, and not from numbers the pipeline made up for him.
   const clean = JSON.parse(JSON.stringify(players));
   clean.leagues = [e.SAMPLE_LEAGUE];
   let stripped = 0;
   for (const p of clean.players) {
     if (!e.noSeason(p)) continue;
-    const copied = p.m?.rookie_score;
-    for (const k of Object.keys(p.sub || {})) {
-      if (copied != null && p.sub[k] === copied) { delete p.sub[k]; stripped += 1; }
-    }
+    if (p.sub && Object.keys(p.sub).length) { stripped += 1; }
+    p.sub = {};          // emptied, not deleted - componentScore expects the object to exist
   }
-  ok('the stripped copy really did lose the invented numbers', stripped > 50, `${stripped}`);
+  ok('there were rookies to strip', stripped > 5, `${stripped}`);
   const b2 = e.buildBoard(clean, { ...e.DEFAULT_SETTINGS(clean), mine: [] });
   const moved = b2.rows.filter((r) => e.noSeason(r.p)
     && Math.abs(r.rating - (row(r.p.name)?.rating ?? 0)) > 0.01);
