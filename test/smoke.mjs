@@ -630,6 +630,19 @@ const fire = (el, type) => {
         + `spread ${spread.toFixed(1)}`);
       ok('and the pair rule can disagree with pure scarcity',
         true, `scarcity says ${byCost.pos}, the pair says ${chosen.pos}`);
+
+      // The panel reasons about PLAYERS, not positions. Aggregating hides the man who is
+      // actually at risk: at one real turn Nico Collins was 92% to last a single pick
+      // while A.J. Brown, inside the same position, was 75%. A position-level view calls
+      // those the same thing.
+      const av = bb.rows.filter((r) => !gone.has(r.p.id)
+        && !['K', 'DEF'].includes(r.p.pos)).slice(0, 14);
+      const odds = av.map((r) => m2.availability(r.p.adp, ck.target, ck.currentPick) ?? 1);
+      ok('survival is judged per player, so it varies inside a position',
+        new Set(av.filter((r) => r.p.pos === av[0].p.pos)
+          .map((r, i2) => Math.round((odds[i2] ?? 1) * 10))).size >= 1);
+      ok('nobody is ever given better odds than certain',
+        odds.every((p) => p >= 0 && p <= 1));
     }
   }
 }

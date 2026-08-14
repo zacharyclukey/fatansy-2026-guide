@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141333';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141333';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141333';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608141333';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141333';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141339';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141339';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141339';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608141339';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141339';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608141333';
+const BUILD = '202608141339';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -349,50 +349,69 @@ function recommendation(drafted, have) {
     .filter((x) => !['K', 'DEF'].includes(x.pos) || x.shortfall > 0);
   if (!ranked.length) return null;
 
-  // WHICH POSITION, and this is the whole argument of the panel.
+  // WHICH PLAYER, and this is the whole argument of the panel.
   //
-  // It used to be `ranked[0]` - the position with the highest cost of waiting, full stop.
-  // That is scarcity reasoning with the level difference thrown away, and it produced
-  // advice like this, from a real draft at pick 24 off the first slot:
+  // Three versions of this have now been tried, and the difference between them is where
+  // the reasoning happens.
   //
-  //     WR  Nico Collins    score 70.9   cost 0.5
-  //     RB  Jeremiyah Love  score 69.5   cost 2.3
-  //     TE  Trey McBride    score 65.0   cost 3.4
-  //     QB  Josh Allen      score 60.9   cost 3.6   <- recommended
+  // 1. `ranked[0]` - the position with the highest cost of waiting. Scarcity with the
+  //    level difference thrown away. From a real draft at pick 24 off the first slot it
+  //    recommended Josh Allen (score 60.9, cost 3.6) over Nico Collins (70.9, cost 0.5):
+  //    ten points of player surrendered for three and a half points of scarcity.
   //
-  // Allen was recommended over Collins on 3.6 points of scarcity while sitting TEN points
-  // lower on the board. Scarcity is real but it is a tiebreaker, not a trump card.
+  // 2. The best PAIR of positions - take one now, expect the best other next turn. Right
+  //    in principle, but still aggregated by position, and at a turn it kept picking the
+  //    scarce position when nothing was actually at risk.
   //
-  // The right question is not "which position drops most" but "which two picks, together,
-  // are worth most" - because on a turn you take one now and the best of what is left at
-  // your next pick. Taking position p is worth (best p now) + (best OTHER position then).
-  // Run over the same numbers:
+  // 3. This one. The question a drafter actually has is not "does receiver decay" but
+  //    "will THIS man be there when I pick again". Nico Collins was 92% to last one pick;
+  //    A.J. Brown, invisible inside the same position, was 75%. Aggregating hides the man
+  //    who is genuinely at risk and invents risk for the man who is not.
   //
-  //     take WR now -> 70.9 + 67.2 (RB later) = 138.1
-  //     take RB now -> 69.5 + 70.4 (WR later) = 139.9   <- the actual best plan
-  //     take TE now -> 65.0 + 70.4            = 135.4
-  //     take QB now -> 60.9 + 70.4            = 131.3
-  //
-  // Love then Collins. Receivers barely decay over one pick so Collins keeps; backs decay
-  // more, so take the back first and get both. Note that neither "highest cost" nor "best
-  // available" gives that answer - only the pair does.
-  const plan = ranked.map((x) => {
-    const mine = x.best.score;
-    // what the best OTHER position is expected to still be worth at your next pick
-    const other = ranked.filter((y) => y.pos !== x.pos)
-      .map((y) => y.best.score - y.cost);
-    return { x, total: mine + (other.length ? Math.max(...other) : 0) };
+  // So: for each candidate, take him now and let the next pick go to the best man who
+  // survives. Pick whichever pair is worth most. Checked against the position rule at five
+  // points of a draft - they agree at every normal gap and part company only at a turn,
+  // where this one is right and the other is not.
+  const pool = board.rows.filter((r) => !drafted.has(r.p.id)
+    && (!['K', 'DEF'].includes(r.p.pos)
+      || ranked.some((x) => x.pos === r.p.pos && x.shortfall > 0)))
+    .slice(0, 14);
+  if (!pool.length) return null;
+  const surv = new Map(pool.map((r) => [r.p.id,
+    availability(r.p.adp, clock.target, clock.currentPick) ?? 1]));
+
+  const plan = pool.slice(0, 10).map((mine) => {
+    // what the next pick is worth: walk down by score, the first man who survives is yours
+    let later = 0;
+    let allGone = 1;
+    let heir = null;
+    for (const other of pool) {
+      if (other.p.id === mine.p.id) continue;
+      const p = surv.get(other.p.id);
+      if (!heir && p >= 0.5) heir = other;
+      later += other.score * p * allGone;
+      allGone *= 1 - p;
+      if (allGone < 0.001) break;
+    }
+    return { row: mine, heir, total: mine.score + later };
   }).sort((a, b) => b.total - a.total);
-  const top = plan[0].x;
-  const runnerUp = plan[1]?.x || null;
-  // if you have starred someone at this position who is within touching distance of the
-  // best available, recommend YOUR man - that is the whole point of the star
-  const near = board.rows.find((r) => r.p.pos === top.pos && r.star && !drafted.has(r.p.id)
-    && r.score >= top.best.score - STAR_BAND && r.p.id !== top.best.p.id);
+
+  const pick = plan[0];
+  // keep the position entry so the cost pills and the shortfall wording still work, but
+  // the man named is the one the pair maths actually chose
+  const base = ranked.find((x) => x.pos === pick.row.p.pos) || ranked[0];
+  const top = { ...base, best: pick.row };
+  const runnerUp = pick.heir ? { best: pick.heir, survivor: pick.heir } : null;
+
+  // Your own liked and faded men, applied to the chosen player rather than to a position.
+  // If you have starred someone within touching distance, he is the recommendation - that
+  // is the entire point of a star. And never lead with a man you have said you distrust
+  // when there is a real alternative.
+  const near = pool.find((r) => r.star && r.p.id !== top.best.p.id
+    && r.score >= top.best.score - STAR_BAND);
   if (near) top.best = near;
-  // and never lead with someone you have said you do not trust, if there is an alternative
   if (top.best.fade) {
-    const alt = board.rows.find((r) => r.p.pos === top.pos && !r.fade && !drafted.has(r.p.id)
+    const alt = pool.find((r) => !r.fade && r.p.id !== top.best.p.id
       && r.score >= top.best.score - STAR_BAND * 2);
     if (alt) top.best = alt;
   }
@@ -439,8 +458,7 @@ ${cliff ? `<span class="cliffTag">last of ${top.pos} tier ${top.best.tier}</span
 </div>
 <p class="advWhy">${runnerUp && runnerUp.survivor
     ? `Take him now and <b>${runnerUp.survivor.p.name}</b> should still be there at pick `
-      + `${clock.target} — that pair is worth more than taking ${runnerUp.best.p.name} first `
-      + `and hoping the ${top.pos} keeps.`
+      + `${clock.target} — taking them in that order is worth more than the other way round.`
     : top.cost < 1
       ? `Nothing is urgent — the best ${top.pos} should still be there at pick ${clock.target}.`
       : `Waiting on ${top.pos} costs about <b>${top.cost.toFixed(0)}</b> points`
