@@ -67,11 +67,14 @@ export const FIT_AXES = [
     uses: ['Projected points per game this year', 'His points per game last year',
       'A man with no last season counts as a big ask'] },
   { key: 'dur', label: 'Availability', left: 'Ignore it', right: 'Demand it',
-    hint: 'The points between his projection and what he would have scored at the rate '
-        + 'he has actually been on the field. The one preference here with hard evidence '
-        + 'behind it - but it is still only a preference, and it never edits the forecast.',
+    hint: 'The points between his projection and what he would have scored at the rate he '
+        + 'has actually been on the field. Games played do repeat year to year, but only '
+        + 'weakly at the skill positions - measured 0.27 at back, 0.29 at receiver, 0.31 '
+        + 'at tight end, and 0.56 at quarterback. So it is a lean, not a law.',
     uses: ['His projected points for a full season',
-      'Games he was available for last season, out of 17'] },
+      'Games he was available for last season, out of 17',
+      'Some of this is durability and some is simply having the job - a starter gets more '
+      + 'chances to play than a backup, and the two cannot be separated'] },
   { key: 'pen', label: 'Avoid mistakes', left: 'Do not care', right: 'Avoid them',
     hint: 'Fumbles and interceptions, priced at what YOUR league actually fines them.',
     needsPenalties: true, open: true },
