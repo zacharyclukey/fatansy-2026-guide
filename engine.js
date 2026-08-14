@@ -108,7 +108,39 @@ export function tagCut(lean) {
   return 10 + 15 * care;
 }
 
-export function fitTags(r, st, league, games) {
+// A percentile is a poor description of a stat with two values in it. In this league a
+// receiver either lost a fumble or did not, which is 2 points across a whole season
+// against a 250-point projection - and the tie structure meant the clean majority
+// collapsed into one block that never reached the top decile while the fined minority got
+// branded. Thirty-four men were told they give points back and three were told they were
+// clean, off a difference of two points.
+//
+// So the mistake tag is gated on the SIZE of the fine, not on rank. Below this it is
+// rounding and there is nothing worth saying. Quarterbacks are the only position with
+// real exposure here, which is the correct answer rather than a special case.
+export const PEN_MATERIAL = 6;         // points across a season
+export const PEN_SHARE = 0.02;         // and at least this much of his projection
+
+export function penMaterial(p, league, st, pts) {
+  const fine = riskPoints(p, league, st);
+  const total = pts || projectedPoints(p, league);
+  return fine >= PEN_MATERIAL && total > 0 && fine / total >= PEN_SHARE;
+}
+
+// The worst fine anyone at this position is exposed to. "Clean" is only worth printing
+// where being fined was a real possibility - telling a receiver he is clean in a league
+// that could only ever have cost him two points is as empty as the other direction.
+export function penCeiling(players, league, st) {
+  const out = {};
+  for (const p of players) {
+    if (!RATE_POS.includes(p.pos)) continue;
+    const fine = riskPoints(p, league, st);
+    if (fine > (out[p.pos] || 0)) out[p.pos] = fine;
+  }
+  return out;
+}
+
+export function fitTags(r, st, league, games, penTop, repl) {
   // A kicker has no touchdown share worth speaking of and a defence does not miss games.
   // Every trait they have is a placeholder, so labelling them would be inventing an
   // opinion out of absent data - the same mistake the 0-100 rating made before it was
@@ -126,6 +158,20 @@ export function fitTags(r, st, league, games) {
     if (pct >= 100 - cut) pick = hi;
     else if (pct <= cut) pick = lo;
     if (!pick) continue;
+    // Mistakes only get a label when the points involved are worth a sentence. Both ends:
+    // calling a man "clean" is equally empty in a league where nobody loses anything.
+    if (a.key === 'pen') {
+      const isClean = pick === (FIT_TAGS.pen || [])[0];
+      // clean: the position has to have had something to lose. fined: HE has to have lost it.
+      // Clean has to mean "a starter who does not give points back". Without the
+      // replacement check it meant "a man who does not play": the three cleanest
+      // quarterbacks in the pool were backups projected for almost nothing, who throw no
+      // interceptions for the same reason they throw no touchdowns.
+      const worth = isClean
+        ? (penTop?.[r.p.pos] || 0) >= PEN_MATERIAL && r.pts > (repl?.[r.p.pos] ?? 0)
+        : penMaterial(r.p, league, st, r.pts);
+      if (!worth) continue;
+    }
     const wanted = (leans[a.key] || 0) > 0 ? pct >= 50 : (leans[a.key] || 0) < 0 ? pct < 50 : null;
     out.push({
       axis: a.key,
@@ -138,7 +184,9 @@ export function fitTags(r, st, league, games) {
       // availability is the one we can price, so it says the number rather than an adjective
       detail: a.key === 'dur' && games
         ? `${Math.round(injuryGap(r.p, league, games))} points behind a full season`
-        : null,
+        : a.key === 'pen'
+          ? `${Math.round(riskPoints(r.p, league, st))} points fined over a season`
+          : null,
     });
   }
   return out.sort((x, y) => y.force - x.force).slice(0, TAG_MAX);
@@ -761,7 +809,8 @@ export function buildBoard(data, st, cache) {
   rows.sort((a, b) => b.sortKey - a.sortKey);
   rows.forEach((r, i) => { r.rank = i + 1; });
 
-  for (const r of rows) r.tags = fitTags(r, st, league, pg);
+  const penTop = penCeiling(data.players, league, st);
+  for (const r of rows) r.tags = fitTags(r, st, league, pg, penTop, repl);
 
   markTiers(rows);
 

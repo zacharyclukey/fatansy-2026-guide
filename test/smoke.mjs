@@ -204,6 +204,23 @@ const fire = (el, type) => {
   // ---- Fit: a preference, and provably not more than that ----------------
   ok('neutral sliders leave every player at 50', b.rows.every((r) => r.fit === 50));
 
+  // ---- the mistake label has to be about real points -------------------
+  // It fired on 34 men and called 3 clean, off a two-point difference: in this league a
+  // receiver either lost one fumble or lost none, so a percentile of a two-valued stat
+  // branded the minority and told the majority nothing. Labels here are gated on the size
+  // of the fine, which correctly leaves it to quarterbacks.
+  const fined = b.rows.filter((r) => r.tags.some((t) => t.tag === 'Gives points back'));
+  ok('nobody is branded for a trivial fine',
+    fined.every((r) => m.riskPoints(r.p, b.league, st) >= m.PEN_MATERIAL),
+    fined.map((r) => `${r.p.name} ${m.riskPoints(r.p, b.league, st).toFixed(0)}`).join(', '));
+  ok('the mistake label is rare, not universal', fined.length < b.rows.length * 0.05,
+    `${fined.length} of ${b.rows.length}`);
+  // And nobody gets called clean for the crime of not playing.
+  const cleanTagged = b.rows.filter((r) => r.tags.some((t) => t.tag === 'Clean'));
+  ok('a backup is never called clean',
+    cleanTagged.every((r) => r.pts > (b.repl[r.p.pos] ?? 0)),
+    cleanTagged.map((r) => r.p.name).join(', '));
+
 
   // ---- kickers and defences must not be given an opinion we do not have -----
   // Every component sits at a flat 50 for them because there are no stats to rate, so the

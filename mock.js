@@ -10,7 +10,7 @@
 // models is the ONE thing a draft room reliably does - take players roughly in ADP order,
 // with need and herd behaviour pulling on it - and it says so on screen.
 
-import { myPicks, roundsOf } from './engine.js?v=202608140853';
+import { myPicks, roundsOf } from './engine.js?v=202608140906';
 
 // ---------------------------------------------------------------- randomness
 // Seeded, so a mock can be replayed. The seed is mixed with the pick number rather than
