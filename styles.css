@@ -543,8 +543,9 @@ span.nm:hover { text-decoration: none; }
   font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
   background: var(--pigskin); color: var(--chalk); border-radius: 4px; padding: 3px 8px;
 }
-.leanBtns { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.leanBtns .hint { flex-basis: 100%; margin-top: 2px; }
+/* The lean is a reading now, not a control - the four buttons that let you overrule it
+   are gone, so there is no button row to style. */
+.leanWhy { margin: 8px 0 0; font-size: 12px; color: var(--ink3); line-height: 1.5; }
 .labKnobs { margin: 0 0 20px; max-width: 620px; }
 
 /* ---------------------------------------------------------------- pick type + stars */

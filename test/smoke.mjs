@@ -845,20 +845,18 @@ const fire = (el, type) => {
   ok('with a slot the board reads itself',
     /Waiting costs you .* at running back/.test(d.querySelector('#lean').textContent),
     d.querySelector('#lean').textContent.replace(/\s+/g, ' ').slice(0, 90));
-  ok('one lean is starred as the suggestion',
-    [...d.querySelectorAll('[data-lean]')].filter((x) => x.textContent.includes('★')).length === 1);
-
-  d.querySelector('[data-lean="zerorb"]').click(); await settle();
-  const zero = mix();
-  d.querySelector('[data-lean="robustrb"]').click(); await settle();
-  const robust = mix();
-  ok('Zero RB favours receivers', zero.WR > zero.RB, `WR ${zero.WR} vs RB ${zero.RB}`);
-  ok('Robust RB favours backs', robust.RB > robust.WR, `RB ${robust.RB} vs WR ${robust.WR}`);
+  // The reading names one lean and explains it. It offers no button to overrule itself -
+  // those four competed with the board's own reasoning and set a multiplier nobody could
+  // interpret, next to a recommendation that had already been made.
+  ok('the reading names a lean', /Zero RB|Robust RB|Hero RB|No lean/
+    .test(d.querySelector('#lean').textContent));
+  ok('and offers no buttons to overrule it', d.querySelectorAll('[data-lean]').length === 0);
+  ok('so nothing on the board can set a position multiplier',
+    Object.keys(st_posx(d)).length === 0, JSON.stringify(st_posx(d)));
 
   // presets are temperament only and live in the lab
   d.querySelector('[data-v="ratings"]').click(); await settle();
   ok('presets are on the ratings page', d.querySelectorAll('[data-strat]').length === 5);
-  ok('no position lean in the lab', d.querySelectorAll('#v-ratings [data-lean]').length === 0);
   const before = JSON.stringify(st_posx(d));
   d.querySelector('[data-strat="upside"]').click(); await settle();
   d.querySelector('[data-v="ratings"]').click();

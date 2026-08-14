@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608140931';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140931';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140931';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608140931';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140931';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141313';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141313';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141313';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608141313';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141313';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608140931';
+const BUILD = '202608141313';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -168,6 +168,12 @@ function load() {
   // A setting with no control is not a setting, it is a ghost. Pinning them to the code
   // default is the only state a user can actually see and reason about.
   for (const k of ['rookieMax', 'style', 'styleBudget', 'tilt']) st[k] = base[k];
+  // The position-lean buttons are gone from the board - the reading tells you what the
+  // evidence says and no longer offers a button to overrule it. That leaves `posx` with no
+  // control anywhere, and a saved multiplier would go on quietly tilting whole positions
+  // for ever with nothing on screen to show it or undo it. Same argument as the sliders
+  // above: a setting with no control is a ghost.
+  st.posx = {};
   st.comp = { ...base.comp, ...(st.comp || {}) };
   for (const k of Object.keys(st.comp)) if (!(k in base.comp)) delete st.comp[k];
   st.sub ||= {};
@@ -1595,16 +1601,19 @@ function renderLean() {
   const on = activeLean(st) || 'custom';
   if (!s) { box.innerHTML = ''; return; }
   const rec = LEANS.find((l) => l.key === s.key);
-  const same = on === s.key;
+  // A reading, not a control. There used to be four buttons here that set position
+  // multipliers by hand. They were a second way to move the board that competed with the
+  // board's own reasoning, and the reading beside them already said which one the evidence
+  // pointed at - so the buttons only ever offered you the chance to disagree with a
+  // recommendation you had just been given, using a number nobody could interpret.
+  //
+  // What the reading is: the cost of waiting at each position, worked out from your draft
+  // slot and who has already gone. It moves as the board empties, which is exactly why it
+  // could never be a setting you pick once and leave.
   box.innerHTML = `<div class="leanHead">
 <span class="leanTag">Board reading</span>
 <b>${rec.name}</b><span class="hint">${s.why}</span></div>
-<div class="leanBtns">
-${LEANS.map((l) => `<button class="chipBtn" data-lean="${l.key}" aria-pressed="${on === l.key}"
- title="${l.blurb}">${l.name}${l.key === s.key ? ' ★' : ''}</button>`).join('')}
-<span class="hint">${same ? 'Your board already matches the reading.'
-    : `★ is what the board suggests right now. You are on ${LEANS.find((l) => l.key === on)?.name || 'a custom lean'}.`}</span>
-</div>`;
+${rec.blurb ? `<p class="leanWhy">${rec.blurb}</p>` : ''}`;
 }
 
 function readouts() {
@@ -1947,9 +1956,6 @@ function wire() {
       Object.assign(st, { ...preset, fit: { ...preset.fit } });
       fitBuilt = '';                 // the readouts must follow the preset
       save(); renderChrome(); rebuild();
-    } else if (b.dataset.lean) {
-      st.posx = { ...LEANS.find((l) => l.key === b.dataset.lean).posx };
-      save(); rebuild();
     } else if (b.id === 'mockQuit') { endMock(false); }
     else if (b.id === 'mockAuto') { autoDraft(false); }
     else if (b.id === 'mockFinish') { autoDraft(true); show('mock'); }
