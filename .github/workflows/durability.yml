@@ -1,0 +1,76 @@
+name: Does availability repeat?
+
+# The projection is right about a player per game and wrong about his season, and every
+# measurement so far says the whole gap is games he did not play. Sleeper's own payload
+# agrees out loud: every 2026 projection carries gp = 18.0, for all 345 players, in a
+# season where nobody can play more than 17.
+#
+# The obvious fix is to price a man at points-per-game x expected games. That only works
+# if availability is a fact about the player rather than something that happened to him,
+# and nothing in this repo has ever tested that. This is the test. It fetches season
+# stats plus week one of each season, so it is a few dozen requests and finishes quickly.
+#
+# Read the persistence table first. If it is near zero, stop - the correction would be
+# multiplying a good projection by noise, and the control world in check_durability.py
+# shows exactly how much damage that does.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'First season'
+        default: '2020'
+      to:
+        description: 'Last season'
+        default: '2025'
+
+jobs:
+  durability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prove the script can tell signal from noise
+        working-directory: pipeline
+        run: python check_durability.py | tee /tmp/check.txt
+
+      - name: Measure it on real seasons
+        working-directory: pipeline
+        run: python durability.py "${{ inputs.from }}" "${{ inputs.to }}" | tee /tmp/out.txt
+
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "### Does availability repeat? — ${{ inputs.from }} to ${{ inputs.to }}"
+            echo ''
+            echo 'Read part 1 first. **Persistence** is the whole question: if games'
+            echo 'played in one season does not predict games played in the next, then'
+            echo 'last year is noise and correcting for it makes the board worse. The'
+            echo 'synthetic control below shows a correction built on noise costing'
+            echo '0.13 to 0.19 of rank correlation, which is far more than anything in'
+            echo 'this app has ever gained.'
+            echo ''
+            echo '**Lift** in part 2 is the separate question of whether it improves the'
+            echo 'ranking. For scale: every box-score stat in `submetrics.py` put'
+            echo 'together was worth +0.007 to +0.015, which is noise. Under about +0.02'
+            echo 'here means nothing found — and nothing found is a fine answer. The'
+            echo 'right response to it is to show expected games as a fact on the'
+            echo "player's card and leave the score alone."
+            echo ''
+            echo '```'
+            cat /tmp/out.txt || echo 'the run produced no output'
+            echo '```'
+            echo ''
+            echo '<details><summary>The planted-and-control check that says whether to'
+            echo 'believe any of the above</summary>'
+            echo ''
+            echo '```'
+            cat /tmp/check.txt || echo 'the check produced no output'
+            echo '```'
+            echo '</details>'
+          } >> $GITHUB_STEP_SUMMARY

@@ -28,6 +28,9 @@ No dependencies beyond the Python standard library.
 | `engine2.py` | Percentiles within position, rookie substitution, no-history fallback. |
 | `export_json.py` | Trims 2.1 MB of working data down to the ~365 KB the app loads. |
 | `check_data.py` | The gate. Refuses a bad rebuild rather than shipping it. |
+| `durability.py` | Does availability repeat, and does correcting for it help? Not part of the build. |
+| `check_durability.py` | Proves `durability.py` finds a planted effect and not a fake one. |
+| `games_effect.py` | Offline: what an expected-games correction would do to the board. |
 
 ## Nightly refresh
 
@@ -67,6 +70,30 @@ Two things it deliberately does:
 
 It cannot compare against ADP — Sleeper does not publish historical ADP, so the most
 interesting comparison, "does this beat the market", is not available.
+
+## Does availability repeat?
+
+```
+python check_durability.py     # prove the script can tell signal from noise
+python durability.py 2020 2025 # then run it on real seasons
+```
+
+Or **Actions → Does availability repeat?**, which needs no local setup and, unlike a
+sandbox, can actually reach Sleeper.
+
+The projection is right about a player per game and wrong about his season, and the whole
+gap is games he did not play — Sleeper's own payload says as much, stamping `gp = 18.0` on
+all 345 players in a season where nobody can play more than 17. The obvious fix is to price
+a man at points per game × expected games. That only works if availability is a fact about
+the player rather than something that happened to him, and **that has never been tested**.
+This tests it. Read part 1 first; under about 0.20 there is nothing there, and the correct
+response is to show expected games as a fact and leave the score alone.
+
+`check_durability.py` is not optional. It runs the same script against a world with a
+durability effect planted in it and a world where games played is pure noise, and fails if
+the answers are not respectively "found it" and "found nothing". A correction built on noise
+costs 0.13 to 0.19 of rank correlation, which is far more than this app has ever gained from
+anything.
 
 ## Known limits
 
