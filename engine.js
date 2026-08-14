@@ -1059,67 +1059,6 @@ export function markTiers(rows) {
   return rows;
 }
 
-// ---------------------------------------------------------------- what to do now
-// "Who is best" is the wrong question on the clock. The right one is "which position
-// costs me the most by waiting" - because the pick you skip is not lost, it is deferred
-// to your next turn, and some positions survive that wait far better than others.
-//
-// For each position: the best man available now, versus the best you could still
-// reasonably expect at your next pick. The gap between them is what waiting costs.
-export function costOfWaiting(rows, clock, drafted, league, have = {}, opts = {}) {
-  if (!clock?.target) return [];
-  const need = opts.need ?? 8;
-  const out = [];
-  const positions = Object.keys(league.starters).filter((p) => p !== 'FLEX');
-
-  for (const pos of positions) {
-    const avail = rows.filter((r) => r.p.pos === pos && !drafted.has(r.p.id));
-    if (!avail.length) continue;
-    const best = avail[0];
-
-    // What score should you EXPECT at this position when you next pick?
-    //
-    // The first version of this took the best man with better-than-even odds of lasting,
-    // and if that was the best player available it reported a cost of zero. Which meant
-    // the whole panel read 0.0 whenever your next pick was close - exactly when the
-    // question matters. A 55% chance of keeping the best player is not "no cost".
-    //
-    // So it is a real expectation: walk down the position, and weight each player by the
-    // chance he is still there AND everyone better has gone.
-    let expected = 0;
-    let allGone = 1;                       // probability everyone above is off the board
-    for (const r of avail.slice(0, 40)) {
-      const p = availability(r.p.adp, clock.target, clock.currentPick) ?? 0;
-      expected += r.score * p * allGone;
-      allGone *= 1 - p;
-      if (allGone < 0.001) break;
-    }
-    // whatever probability is left over, assume the worst man considered
-    expected += (avail[Math.min(39, avail.length - 1)]?.score ?? 0) * allGone;
-
-    const cost = Math.max(0, best.score - expected);
-    // named for the sentence in the UI: the best one with better-than-even odds
-    const survivor = avail.find((r) => (availability(r.p.adp, clock.target, clock.currentPick) ?? 0) >= 0.5);
-
-    const want = league.starters[pos] || 0;
-    const got = have[pos] || 0;
-    const shortfall = Math.max(0, want - got);
-    const urgency = shortfall > 0 ? 1 : 0.45;
-
-    out.push({
-      pos,
-      best,
-      survivor,
-      expected,
-      cost,
-      weighted: cost * urgency + (shortfall > 0 ? need / 2 : 0),
-      shortfall,
-      bestBackOdds: availability(best.p.adp, clock.target, clock.currentPick),
-    });
-  }
-  return out.sort((a, b) => b.weighted - a.weighted);
-}
-
 // ---------------------------------------------------------------- planning the draft
 // Everything above this line looks two picks ahead. That is not far enough, and here is
 // the draft that proved it.
@@ -1340,12 +1279,21 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
     budget.n = opts.budget ?? 20000;            // every candidate gets the same search
     const out = roll(0, new Set([r.p.id]), rest);
     if (budget.n <= 0) exact = false;
-    // what this branch ends up paying for each slot, so the panel can say "wait on
+    // What this branch ends up paying for each POSITION, so the panel can say "wait on
     // quarterback and you get 33" using the branch that actually waits on quarterback -
-    // rather than a separate sum computed at your next pick, which is not where the plan
-    // fills the slot and was the source of a panel that argued against its own pick.
+    // rather than a separate sum computed somewhere else, which is what had the panel
+    // arguing against its own pick.
+    //
+    // Keyed by the position of the man taken, NOT by the slot label. Keying by slot said a
+    // branch containing "flex at 31, and the flex takes a receiver" had no receiver in it
+    // at all, so the receiver got priced at the far end of the plan instead of at 31. That
+    // is how the panel came to report a 46-point cost of waiting on receivers beside a
+    // pill saying it cost 1.
     const fill = {};
-    for (const s of out.steps) if (fill[s.slot] == null) fill[s.slot] = s.value;
+    for (const s of out.steps) {
+      const pos = s.take?.p.pos;
+      if (pos && fill[pos] == null) fill[pos] = s.value;
+    }
     return { row: r, now: r.score, later: out.value, total: r.score + out.value,
       steps: out.steps, fill };
   }).sort((a, b) => b.total - a.total);
@@ -1362,6 +1310,12 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
     .map(([pos, c]) => ({ pos, best: c.row, total: c.total, loss: top.total - c.total }))
     .sort((a, b) => a.loss - b.loss);
 
+  // ONE cost of waiting per position, and every readout in the app uses this one. What you
+  // pay at a position if you do not open with it, read out of the best plan that opens
+  // with something else - which is the branch that genuinely waits. The board reading used
+  // to compute its own version of this at your next pick only; two numbers for the same
+  // English phrase, sitting one above the other on screen, disagreeing.
+
   // What each position is worth now versus what it is worth if you leave it to the end of
   // the plan. Priced at the LAST pick the plan can see, not the next one, because that is
   // where an unfilled slot actually lands: the quarterback you gave up is not the one
@@ -1374,6 +1328,15 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
     if (!b || !later.length) continue;
     drop[pos] = { now: b.score,
       later: expect(eligible(pos, new Set()), later[later.length - 1]).value };
+  }
+  for (const c of cost) {
+    // the best plan that does NOT open at this position is the one that has to wait for it
+    const other = plan.find((x) => x.row.p.pos !== c.pos);
+    c.now = c.best.score;
+    c.wait = other?.fill?.[c.pos] ?? drop[c.pos]?.later ?? c.best.score;
+    c.gap = Math.max(0, c.now - c.wait);
+    // where that plan actually covers it, so the panel can say "you still get one at 31"
+    c.at = other?.steps.find((s) => s.take?.p.pos === c.pos)?.pick ?? null;
   }
 
   return { plan, top, cost, drop, slots, later, at, bench, exact };

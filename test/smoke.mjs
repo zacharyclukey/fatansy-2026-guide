@@ -107,7 +107,7 @@ const fire = (el, type) => {
   const needed = ['DEFAULT_SETTINGS', 'componentWeights', 'componentScore', 'floorScore',
     'projectedPoints', 'inLeague', 'flexFill', 'replacementLevels', 'SAMPLE_LEAGUE',
     'subScores', 'applyCustomStats', 'buildBoard', 'pickType',
-    'markTiers', 'myPicks', 'draftContext', 'availability', 'poolAround', 'costOfWaiting',
+    'markTiers', 'myPicks', 'draftContext', 'availability', 'poolAround', 'planDraft',
     'roundsOf', 'priorityOrder'];
   const missing = needed.filter((n) => !exported.includes(n));
   ok('every engine export the app imports still exists', missing.length === 0, missing.join(', '));
@@ -648,24 +648,21 @@ const fire = (el, type) => {
     ok('a turn knows its next pick is one away', ck.target === 25 && ck.gap === 1,
       `target ${ck.target}, gap ${ck.gap}`);
     const gone = new Set(bb.rows.slice(0, 23).map((r) => r.p.id));
-    const costs = m2.costOfWaiting(bb.rows, ck, gone, lg, {}, { need: 8 })
+    const costs = m2.planDraft(bb.rows, ck, gone, lg, {}, { candidates: 10 }).cost
       .filter((c) => !['K', 'DEF'].includes(c.pos) && c.best);
     if (costs.length >= 2) {
-      const byCost = [...costs].sort((a, b) => b.cost - a.cost)[0];
-      const plan = costs.map((x) => ({ x, total: x.best.score
-        + Math.max(...costs.filter((y) => y.pos !== x.pos).map((y) => y.best.score - y.cost)) }))
-        .sort((a, b) => b.total - a.total);
-      const chosen = plan[0].x;
-      // the pair rule must never pick someone whose own score is beaten by more than the
-      // whole spread of costs - that is the failure mode being fixed
+      const byCost = [...costs].sort((a, b) => b.gap - a.gap)[0];
+      const chosen = costs[0];                 // sorted best-first by plan total
+      // the rule must never pick someone whose own score is beaten by more than the whole
+      // spread of waiting costs - that is the failure mode being fixed
       const bestNow = Math.max(...costs.map((c) => c.best.score));
-      const spread = Math.max(...costs.map((c) => c.cost));
+      const spread = Math.max(...costs.map((c) => c.gap));
       ok('the pick is never further below the best man than scarcity can justify',
         bestNow - chosen.best.score <= spread + 0.001,
         `${chosen.best.p.name} ${chosen.best.score.toFixed(1)} vs best ${bestNow.toFixed(1)}, `
         + `spread ${spread.toFixed(1)}`);
-      ok('and the pair rule can disagree with pure scarcity',
-        true, `scarcity says ${byCost.pos}, the pair says ${chosen.pos}`);
+      ok('and the plan can disagree with pure scarcity',
+        true, `scarcity says ${byCost.pos}, the plan says ${chosen.pos}`);
 
       // The panel reasons about PLAYERS, not positions. Aggregating hides the man who is
       // actually at risk: at one real turn Nico Collins was 92% to last a single pick

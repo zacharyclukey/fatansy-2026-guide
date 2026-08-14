@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141502';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141502';
 import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141502';
 import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141502';
 import { TIPS, PCT_NOTE } from './tips.js?v=202608141502';
@@ -399,51 +399,59 @@ const word = (pos, many) => (POS_WORD[pos]?.[many ? 1 : 0] || pos);
 // scale the top of the board is around 120 and a startable man is around 40, so ten points
 // is roughly a tier - the same order as the gaps markTiers looks for.
 const CLIFF = 10;
+// Below this the pick was close and the panel has to say so. A cost-of-waiting argument
+// only explains a pick that a cost of waiting actually decided; wheeling one out to
+// justify a five-point preference is how the panel ended up quoting a 46-point receiver
+// cliff as the reason for taking a running back.
+const CLOSE = 6;
 
-// Why this man and not the obvious one. Both halves of the trade in one sentence: what
-// you lose at HIS position by waiting, and what you lose at the position you are passing
-// on.
+// Why this man and not the obvious one, in the numbers the decision used.
 //
-// Both numbers are read straight out of the two branches being compared. What you would
-// get at his position if you waited is whatever the RIVAL's plan pays for that slot -
-// because the rival's plan is the one that waits. And what you get at the rival's position
-// is what the WINNER's plan pays for it. So the sentence is not a second opinion about the
-// pick; it is the pick, read back out.
+// res.cost carries one cost of waiting per position - what you pay there if you do not
+// open with it, read out of the best plan that opens with something else. Every readout
+// in the app now uses that same field, so the sentence, the pills and the board reading
+// cannot drift apart again.
 function planWhy(res, top) {
+  const mine = res.cost.find((c) => c.pos === top.pos);
   const rival = res.cost.find((c) => c.pos !== top.pos && c.best);
-  const at = res.later[0];
-  if (!rival || !at || !res.drop[top.pos] || !res.drop[rival.pos]) {
+  if (!mine || !rival || !res.later.length) {
     return 'Best of what is left, counting every pick you have between now and the end.';
   }
-  const branch = (id) => res.plan.find((c) => c.row.p.id === id);
-  // a slot the plan never scheduled fell past the horizon, so it is priced where the plan
-  // stops looking - which is what the planner charged it too
-  const waited = (b, pos) => b?.fill?.[pos] ?? res.drop[pos].later;
-  const mine = { now: res.drop[top.pos].now, later: waited(branch(rival.best.p.id), top.pos) };
-  const theirs = { now: rival.best.score, later: waited(branch(top.best.p.id), rival.pos) };
-  const gap = (d) => Math.round(Math.max(0, d.now - d.later));
-  const mineGap = gap(mine);
-  const theirGap = gap(theirs);
-  const cliff = `The last ${word(top.pos)} at this level goes about here — wait and the best `
-    + `one left is worth <b>${mine.later.toFixed(0)}</b> instead of ${mine.now.toFixed(0)}, `
-    + `and you carry that all season.`;
-  const deep = `${word(rival.pos, true)[0].toUpperCase()}${word(rival.pos, true).slice(1)} `
-    + `this good keep coming: pass now and you still get about `
-    + `<b>${theirs.later.toFixed(0)}</b> instead of ${theirs.now.toFixed(0)}.`;
+  const mineGap = Math.round(mine.gap);
+  const theirGap = Math.round(rival.gap);
+  const them = word(rival.pos, true);
   const up = (s) => s[0].toUpperCase() + s.slice(1);
   const both = `waiting costs about <b>${mineGap}</b> at ${word(top.pos, true)} and `
-    + `<b>${theirGap}</b> at ${word(rival.pos, true)}`;
+    + `<b>${theirGap}</b> at ${them}`;
+
+  // Close first, before any cliff talk. When the alternatives are within a few points the
+  // truthful answer is that it barely matters, and the useful thing to add is where the
+  // plan picks up the position you are passing on.
+  if (rival.loss < CLOSE) {
+    const n = Math.round(rival.loss);
+    return `Close call — opening with a ${word(rival.pos)} instead works out about `
+      + `<b>${n || 1}</b> point${n === 1 ? '' : 's'} worse across the whole draft, so this `
+      + `is mostly just the better player`
+      + (rival.at ? `. You still get a ${word(rival.pos)} at pick ${rival.at}.` : '.');
+  }
+
+  const cliff = `The last ${word(top.pos)} at this level goes about here — wait and the best `
+    + `one left is worth <b>${mine.wait.toFixed(0)}</b> instead of ${mine.now.toFixed(0)}, `
+    + `and you carry that all season.`;
+  const deep = `${up(them)} this good keep coming: pass now and you still get about `
+    + `<b>${rival.wait.toFixed(0)}</b> instead of ${rival.now.toFixed(0)}.`;
   // A cliff has to be steep in itself, not merely steeper than the next thing. Comparing
   // the two gaps alone printed "neither falls off a cliff" above a pair of sixty-point
   // drops, because they happened to be sixty-point drops of the same size.
   if (mineGap >= CLIFF && mineGap > theirGap + 3) return `${cliff} ${deep}`;
   if (mineGap >= CLIFF && theirGap >= CLIFF) {
-    return `Everything thins out from here — ${both}. He is the best of what is going.`;
+    return `Everything thins out from here — ${both}. He is the best of what is going`
+      + `${rival.at ? `, and the plan still gets you a ${word(rival.pos)} at pick ${rival.at}` : ''}.`;
   }
   if (mineGap + 3 < theirGap) {
     const ahead = Math.round(top.best.score - rival.best.score);
     return `Nothing is urgent at ${word(top.pos)} — he is simply the best man left once `
-      + `every pick you have is counted. ${up(word(rival.pos, true))} thin out faster, `
+      + `every pick you have is counted. ${up(them)} thin out faster, `
       // and sometimes the man taken is not even the higher score, which is the plan saying
       // the rest of the draft pays it back. "give up -12 points" is not a sentence.
       + (ahead > 0
@@ -1689,8 +1697,15 @@ function renderLean() {
     const p = byId(id);
     if (p) have[p.pos] = (have[p.pos] || 0) + 1;
   }
-  const costs = costOfWaiting(board.rows, clock, drafted, board.league, have, { need: st.need });
-  const s = suggestLean(costs);
+  // Read off the plan, not off a second sum. This used to call costOfWaiting, which prices
+  // a position at your NEXT pick only - so it sat directly under the recommendation
+  // quoting a different number for the same English phrase, and on one board it said
+  // "receivers are the scarce thing, so backs can wait" immediately below "Take RB".
+  // Same field the pills and the reason sentence use now.
+  const res = planDraft(board.rows, clock, drafted, board.league, have,
+    { candidates: 10, horizon: PLAN_HORIZON });
+  if (!res) { box.innerHTML = ''; return; }
+  const s = suggestLean(res.cost.map((c) => ({ pos: c.pos, cost: c.gap })));
   const on = activeLean(st) || 'custom';
   if (!s) { box.innerHTML = ''; return; }
   const rec = LEANS.find((l) => l.key === s.key);
