@@ -1,0 +1,46 @@
+name: Is the positional durability gap real
+
+# The app's durability dial can anchor on "the average at their position". Built from 2025
+# alone that came out RB 15.5 games and WR 14.3, which docks receivers harder than backs
+# and pushes backs up the board - off ONE season, saying the opposite of what most people
+# believe about running backs.
+#
+# This checks six years. Draftability is decided by the previous season and availability
+# measured in the next one, so nothing is selected for having stayed healthy.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'First season'
+        default: '2019'
+      to:
+        description: 'Last season'
+        default: '2025'
+
+jobs:
+  durable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Count the games
+        working-directory: pipeline
+        run: python durable.py "${{ inputs.from }}" "${{ inputs.to }}" | tee /tmp/out.txt
+      - name: Publish the result
+        if: always()
+        run: |
+          {
+            echo "### Is the positional durability gap real — ${{ inputs.from }} to ${{ inputs.to }}"
+            echo ''
+            echo '```'
+            cat /tmp/out.txt || echo 'the run produced no output'
+            echo '```'
+            echo ''
+            echo 'The bottom table is the one that decides it. **FLIPS** on every line means'
+            echo 'the positional anchor is fitting one season of noise and should be pinned to'
+            echo 'the league average. **consistent** means the gap is real and worth keeping,'
+            echo 'even where it contradicts the usual assumption about running backs.'
+          } >> $GITHUB_STEP_SUMMARY
