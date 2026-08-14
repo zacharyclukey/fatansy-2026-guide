@@ -19,8 +19,8 @@ export const TIPS = {
     "Share of his projection from touchdowns and any bonus YOUR league pays."],
   asc: ['Take the proven man, or the one being asked to jump.',
     "This year's projected points per game against what he actually did."],
-  dur: ['How hard to punish a player who misses games.',
-    'Games available last year. Every projection assumes he plays them all.'],
+  durdial: ['How much of a season to assume each player gives you.',
+    'Rescales the projection. Left = a full year, right = what he actually played.'],
   pen: ['How much fumbles and interceptions bother you.',
     'Priced at what your league actually fines them.'],
 

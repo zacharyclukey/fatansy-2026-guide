@@ -18,35 +18,35 @@ export const PRESETS = [
     name: 'Balanced',
     blurb: 'Best player available, nudged by what you still need.',
     when: 'Hard to go badly wrong. Rarely wins the league on its own.',
-    set: { fit: { td: 0, asc: 0, dur: 0, pen: 0 }, need: 8, rookie: true },
+    set: { fit: { td: 0, asc: 0, pen: 0 }, dur: 33, need: 8, rookie: true },
   },
   {
     key: 'value',
     name: 'Pure value',
     blurb: 'Ignore roster holes and take the most points above replacement.',
     when: 'Strong early and with deep benches. Can leave you with five backs and no tight end.',
-    set: { fit: { td: 0, asc: 0, dur: 0, pen: 0 }, need: 0, rookie: true },
+    set: { fit: { td: 0, asc: 0, pen: 0 }, dur: 33, need: 0, rookie: true },
   },
   {
     key: 'upside',
     name: 'Upside hunter',
     blurb: 'Chase the men whose points come in lumps, and the ones being asked to jump.',
     when: 'Good in a big league where a median team wins nothing. Bad in a small one.',
-    set: { fit: { td: 70, asc: 60, dur: -20, pen: 0 }, need: 6, rookie: true },
+    set: { fit: { td: 70, asc: 60, pen: 0 }, dur: 10, need: 6, rookie: true },
   },
   {
     key: 'floor',
     name: 'Safe floor',
     blurb: 'Steady scorers who were on the field every week.',
     when: 'Good when you just need to make the playoffs. Rarely produces the best team.',
-    set: { fit: { td: -60, asc: -50, dur: 70, pen: 40 }, need: 10, rookie: false },
+    set: { fit: { td: -60, asc: -50, pen: 40 }, dur: 85, need: 10, rookie: false },
   },
   {
     key: 'clean',
     name: 'No mistakes',
     blurb: 'Avoid the men who fumble and throw interceptions, priced at your league rules.',
     when: 'Worth more the harder your league fines them. Does nothing in a league that does not.',
-    set: { fit: { td: -20, asc: 0, dur: 40, pen: 90 }, need: 8, rookie: true },
+    set: { fit: { td: -20, asc: 0, pen: 90 }, dur: 67, need: 8, rookie: true },
   },
 ];
 // Position leans. These only ever set position multipliers - never the rating knobs.
@@ -74,6 +74,7 @@ export function activePreset(st) {
     const a = s.set;
     const fit = st.fit || {};
     return Object.entries(a.fit).every(([k, v]) => (fit[k] || 0) === v)
+      && (st.dur ?? 33) === (a.dur ?? 33)
       && (st.need ?? 8) === a.need
       && !!st.rookie === !!a.rookie;
   })?.key || null;

@@ -19,7 +19,10 @@ export const DEFAULT_SETTINGS = (data) => ({
   // Your three preferences, each -100 (hard left) to +100 (hard right), 0 = no opinion.
   // They break ties between players you would be roughly equally happy with. They are
   // not a forecast and the app says so.
-  fit: { td: 0, asc: 0, dur: 0, pen: 0 },
+  fit: { td: 0, asc: 0, pen: 0 },
+  // -100 assume everyone plays a full season, 0 assume the positional average,
+  // +100 assume each man repeats his own attendance record.
+  dur: 33,
   fitExtra: {},       // extra scoring keys you have added to a point-based axis
   fitOn: true,
   need: 8,            // draft-score bonus for a position you still need
@@ -66,10 +69,6 @@ export const FIT_AXES = [
     hint: 'How big a leap the 2026 projection is asking for, against what he actually did.',
     uses: ['Projected points per game this year', 'His points per game last year',
       'A man with no last season counts as a big ask'] },
-  { key: 'dur', label: 'Punish injury risk', left: 'Ignore it', right: 'Punish it',
-    hint: 'The only one of these with hard evidence behind it: every projection '
-        + 'overshoots its season total, and the whole gap is games missed.',
-    uses: ['Games he was available for last season, out of 17'] },
   { key: 'pen', label: 'Avoid mistakes', left: 'Do not care', right: 'Avoid them',
     hint: 'Fumbles and interceptions, priced at what YOUR league actually fines them.',
     needsPenalties: true, open: true },
@@ -159,6 +158,119 @@ export function ascent(p) {
   const before = m.last_ppg;
   if (before == null || !m.has2025) return 6;        // no history: treat as a big ask
   return now - before;
+}
+
+// ---------------------------------------------------------------- durability
+// The one correction the data actually demands. Measured over 2020-2025: every
+// projection overshoots its season total at every position, and the whole gap is games
+// missed - per-game accuracy is fine. Projections quietly assume a full year.
+//
+// But WHICH assumption is right for a given man is genuinely unknown, so this is a dial
+// rather than a fixed haircut:
+//
+//   risk-accepting  -> assume he plays the full season, like the raw projection does
+//   middle          -> assume he plays what his position typically plays
+//   injury-averse   -> assume he plays what HE has played
+//
+// Nobody can tell you which is true. What the app can do is show you the number each
+// assumption produces and let you pick the one you are willing to be wrong about.
+export const FULL_GAMES = 17;
+
+// FOUR anchors, left (most optimistic) to right (most cautious), and the dial slides
+// between neighbours rather than between two extremes:
+//
+//    0  everyone plays a full season          - what the raw projection already assumes
+//   33  the league average for draftable men  - the honest, bias-free haircut
+//   67  the average at HIS position           - see the warning below
+//  100  what HE has actually played
+//
+// The default is 33, not 67, and that is deliberate. Among draftable players in 2025 the
+// backs averaged 15.5 games and the receivers 14.3, so anchoring on position docks
+// receivers harder than backs and re-swamps the top of the board with running backs -
+// exactly the bias that was found and fixed once already. One season is nowhere near
+// enough to claim backs are the more durable position; it is the reverse of what most
+// people believe. The positional anchor is offered because it may be what you want, but
+// it is not the default and the interface says why.
+export const DUR_ANCHORS = [
+  { at: 0, key: 'full', name: 'a full season for everybody' },
+  { at: 33, key: 'league', name: 'the league average' },
+  { at: 67, key: 'position', name: 'the average at their position' },
+  { at: 100, key: 'own', name: 'what each player actually played' },
+];
+
+// What band the dial is sitting in, for the label. Named after the assumption rather than
+// the direction, because "more cautious" is not always true - a back is MORE durable than
+// the league average, so sliding him from league to positional is optimistic for him.
+export const DUR_BANDS = [
+  [0, 0, 'Optimistic', 'everybody plays all seventeen, same as the raw projection'],
+  [0, 33, 'Optimistic', 'between a full season and the league average'],
+  [33, 33, 'Realistic', 'the league average for a draftable player'],
+  [33, 67, 'Position-leaning', 'between the league average and their own position'],
+  [67, 67, 'Position-leaning', 'the average at their position'],
+  [67, 100, 'Cautious', 'between their position and their own record'],
+  [100, 100, 'Cautious', 'exactly what each player played last year'],
+];
+
+export function durBand(v) {
+  const x = Math.max(0, Math.min(100, v ?? 33));
+  for (const [lo, hi, name, why] of DUR_BANDS) {
+    if (lo === hi ? x === lo : x > lo && x < hi) return { name, why };
+  }
+  return { name: 'Realistic', why: 'the league average for a draftable player' };
+}
+
+// Slide between whichever two anchors the dial currently sits between.
+export function expectedGames(p, lean, games) {
+  const own = (p.m && p.m.has2025 && p.m.games_2025 != null)
+    ? Math.max(0, Math.min(FULL_GAMES, p.m.games_2025))
+    : (games.position ?? games.league ?? FULL_GAMES);   // no history: use the assumption
+  const stops = [FULL_GAMES, games.league ?? FULL_GAMES,
+    games.position ?? games.league ?? FULL_GAMES, own];
+  const x = Math.max(0, Math.min(100, lean ?? 33));
+  for (let i = 0; i < DUR_ANCHORS.length - 1; i += 1) {
+    const a = DUR_ANCHORS[i];
+    const b = DUR_ANCHORS[i + 1];
+    if (x >= a.at && x <= b.at) {
+      const t = b.at === a.at ? 0 : (x - a.at) / (b.at - a.at);
+      return stops[i] + (stops[i + 1] - stops[i]) * t;
+    }
+  }
+  return stops[stops.length - 1];
+}
+
+// Average games played, pooled across the league AND per position, over DRAFTABLE players
+// only. Across the whole pool it comes out near 14, but that is dragged down by third
+// stringers and week-17 call-ups nobody would ever draft. The question is "how much of a
+// season does a player of this calibre give you", so those men have no business setting it.
+export const DRAFTABLE = 36;
+
+export function positionGames(players, depth = DRAFTABLE) {
+  const byPos = {};
+  for (const p of players) {
+    if (!p.m || !p.m.has2025 || p.m.games_2025 == null) continue;
+    if (!RATE_POS.includes(p.pos)) continue;      // kickers and defences do not miss time
+    (byPos[p.pos] ||= []).push(p);
+  }
+  const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : FULL_GAMES);
+  const perPos = {};
+  const all = [];
+  for (const [pos, list] of Object.entries(byPos)) {
+    const top = list.sort((a, b) => (a.adp || 999) - (b.adp || 999)).slice(0, depth)
+      .map((p) => Math.max(0, Math.min(FULL_GAMES, p.m.games_2025)));
+    perPos[pos] = mean(top);
+    all.push(...top);
+  }
+  return { league: mean(all), pos: perPos };
+}
+
+// The projection, rescaled to the fraction of a season you are willing to assume.
+//
+// Applied as a FRACTION rather than by dividing out each player's own projected game
+// count: Sleeper projects skill players over 18 games and leaves defences at 17, so
+// dividing by that field handed skill players a bigger haircut and floated a defence back
+// into the top 100 - a positional bias created purely by a metadata quirk.
+export function durableePoints(p, league, lean, games) {
+  return projectedPoints(p, league) * (expectedGames(p, lean, games) / FULL_GAMES);
 }
 
 export function durability(p) {
@@ -327,14 +439,14 @@ export function inLeague(p, league) {
 // So it is derived instead: fill each position's own slots, then let the best remaining
 // flex-eligible players take the flex spots, and see who they actually are. That
 // self-corrects for PPR, half-PPR, TE premium or any other scoring a league invents.
-export function flexFill(players, league) {
+export function flexFill(players, league, ptsOf = projectedPoints) {
   const flexSlots = (league.starters.FLEX || 0) * league.teams;
   const eligible = ['RB', 'WR', 'TE'].filter((p) => league.starters[p] != null || flexSlots);
   const pool = {};
   for (const pos of eligible) {
     pool[pos] = players
       .filter((p) => p.pos === pos && inLeague(p, league))
-      .map((p) => ({ p, pts: projectedPoints(p, league) }))
+      .map((p) => ({ p, pts: ptsOf(p, league) }))
       .sort((a, b) => b.pts - a.pts);
   }
   // everyone locked into a dedicated slot at his own position
@@ -358,15 +470,15 @@ export const STREAMED = ['K', 'DEF'];
 // apparent value of drafting one early - correctly, because nobody should.
 export const STREAM_DEPTH = 0.5;
 
-export function replacementLevels(players, league) {
+export function replacementLevels(players, league, ptsOf = projectedPoints) {
   const out = {};
-  const { used, pool } = flexFill(players, league);
+  const { used, pool } = flexFill(players, league, ptsOf);
 
   for (const pos of Object.keys(league.starters)) {
     if (pos === 'FLEX') continue;
     const list = pool[pos] ? pool[pos].map((x) => x.pts) : players
       .filter((p) => p.pos === pos && inLeague(p, league))
-      .map((p) => projectedPoints(p, league))
+      .map((p) => ptsOf(p, league))
       .sort((a, b) => b - a);
     if (!list.length) { out[pos] = 0; continue; }
     // Flex-eligible positions use the derived count. Kickers and defences are different:
@@ -452,12 +564,20 @@ export function buildBoard(data, st, cache) {
   const comps = data.components;
   const cw = componentWeights(st);
   const cwTotal = Object.values(cw).reduce((a, b) => a + b, 0) || 1;
-  const repl = replacementLevels(data.players, league);
+  // One number, used for the board, the replacement level and the flex fill alike. If
+  // the durability assumption only moved the player and not the baseline he is measured
+  // against, it would be comparing a discounted man with an undiscounted replacement.
+  const pg = positionGames(data.players);
+  const durLean = st.dur ?? 33;
+  const gamesFor = (p) => ({ league: pg.league, position: pg.pos[p.pos] ?? pg.league });
+  const ptsOf = (p, lg) => durableePoints(p, lg, durLean, gamesFor(p));
+  const repl = replacementLevels(data.players, league, ptsOf);
 
   const rows = data.players
     .filter((p) => inLeague(p, league))
     .map((p) => {
-      const pts = projectedPoints(p, league);
+      const pts = ptsOf(p, league);
+      p._games = expectedGames(p, durLean, gamesFor(p));
       const vor = pts - (repl[p.pos] || 0);
       const cached = cache?.get(p.id);
       const scores = cached ? { ...cached } : (() => {
@@ -485,7 +605,7 @@ export function buildBoard(data, st, cache) {
   // a running back rather than heavy compared with a quarterback.
   for (const list of Object.values(byPos)) {
     for (const [key, get] of [['td', (r) => swingShare(r.p, league, st)],
-      ['asc', (r) => ascent(r.p)], ['dur', (r) => durability(r.p)],
+      ['asc', (r) => ascent(r.p)],
       ['pen', (r) => -riskPoints(r.p, league, st)]]) {
       const vals = list.map((r) => [r, get(r)]).sort((a, b) => a[1] - b[1]);
       const n = vals.length;
