@@ -645,6 +645,55 @@ const fire = (el, type) => {
         odds.every((p) => p >= 0 && p <= 1));
     }
   }
+
+  // ---- the decision rule, on cases where the right answer is known --------
+  // The panel takes the man who maximises (him now) + (the best man who survives to your
+  // next pick). These are the situations that rule exists to get right, run through the
+  // same arithmetic with the odds fixed by hand so the answer is not a matter of opinion.
+  {
+    const plan = (cands) => cands.map((mine) => {
+      let later = 0;
+      let allGone = 1;
+      for (const o of cands) {
+        if (o.n === mine.n) continue;
+        later += o.s * o.p * allGone;
+        allGone *= 1 - o.p;
+        if (allGone < 0.001) break;
+      }
+      return { n: mine.n, total: mine.s + later };
+    }).sort((a, b) => b.total - a.total)[0].n;
+
+    // Everyone keeps: you get both, so there is nothing to be clever about.
+    ok('when everyone is safe it takes the best man',
+      plan([{ n: 'best', s: 70, p: 0.95 }, { n: 'second', s: 68, p: 0.95 },
+        { n: 'third', s: 60, p: 0.95 }]) === 'best');
+
+    // The whole point of the rule: take the man who is leaving, keep the man who is not.
+    ok('it takes the vanishing man and keeps the safe one',
+      plan([{ n: 'safe', s: 70, p: 0.92 }, { n: 'going', s: 68, p: 0.05 },
+        { n: 'third', s: 58, p: 0.9 }]) === 'going');
+
+    // Zach's case. If NOBODY comes back, urgency stops separating anyone and the only
+    // thing left is who is actually better. It must not grab a lesser man merely because
+    // he is also disappearing.
+    ok('when nobody comes back it takes the BEST of them, not just anyone leaving',
+      plan([{ n: 'best', s: 70, p: 0.04 }, { n: 'second', s: 65, p: 0.03 },
+        { n: 'safe', s: 52, p: 0.95 }]) === 'best');
+    ok('and still the best man when the field is flat and all of it is going',
+      plan([{ n: 'best', s: 70, p: 0.02 }, { n: 'second', s: 69, p: 0.02 },
+        { n: 'third', s: 68, p: 0.02 }]) === 'best');
+
+    // A cliff behind a safe man: spending the pick on the safe one loses the cliff.
+    ok('it does not burn a pick on a man who was never going anywhere',
+      plan([{ n: 'safe', s: 70, p: 0.9 }, { n: 'cliff', s: 66, p: 0.08 },
+        { n: 'scraps', s: 40, p: 0.95 }]) === 'cliff');
+
+    // Ties are broken by who is leaving - which is what happens on the real board at a
+    // long gap, where two men score 70.9 and one of them lasts 6.8% and the other 0.2%.
+    ok('a tie on score is broken by who will not be there',
+      plan([{ n: 'lasts', s: 70.9, p: 0.068 }, { n: 'going', s: 70.9, p: 0.002 },
+        { n: 'filler', s: 60, p: 0.5 }]) === 'going');
+  }
 }
 
 // ---------------------------------------------------------------- 4. the fit page
