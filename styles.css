@@ -683,3 +683,15 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
 .kbdIdle { color: var(--ink3); }
 .kbdNone { color: var(--warn); }
 .kbdDone { color: var(--good); font-weight: 600; }
+
+/* Preference labels on the player card. A fact about how he matches what YOU said you
+   like - never a claim about how good he is. Two at most; a third never gets read. */
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.tag {
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  border-radius: 3px; padding: 3px 7px;
+  background: var(--panel2); color: var(--ink2);
+}
+.tag em { font-style: normal; font-weight: 400; opacity: .8; }
+.tag.want { background: var(--goodSoft); color: var(--good); }
+.tag.against { background: var(--badSoft); color: var(--bad); }

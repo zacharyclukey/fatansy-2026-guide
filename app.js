@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, durBand } from './engine.js?v=202608140818';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140818';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140818';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608140818';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140818';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, costOfWaiting, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608140844';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608140844';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608140844';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608140844';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608140844';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608140818';
+const BUILD = '202608140844';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -845,6 +845,11 @@ ${r.lastOfTier ? ` <b class="warn">He is the last ${r.p.pos} of his tier</b> —
 ${statCards(r)}
 <p class="facts">${facts.length ? `2025: <b>${facts.join('</b> · <b>')}</b>`
     : 'No 2025 data — rated off the projection.'}</p>
+${r.tags?.length ? `<p class="tags">${r.tags.map((t) => `<span class="tag${
+    t.match === true ? ' want' : t.match === false ? ' against' : ''}" title="${t.why}">${t.tag}${
+    t.detail ? ` <em>${t.detail}</em>` : ''}</span>`).join('')}</p>` : ''}
+<p class="facts hint">These labels come from your own preferences, not from a forecast.
+They nudge the order by a few places at most — the projection is untouched.</p>
 <p class="facts">${r.rated
     ? `Your grade <b>${r.rating.toFixed(0)}</b> ranks him <b>${r.posRated}</b> of ${r.posCount} ${r.p.pos}s.`
     : `No grade — there are no ${r.p.pos} stats worth rating, so this is pure value.`}
@@ -1261,37 +1266,7 @@ function fitWord(v) {
   return n < 35 ? 'slight' : n < 75 ? 'clear' : 'strong';
 }
 
-function renderDur() {
-  const el = $('#dur');
-  if (!el) return;
-  const v = st.dur ?? 33;
-  if (document.activeElement !== el) el.value = v;
-  const band = durBand(v);
-  const out = $('#durOut');
-  if (out) out.innerHTML = `${band.name} — ${band.why}`;
-  const why = $('#durWhy');
-  if (!why) return;
-  // Name the men it is actually moving. An abstract slider that changes a number nobody
-  // can see is indistinguishable from a slider that does nothing.
-  const shown = board.rows.slice(0, 140).filter((r) => r.p._games != null);
-  const hurt = shown.filter((r) => r.p._games < 13)
-    .sort((a, b) => a.p._games - b.p._games).slice(0, 3)
-    .map((r) => `${r.p.name} (${r.p._games.toFixed(0)})`);
-  why.innerHTML = 'Projections quietly assume everyone plays all season. They never do — '
-    + 'and that gap is the whole reason a projected total comes in high. '
-    + (hurt.length
-      ? `Right now this is docking <b>${hurt.join('</b>, <b>')}</b>. `
-      : 'Right now nobody near the top is being docked. ')
-    + (v > 40
-      ? '<b class="warn">Past the league average this leans on position.</b> In 2025 the '
-        + 'backs averaged 15.5 games and the receivers 14.3, so the further right you go '
-        + 'the more backs rise — off one season of data that says the opposite of what '
-        + 'most people believe. Worth knowing before you trust it.'
-      : '');
-}
-
 function renderFit() {
-  renderDur();
   const host = $('#fitAxes');
   if (!host) return;
   const league = data.leagues[st.league];
@@ -1818,7 +1793,6 @@ function wire() {
     }
   });
   for (const [id, fn] of [['need', (v) => { st.need = +v; }],
-    ['dur', (v) => { st.dur = +v; }],
   ]) {
     const el = $(`#${id}`);
     if (!el) continue;
@@ -1925,7 +1899,7 @@ function wire() {
     if (b.dataset.strat) {
       // a preset sets temperament only - never position values
       const preset = PRESETS.find((y) => y.key === b.dataset.strat).set;
-      Object.assign(st, { ...preset, fit: { ...preset.fit }, dur: preset.dur ?? 0 });
+      Object.assign(st, { ...preset, fit: { ...preset.fit } });
       fitBuilt = '';                 // the readouts must follow the preset
       save(); renderChrome(); rebuild();
     } else if (b.dataset.lean) {

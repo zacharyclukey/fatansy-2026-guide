@@ -204,43 +204,6 @@ const fire = (el, type) => {
   // ---- Fit: a preference, and provably not more than that ----------------
   ok('neutral sliders leave every player at 50', b.rows.every((r) => r.fit === 50));
 
-  // ---- the durability dial ----------------------------------------------
-  // Four anchors: all seventeen, the league average, the positional average, his own
-  // record. Sliding between them must be smooth and must never reorder at the left.
-  const gm = m.positionGames(data.players);
-  ok('the league average is a real number', gm.league > 12 && gm.league < 17,
-    gm.league.toFixed(1));
-  ok('every position gets its own average too',
-    ['QB', 'RB', 'WR', 'TE'].every((p) => gm.pos[p] > 10 && gm.pos[p] <= 17));
-
-  const atFull = m.buildBoard(data, { ...st, dur: 0 });
-  const atLeague = m.buildBoard(data, { ...st, dur: 33 });
-  const atOwn = m.buildBoard(data, { ...st, dur: 100 });
-
-  // A flat haircut applied to everyone AND to the replacement level cannot reorder
-  // anything. If sliding to the league average moves the board, the discount is leaking
-  // into some players and not others, which is the metadata-quirk bug all over again.
-  ok('a flat league-wide haircut does not reorder the board',
-    atFull.rows.every((r, i) => r.p.id === atLeague.rows[i].p.id));
-  ok('but it does lower the printed totals',
-    atLeague.rows[0].pts < atFull.rows[0].pts);
-
-  // Sliding to his own record must move the men who actually missed time, and only those.
-  const fullRank = new Map(atFull.rows.map((r) => [r.p.id, r.rank]));
-  const hurtMoved = atOwn.rows.filter((r) => (r.p.m?.games_2025 ?? 17) <= 8
-    && fullRank.get(r.p.id) <= 100);
-  ok('men who missed half a season fall a long way',
-    hurtMoved.length === 0 || hurtMoved.every((r) => r.rank > fullRank.get(r.p.id) + 20),
-    `${hurtMoved.length} checked`);
-  const ironMen = atOwn.rows.filter((r) => r.p.m?.games_2025 === 17 && r.rank <= 60);
-  ok('and the ever-presents do not fall', ironMen.every(
-    (r) => r.rank <= fullRank.get(r.p.id) + 3));
-
-  // The band label has to agree with where the handle is.
-  ok('the dial names its own band',
-    m.durBand(0).name === 'Optimistic' && m.durBand(33).name === 'Realistic'
-    && m.durBand(100).name === 'Cautious');
-  ok('the default sits on the league average', m.DEFAULT_SETTINGS(data).dur === 33);
 
   // ---- kickers and defences must not be given an opinion we do not have -----
   // Every component sits at a flat 50 for them because there are no stats to rate, so the
@@ -846,8 +809,8 @@ const fire = (el, type) => {
   // a preset must actually move the sliders it claims to set
   d.querySelector('[data-strat="floor"]').click(); await settle();
   d.querySelector('[data-v="ratings"]').click(); await settle();
-  const durBox = d.querySelector('#dur');
-  ok('a preset moves the sliders', durBox && +durBox.value === 85, `dur=${durBox?.value}`);
+  const durBox = d.querySelector('#fit_dur');
+  ok('a preset moves the sliders', durBox && +durBox.value === 80, `dur=${durBox?.value}`);
 
   const tw = d.querySelector('#fit_td'); tw.value = '15'; fire(tw, 'input');
   await settle();

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608140818" />
+<link rel="stylesheet" href="styles.css?v=202608140844" />
 </head>
 <body>
 
@@ -189,23 +189,6 @@
       could build. These decide which of two players you would rather have when the
       numbers cannot separate them.</p>
 
-    <!-- Not a preference. An ASSUMPTION, and the only correction the measurements
-         actually demand: every projection overshoots its season total, and the whole gap
-         is games missed. Which assumption is right for a given man is unknowable, so it
-         is a dial and the number it produces is shown next to it. -->
-    <label class="knob durKnob">
-      <span class="knobLabel"><span data-tip="durdial" tabindex="0">How many games will they play?</span>
-        <em id="durOut">the average for their position</em></span>
-      <input id="dur" type="range" min="0" max="100" step="1" value="33"
-        list="durStops" />
-      <datalist id="durStops">
-        <option value="0"></option><option value="33"></option>
-        <option value="67"></option><option value="100"></option>
-      </datalist>
-      <span class="fitEnds fitEnds4"><b>All 17</b><b>League avg</b><b>Position avg</b><b>Their own</b></span>
-      <span class="hint" id="durWhy"></span>
-    </label>
-
     <div id="fitAxes" class="fitAxes"></div>
     <p id="fitNote" class="hint fitNote"></p>
 
@@ -278,6 +261,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608140818"></script>
+<script type="module" src="app.js?v=202608140844"></script>
 </body>
 </html>
