@@ -980,7 +980,16 @@ const fire = (el, type) => {
   ok('nobody panics for a kicker or a defence', early.length === 0,
     early.map((x) => `${x.pos} at ${x.n}, adp ${x.adp}`).join(', '));
   const firstK = run.log.find((x) => x.pos === 'K');
-  ok('the first kicker goes late', !firstK || firstK.n > T * (R - 4), `pick ${firstK?.n}`);
+  // Measured against the market, not against a round number, for the same reason the
+  // check above is. This asked for no kicker before pick 132 while the best kicker in the
+  // pool has an ADP of 127.5 - so it demanded the room take the top kicker LATER than the
+  // wider world does, and contradicted its own sibling two lines up. A room that takes a
+  // kicker in round five is broken; a room that takes one a dozen picks before his ADP is
+  // just keen, and that is what the tolerance is for.
+  const firstKAdp = Math.min(...pool.filter((p) => p.pos === 'K' && p.adp).map((p) => p.adp));
+  ok('the first kicker goes near his market price at the earliest',
+    !firstK || firstK.n > firstKAdp - 25,
+    `pick ${firstK?.n}, earliest kicker ADP ${firstKAdp.toFixed(0)}`);
 
   // a league with no kicker slot must not have kickers in it at all
   const noK = { ...lg, starters: { QB: 1, RB: 2, WR: 3, TE: 1, FLEX: 1 }, rounds: 10 };
