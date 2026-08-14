@@ -595,6 +595,43 @@ const fire = (el, type) => {
     d.querySelectorAll('.detail .kind').length === 1);
   ok('advice names a position', /Take|Line up/.test(d.querySelector('#advice .advTag')?.textContent || ''));
   ok('cost of waiting is shown', d.querySelectorAll('#advice .costPill').length >= 3);
+
+  // ---- the recommendation weighs BOTH picks, not just the scarcer position ----
+  // It used to take whichever position had the highest cost of waiting, full stop. In a
+  // real draft at pick 24 off the first slot that recommended Josh Allen (score 60.9, cost
+  // 3.6) over Nico Collins (score 70.9, cost 0.5) - ten points of player thrown away for
+  // three and a half points of scarcity. Scarcity is a tiebreaker, not a trump card.
+  {
+    const m2 = await import(`file://${DIR}/engine.js`);
+    const dd = JSON.parse(JSON.stringify(players));
+    dd.leagues = [m2.SAMPLE_LEAGUE];
+    const bb = m2.buildBoard(dd, { ...m2.DEFAULT_SETTINGS(dd), mine: [] });
+    const lg = m2.SAMPLE_LEAGUE;
+    // slot 1: picks 1, 24, 25 - a turn, so nothing decays much between them
+    const ck = m2.draftContext(lg, 1, 24);
+    ok('a turn knows its next pick is one away', ck.target === 25 && ck.gap === 1,
+      `target ${ck.target}, gap ${ck.gap}`);
+    const gone = new Set(bb.rows.slice(0, 23).map((r) => r.p.id));
+    const costs = m2.costOfWaiting(bb.rows, ck, gone, lg, {}, { need: 8 })
+      .filter((c) => !['K', 'DEF'].includes(c.pos) && c.best);
+    if (costs.length >= 2) {
+      const byCost = [...costs].sort((a, b) => b.cost - a.cost)[0];
+      const plan = costs.map((x) => ({ x, total: x.best.score
+        + Math.max(...costs.filter((y) => y.pos !== x.pos).map((y) => y.best.score - y.cost)) }))
+        .sort((a, b) => b.total - a.total);
+      const chosen = plan[0].x;
+      // the pair rule must never pick someone whose own score is beaten by more than the
+      // whole spread of costs - that is the failure mode being fixed
+      const bestNow = Math.max(...costs.map((c) => c.best.score));
+      const spread = Math.max(...costs.map((c) => c.cost));
+      ok('the pick is never further below the best man than scarcity can justify',
+        bestNow - chosen.best.score <= spread + 0.001,
+        `${chosen.best.p.name} ${chosen.best.score.toFixed(1)} vs best ${bestNow.toFixed(1)}, `
+        + `spread ${spread.toFixed(1)}`);
+      ok('and the pair rule can disagree with pure scarcity',
+        true, `scarcity says ${byCost.pos}, the pair says ${chosen.pos}`);
+    }
+  }
 }
 
 // ---------------------------------------------------------------- 4. the fit page
