@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608150903';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608150903';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608150903';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608150903';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608150903';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain } from './engine.js?v=202608151624';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608151624';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608151624';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608151624';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608151624';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608150903';
+const BUILD = '202608151624';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -42,21 +42,57 @@ const KINDS = {
   swing: ['Swing', 'Priced about right, but his points arrive in lumps — he leans on touchdowns more than he stays on the field.'],
   reach: ['Reach', 'Taking him here means passing men your board rates higher.'],
 };
+// One place that asks the engine for words. Called per row for the tooltips, so it must
+// never throw and never be expensive: the room's drafted list is only pulled in for the
+// card, where naming who a Reach walks past is worth the extra work.
+function expl(r, withRoom = false) {
+  try {
+    return explain(r, picks().drafted.length + 1, {
+      st,
+      league: board?.league,
+      repl: board?.repl,
+      rows: withRoom ? board?.rows : null,
+      drafted: withRoom ? new Set(picks().drafted) : null,
+    });
+  } catch (err) {
+    console.error('explanation failed', err);
+    return null;
+  }
+}
+// A tooltip is an attribute, so anything with a quote in it would end the attribute and
+// silently swallow the rest of the row.
+const tip = (s) => esc(s).replace(/"/g, '&quot;');
+
 const FIXED = [
-  ['Type', (r) => (r.kind
-    ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>`
-    // The dash now means one thing and one thing only: his window has not opened yet and
-    // he is too far off to even call it a reach. It used to mean that OR "he is correctly
-    // priced but we have nothing to say about him", which is why it read as a bug.
-    : `<em class="soft" title="Not in range yet — his window starts around pick ${r.worthFrom}">—</em>`), 58, ''],
+  // Every verdict now says why, on hover. The label on its own was the whole complaint:
+  // it told you the answer and never the reasoning, which is fine if you wrote it and
+  // useless if you did not.
+  ['Type', (r) => {
+    const e = expl(r);
+    const t = e ? ` title="${tip(e.tipLabel)}"` : '';
+    return r.kind
+      ? `<em class="kind ${r.kind}"${t}>${KINDS[r.kind][0]}</em>`
+      // The dash means one thing and one thing only: his window has not opened yet and he
+      // is too far off to even call it a reach. It used to mean that OR "he is correctly
+      // priced but we have nothing to say about him", which is why it read as a bug.
+      : `<em class="soft"${t || ` title="Not in range yet — his window starts around pick ${r.worthFrom}"`}>—</em>`;
+  }, 58, ''],
   // Not a grade. The span of picks where taking him costs you nothing, because everyone
   // inside it is a player you would be equally happy with.
   // Plain information, no colour. The judgement is in Type, which knows the clock.
-  ['Worth', (r) => `<em class="win">${r.openEnded ? `${r.worthFrom}+`
-    : r.worthFrom === r.worthTo ? r.worthFrom
-      : `${r.worthFrom}–${r.worthTo}`}</em>`, 66, 'wd'],
+  // Hovering it explains the rank rather than the range, because "why is he this high"
+  // is the question people actually have when they look at this part of the row.
+  ['Worth', (r) => {
+    const e = expl(r);
+    return `<em class="win"${e ? ` title="${tip(e.tipRank)}"` : ''}>${r.openEnded ? `${r.worthFrom}+`
+      : r.worthFrom === r.worthTo ? r.worthFrom
+        : `${r.worthFrom}–${r.worthTo}`}</em>`;
+  }, 66, 'wd'],
   ['ADP', (r) => (r.p.adp ? r.p.adp.toFixed(1) : '—'), 52, ''],
-  ['Score', (r) => r.score.toFixed(1), 58, 'sc'],
+  ['Score', (r) => {
+    const e = expl(r);
+    return `<em${e ? ` title="${tip(e.tipRank)}"` : ''}>${r.score.toFixed(1)}</em>`;
+  }, 58, 'sc'],
 ];
 // The stats worth seeing differ by position - a receiver's carries tell you nothing. This
 // group only appears when you have filtered to one position, and it changes with it.
@@ -944,6 +980,10 @@ function detail(r) {
   const [, why] = callFor(r);
   const drafted = new Set(picks().drafted);
   const wait = waitAdvice(r, drafted);
+  // The card gets the full version, with the room's drafted list, so a Reach can name the
+  // men you would actually be walking past rather than gesturing at "men your board rates
+  // higher" - who are, half the time, already gone.
+  const e = expl(r, true);
 
   // ---- the numbers, first, because they are what the argument rests on ----
   // They used to be the last line of a paragraph at the bottom of the card. Where he sits,
@@ -978,10 +1018,17 @@ function detail(r) {
 <div class="dHead">${head}</div>
 ${chips ? `<p class="dChips">${chips}</p>` : ''}
 
+${sec(`Why he is #${r.rank} on your board`, e ? `<p class="dSub">${esc(e.rank)}</p>
+${e.prefLine ? `<p class="dNote">${esc(e.prefLine)}</p>` : ''}
+<p class="dNote">${esc(e.caveat)}</p>` : '')}
+
 ${sec('Is he worth this pick?', `
 <p class="dCall">${r.kind
-    ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em> ${KINDS[r.kind][1]}`
-    : '<em class="kind soft">Not yet</em> His range is still a long way off.'}</p>
+    ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>`
+    : '<em class="kind soft">Not yet</em>'} ${esc(e ? e.why
+      : (r.kind ? KINDS[r.kind][1] : 'His range is still a long way off.'))}</p>
+${e && e.cost ? `<p class="dSub">${esc(e.cost)}</p>` : ''}
+${e ? `<p class="dSub">${esc(e.change)}</p>` : ''}
 <p class="dSub">Worth <b>${window}</b>. The room takes him around <b>pick ${r.adpRank}</b>.
 ${why ? ` ${why}` : ''}</p>`)}
 

@@ -348,6 +348,96 @@ const fire = (el, type) => {
       `${kd.length} K/DEF`);
   }
 
+  // ---- every call has to be explainable, and honestly ---------------------
+  //
+  // The board labels men Steal / Safe / Swing / Reach and gives a range of picks, and for
+  // most of its life it never said why. The explanation is now part of the product, so it
+  // is tested like one: it must exist for everyone, it must name what it is explaining,
+  // and - the part that actually matters - it must not reach for the stats that were
+  // measured to add nothing and then deleted from the score.
+  {
+    let threw = null;
+    let unnamed = null;
+    let noRank = null;
+    const at = 24;
+    const bAt = m.buildBoard(data, { ...st, atPick: at });
+    const ctx = { st, league: bAt.league, repl: bAt.repl, rows: bAt.rows, drafted: new Set() };
+    const all = [];
+    for (const r of bAt.rows) {
+      let e;
+      try {
+        e = m.explain(r, at, ctx);
+      } catch (err) { threw ||= `${r.p.name}: ${err.message}`; continue; }
+      all.push([r, e]);
+      // the sentence has to stand on its own, so it names the label it is explaining
+      if (!e.why.toLowerCase().includes(e.label.toLowerCase())) unnamed ||= `${r.p.name} (${e.label}): ${e.why}`;
+      if (!e.rank || e.rank.length < 40) noRank ||= r.p.name;
+    }
+    ok('every row on the board can explain itself', threw === null, threw);
+    ok('the explanation checked the whole pool', all.length === bAt.rows.length,
+      `${all.length} of ${bAt.rows.length}`);
+    ok('the explanation names the label it is explaining', unnamed === null, unnamed);
+    ok('every row also explains where it sits on the board', noRank === null, noRank);
+    ok('every row says what would change the call',
+      all.every(([, e]) => e.change && e.change.length > 20));
+
+    // THE constraint. Five years of held-out testing said the historical box-score stats
+    // add nothing over the projection (+0.007 / -0.001 / +0.002 / +0.015) and they were
+    // taken out of the score. Writing "elite red-zone work" in the explanation would put
+    // that exact fiction straight back in, in prose, where nobody can audit it. The score
+    // is the projection, the gap to a replacement, the tier, the ADP distance and the
+    // preference sliders - so those are the only things the words may lean on.
+    const BANNED = ['red zone', 'red-zone', 'target', 'carries', 'carry', 'catch rate',
+      'catch%', 'snap', 'touches per', 'touch a game', 'yards per', 'reception', 'drops',
+      'workload', 'elite', 'explosive', 'workhorse', 'breakout', 'efficiency',
+      'last year he', 'last season he'];
+    const dirty = [];
+    for (const [r, e] of all) {
+      const text = [e.rank, e.why, e.change, e.cost, e.prefLine, e.caveat].join(' ').toLowerCase();
+      for (const w of BANNED) if (text.includes(w)) dirty.push(`${r.p.name}: "${w}"`);
+    }
+    ok('no explanation leans on a stat that is not in the score', dirty.length === 0,
+      [...new Set(dirty)].slice(0, 5).join(', '));
+
+    // and it must not claim the guessed cut-offs are precise
+    ok('the fuzzy cut-offs are admitted to be fuzzy',
+      /not measured|fuzzy/i.test(m.EXPLAIN_CAVEAT) && /readable|readability/i.test(m.EXPLAIN_CAVEAT));
+    ok('waiting advice is hedged rather than exact',
+      all.filter(([, e]) => /\bpicks?\b/.test(e.change))
+        .every(([, e]) => /roughly|around|about/i.test(e.change)));
+
+    // a Reach has to say what it costs, in names
+    const reaches = all.filter(([r]) => r.kind === 'reach');
+    ok('the board still produces reaches to check', reaches.length > 0, `${reaches.length}`);
+    ok('a reach says who you would be passing',
+      reaches.every(([, e]) => e.cost && /rates higher/.test(e.cost)));
+
+    // an unrated man gets an explanation that SAYS he is unrated, rather than one invented
+    // for him. This is the failure mode the whole feature invites: a kicker with no stats
+    // is exactly the player a fluent sentence generator will happily make something up for.
+    const kd = all.filter(([r]) => !r.rated);
+    ok('there are unrated players to check', kd.length > 0, `${kd.length}`);
+    ok('an unrated player is told he is unrated, not given an invented reason',
+      kd.every(([, e]) => /nothing (about|worth)|does not pretend|nothing measured/i.test(e.rank)
+        || /nothing measured/i.test(e.why)),
+      kd.slice(0, 1).map(([r, e]) => `${r.p.name}: ${e.rank}`).join(''));
+    ok('an unrated player is never given a preference line about availability',
+      kd.every(([, e]) => !/availability/i.test(e.prefLine || '')));
+
+    // the availability assumption currently set has to be named, because "why did he move"
+    // is nearly always "because you moved something"
+    const rated = all.filter(([r]) => r.rated);
+    ok('the rated players are told which availability assumption is in force',
+      rated.every(([, e]) => /availability/i.test(e.prefLine)));
+    const keen = m.buildBoard(data, { ...st, atPick: at, fit: { td: 0, asc: 0, dur: 80, pen: 0 } });
+    const kr = keen.rows.find((r) => r.rated);
+    const ke = m.explain(kr, at, { ...ctx, st: { ...st, fit: { td: 0, asc: 0, dur: 80, pen: 0 } } });
+    ok('moving the availability slider changes what the explanation says',
+      /asked for availability/i.test(ke.prefLine), ke.prefLine);
+    ok('and the explanation still admits preferences only break ties',
+      /break ties/i.test(ke.prefLine));
+  }
+
   // the snake clock
   ok('snake picks', JSON.stringify(m.myPicks(12, 4, 4)) === '[4,21,28,45]');
   const c = m.draftContext({ teams: 12, rounds: 16 }, 4, 4);

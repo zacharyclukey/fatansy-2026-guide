@@ -1059,6 +1059,235 @@ export function markTiers(rows) {
   return rows;
 }
 
+// ---------------------------------------------------------------- saying why
+// The board has always been willing to tell you WHAT it thinks - Steal, Safe, Swing,
+// Reach, a range of picks, a number - and never once willing to say why. That is fine for
+// someone who built it and useless for anyone else, so every call now comes with a
+// sentence.
+//
+// The hard part is not the writing, it is the honesty. Five years of held-out testing
+// said the projection is the whole edge (+0.25 over last year's points at every position)
+// and that no arrangement of historical stats added anything to it - lift of +0.007,
+// -0.001, +0.002, +0.015. Those stats were removed from the score for that reason. So the
+// explanation is not allowed to reach for them either. "Elite red-zone work" would be a
+// lovely sentence and it would be putting back, in prose, the exact fiction that was just
+// deleted from the maths.
+//
+// What is actually allowed in here, because it is actually what moves the number:
+//   - the projection
+//   - how far that sits above an ordinary man at his position (which is where positional
+//     thinness lives - a thin position IS a big gap to the next man)
+//   - where a tier ends
+//   - the distance between your board and where the room drafts him
+//   - the availability assumption you currently have set
+//   - your preference sliders, and the fact that they only ever break ties
+//
+// And the cut-offs get hedged. The 2.5-point band, the 4-pick slack, the 24-pick reach
+// range, the 45-player cap: every one of those was chosen to make the screen readable,
+// none was fitted to an outcome. The prose says "about" and "roughly" because that is
+// what they are. Nothing here forecasts.
+
+const POS_NOUN = { QB: 'quarterback', RB: 'running back', WR: 'receiver', TE: 'tight end',
+  K: 'kicker', DEF: 'defence' };
+export const posWord = (pos) => POS_NOUN[pos] || pos;
+
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// The sliders currently doing something, named in the words the ratings page uses. This
+// exists so the card can answer "why is HE here and not where he was yesterday" - which is
+// nearly always "because you moved something", and the app should say so rather than let
+// it look like the numbers changed underneath.
+export function activePrefs(r, st = {}, league = null) {
+  const out = [];
+  const leans = st.fit || {};
+  const tilt = st.tilt ?? 0.5;
+
+  // Availability is called out whether or not it is set, because "set to the middle" is
+  // itself an assumption about him and the person should know it is being made.
+  const dur = leans.dur || 0;
+  if (!r.rated) {
+    // no games history worth the name for a kicker, none at all for a defence
+  } else if (dur > 0) {
+    out.push(`you have asked for availability (${dur} of 100), so missed time nudges him down`);
+  } else if (dur < 0) {
+    out.push(`you have told the board to ignore availability (${dur} of 100), so missed `
+      + 'time is not held against him');
+  } else {
+    out.push('your availability setting is at the middle, so games he missed are not '
+      + 'moving him either way');
+  }
+
+  for (const a of FIT_AXES) {
+    if (a.key === 'dur') continue;
+    if (a.needsPenalties && league && !hasPenalties(league)) continue;
+    const v = leans[a.key] || 0;
+    if (!v) continue;
+    out.push(`you leaned "${a.label}" towards ${v > 0 ? a.right : a.left}`);
+  }
+
+  if (r.rated && tilt >= 0.75) out.push('you have the board leaning hard on your own grades');
+  else if (r.rated && tilt <= 0.25) out.push('you have the board leaning on value rather than your grades');
+
+  const px = st.posx?.[r.p.pos];
+  if (px && px !== 1) {
+    out.push(`you put a thumb on ${posWord(r.p.pos)}s (×${(+px).toFixed(2).replace(/0$/, '')})`);
+  }
+  if (r.star) out.push('you starred him, which moves him past anyone he was close to');
+  if (r.fade) out.push('you faded him, which moves him behind anyone he was close to');
+  return out;
+}
+
+// Why he sits at this rank. Projection first, because it is the whole case; then the gap
+// to an ordinary man at his position, because that gap IS what "the position is thin"
+// means; then the tier edge, if he is standing on one.
+export function explainRank(r, ctx = {}) {
+  const pos = posWord(r.p.pos);
+  const pts = Math.round(r.pts);
+  const gap = Math.round(Math.abs(r.vor));
+
+  if (!r.rated) {
+    return `#${r.rank}, and that is the projection on its own — ${pts} points. There is `
+      + `nothing about a ${pos} worth grading, so the board does not pretend to have an `
+      + `opinion on him. Because anyone can pick a decent one up during the season, the `
+      + `${pos} he is measured against is a good one rather than the last one drafted, `
+      + `which is why the board takes ${pos}s later than the room does.`;
+  }
+
+  const lead = r.vor >= 0
+    ? `#${r.rank} because the 2026 projection has him at ${pts} points, about ${gap} more `
+      + `than an ordinary ${pos} you could still get later.`
+    : `#${r.rank} because the 2026 projection has him at ${pts} points — about ${gap} `
+      + `short of an ordinary ${pos} you could still get later, which is why he sits `
+      + 'this low.';
+
+  const thin = r.lastOfTier
+    ? ` He is the last ${pos} at this level: after him the next one is a real step down, `
+      + 'so the position is thin right here.'
+    : ` That gap is where the position comes into it — the thinner his position, the `
+      + 'further the next man is behind him and the more the same projection is worth.';
+
+  const equals = r.equals >= 4
+    ? ` About ${r.equals} other players are close enough on your board that you would be `
+      + 'roughly as happy with any of them.'
+    : '';
+
+  return lead + thin + equals;
+}
+
+// Why the label says what it says. One or two sentences, and it always names the label it
+// is explaining so the sentence can be read on its own.
+export function explainLabel(r, atPick, ctx = {}) {
+  const at = atPick || r.adpRank;
+  const pos = posWord(r.p.pos);
+  const from = r.worthFrom;
+  const to = r.worthTo;
+
+  if (r.kind === 'steal') {
+    return `Steal: your board stops calling him fair value at around pick ${to}, and the `
+      + `draft is already at ${at}. He has fallen past his price — nothing about him has `
+      + 'changed, only what it costs to have him.';
+  }
+  if (r.kind === 'reach') {
+    return `Reach: your board does not have him at fair value until about pick ${from}, `
+      + `and this is pick ${at}. Taking him now costs you men your own board rates higher.`;
+  }
+  if (r.kind === 'safe') {
+    if (!r.rated) {
+      return `Safe: pick ${at} sits inside the range where your board calls him fair `
+        + `value. There is nothing measured about a ${pos} to say more than that, and an `
+        + 'unmeasured player is given the steady label rather than the exciting one.';
+    }
+    return `Safe: pick ${at} sits inside the range where your board calls him fair value, `
+      + `and the projection expects his points to arrive more evenly week to week than `
+      + `they do for most ${pos}s.`;
+  }
+  if (r.kind === 'swing') {
+    return `Swing: pick ${at} sits inside the range where your board calls him fair `
+      + `value, but more of his projected points come in lumps than for most ${pos}s — `
+      + 'and lumps are where the big weeks and the empty ones both come from.';
+  }
+  return `Not yet: your board does not have him at fair value until about pick ${from}, `
+    + 'which is more than a couple of dozen picks off. That is too far away to be worth '
+    + 'calling a reach, so it says nothing rather than guess.';
+}
+
+// What would move it. Almost always "wait", and the number of picks is worth printing
+// because "wait a bit" is not advice.
+export function explainChange(r, atPick) {
+  const at = atPick || r.adpRank;
+  const toSteal = (r.worthTo + SLACK) - at;
+  const toFair = (r.worthFrom - SLACK + 1) - at;
+
+  if (r.kind === 'steal') return 'He stays a Steal for as long as nobody takes him.';
+  if (r.openEnded) {
+    return 'His fair-value range runs on past dozens of players, so he never turns into a '
+      + 'Steal however far he falls. That cap is a readability limit, not a fact about him '
+      + '— a range that wide stops meaning anything.';
+  }
+  if (r.kind === 'reach') {
+    const a = Math.max(1, toFair);
+    const b = Math.max(a + 1, toSteal);
+    return `Wait roughly ${plural(a, 'pick', 'picks')} and he is fair value; roughly `
+      + `${plural(b, 'pick', 'picks')} and he becomes a Steal.`;
+  }
+  if (r.kind === 'safe' || r.kind === 'swing') {
+    return `If he is still sitting there in roughly ${plural(Math.max(1, toSteal), 'pick', 'picks')}`
+      + ', the same man becomes a Steal.';
+  }
+  return `He comes into range at around pick ${Math.max(1, r.worthFrom - SLACK + 1)}.`;
+}
+
+// A Reach has a price and it is not abstract: it is the men you walk past. Naming the
+// best one turns "your board rates others higher" into something you can disagree with.
+export function explainCost(r, ctx = {}) {
+  const rows = ctx.rows || [];
+  const drafted = ctx.drafted || new Set();
+  const above = rows.filter((x) => x.rank < r.rank && x.p.id !== r.p.id && !drafted.has(x.p.id));
+  if (!above.length) return '';
+  const best = above[0];
+  return `You would be passing ${plural(above.length, 'player', 'players')} your board `
+    + `rates higher — ${best.p.name} (${best.p.pos}) first among them.`;
+}
+
+// The bit that keeps this honest. Every number in the sentences above leans on a cut-off
+// somebody chose, and the person reading deserves to know which ones were measured and
+// which were picked to make the screen legible.
+export const EXPLAIN_CAVEAT = 'The cut-offs behind all of this — how close two players '
+  + 'have to be before they count as the same pick, how many picks early counts as early, '
+  + 'how wide a range is too wide to mean anything — were chosen to keep the board '
+  + 'readable. They were not measured against any result, so treat the edges as fuzzy.';
+
+// Everything a card or a tooltip needs, in one call. Never throws: a row with half its
+// fields missing still gets sentences, because a blank explanation is worse than a vague
+// one and this runs on every visible row.
+export function explain(r, atPick, ctx = {}) {
+  const name = { steal: 'Steal', safe: 'Safe', swing: 'Swing', reach: 'Reach' };
+  const label = name[r.kind] || 'Not yet';
+  const rank = explainRank(r, ctx);
+  const why = explainLabel(r, atPick, ctx);
+  const change = explainChange(r, atPick);
+  const cost = r.kind === 'reach' ? explainCost(r, ctx) : '';
+  const prefs = activePrefs(r, ctx.st || {}, ctx.league || null);
+  return {
+    label,
+    rank,
+    why,
+    change,
+    cost,
+    prefs,
+    // one line, because a preference that could move a man twenty places would be
+    // overruling the only thing that measured
+    prefLine: prefs.length
+      ? `Your settings in play: ${prefs.join('; ')}. Preferences only break ties — a few `
+        + 'places at most, never past the projection.'
+      : '',
+    caveat: EXPLAIN_CAVEAT,
+    // short enough for a tooltip: the call, then the way out of it
+    tipLabel: `${why} ${change}`.trim(),
+    tipRank: rank,
+  };
+}
+
 // ---------------------------------------------------------------- planning the draft
 // Everything above this line looks two picks ahead. That is not far enough, and here is
 // the draft that proved it.
