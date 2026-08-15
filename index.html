@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608151624" />
+<link rel="stylesheet" href="styles.css?v=202608151648" />
 </head>
 <body>
 
@@ -241,6 +241,21 @@
     </div>
     <p id="syncMsg" class="setupMsg" hidden></p>
 
+    <h2 class="h2">Follow a mock draft on Sleeper</h2>
+    <p class="lede">Practising in a Sleeper mock? Paste its link here and the board will
+      follow it — the same live picks, the same advice, against real people instead of the
+      practice room. A mock is not one of your leagues, so it arrives as an extra entry in
+      the league dropdown at the top and nothing you already have is touched.</p>
+    <div class="rowbtns">
+      <input id="followUrl" type="text" class="grow"
+        placeholder="https://sleeper.app/draft/nfl/1394053712187506688"
+        aria-label="Sleeper mock draft link" />
+      <button id="followBtn">Follow this draft</button>
+    </div>
+    <p id="followMsg" class="setupMsg" hidden></p>
+    <p class="hint">Then set your draft slot on the Board tab and press <b>Start
+      auto-sync</b> above. It re-reads the picks every eight seconds.</p>
+
     <h2 class="h2">Check it works before draft day</h2>
     <p class="lede">Your drafts have not happened yet, so there are no picks to read. This
       runs the whole sync against a season you have already drafted and reports what it
@@ -261,6 +276,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608151624"></script>
+<script type="module" src="app.js?v=202608151648"></script>
 </body>
 </html>

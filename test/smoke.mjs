@@ -1332,6 +1332,126 @@ const fire = (el, type) => {
   d.querySelector('[data-v="board"]').click();
   await settle();
   ok('picks land on the board', d.querySelectorAll('.row.mine').length === 2);
+
+  // The clock is Sleeper's pick number, not how many players we recognised. Four picks
+  // are in and one of them ('000000') is not on our board, so counting ticked-off rows
+  // gives 3 and the real answer is 8. Getting this wrong makes every "does he come back
+  // to you" question answer for the wrong pick, all draft.
+  // Four picks are in, the last of them pick 19, and one man ('000000') is not on our
+  // board. Counting ticked-off rows says the draft is at pick 4; the truth is pick 20.
+  ok('the clock follows the real pick number, not our tally',
+    /Pick 20\b/.test(d.querySelector('#clockNow').textContent),
+    d.querySelector('#clockNow').textContent);
+}
+
+// ------------------------------------------------------- 6b. following a Sleeper mock
+// A mock draft has no rosters and no league of its own. Everything the board needs has to
+// come out of the draft object and the league it was spun up from.
+{
+  const s = await import(`file://${DIR}/sleeper.js`);
+
+  ok('a pasted link gives up its draft id',
+    s.parseDraftId('https://sleeper.app/draft/nfl/1394053712187506688') === '1394053712187506688');
+  ok('a link with a query string still works',
+    s.parseDraftId('https://sleeper.com/draft/nfl/1394053712187506688?x=1#top') === '1394053712187506688');
+  ok('a bare id is accepted', s.parseDraftId(' 1394053712187506688 ') === '1394053712187506688');
+  ok('a league link is not a draft link', s.parseDraftId('https://sleeper.app/leagues/123456789') === null);
+  ok('nonsense is rejected', s.parseDraftId('hello') === null && s.parseDraftId('') === null);
+
+  // Sleeper spells flex four different ways and none of them is "FLEX".
+  const shape = s.slotsFromSettings({ slots_qb: 1, slots_rb: 2, slots_wr: 2, slots_te: 1,
+    slots_flex: 2, slots_super_flex: 1, slots_k: 1, slots_def: 1, slots_bn: 6, slots_dl: 3 });
+  ok('lineup slots come out of the draft settings',
+    shape.starters.QB === 1 && shape.starters.RB === 2 && shape.starters.TE === 1
+    && shape.bench === 6, JSON.stringify(shape));
+  ok('every flavour of flex counts as flex', shape.starters.FLEX === 3, `${shape.starters.FLEX}`);
+  ok('slots with no projection behind them are dropped, not scored as zero',
+    !('DL' in shape.starters));
+
+  ok('ppr pays a point a catch', s.standardScoring('ppr').rec === 1);
+  ok('half ppr pays half', s.standardScoring('half_ppr').rec === 0.5);
+  ok('standard pays nothing for a catch', s.standardScoring('std').rec === undefined);
+  ok('the fallback still scores yards and touchdowns',
+    s.standardScoring('ppr').rush_td === 6 && s.standardScoring('ppr').pass_yd === 0.04);
+
+  // ---- the whole path, through the UI ---------------------------------
+  sleeperRoutes['/draft/M9'] = {
+    draft_id: 'M9', status: 'pre_draft', draft_order: null,
+    metadata: { name: 'Mock Room', league_id: 'L1', scoring_type: 'ppr' },
+    settings: { teams: 12, rounds: 16, slots_qb: 1, slots_rb: 2, slots_wr: 2, slots_te: 1,
+      slots_flex: 2, slots_k: 1, slots_def: 1, slots_bn: 6 },
+  };
+  sleeperRoutes['/league/L1'] = {
+    name: 'Test League', total_rosters: 12,
+    roster_positions: ['QB', 'RB', 'RB', 'WR', 'WR', 'TE', 'FLEX', 'K', 'DEF', 'BN'],
+    scoring_settings: { rec: 1, rush_yd: 0.1, pass_td: 4, made_up_bonus: 3 },
+  };
+  sleeperRoutes['/draft/M9/picks'] = [];
+
+  const { d } = await boot();
+  d.querySelector('[data-v="setup"]').click();
+  d.querySelector('#followUrl').value = 'https://sleeper.app/draft/nfl/M9';
+  d.querySelector('#followBtn').click();
+  await new Promise((r) => setTimeout(r, 300));
+  const fm = d.querySelector('#followMsg').textContent;
+  ok('a bare id is required to be numeric — a made-up one is refused',
+    /does not look like a Sleeper draft link/.test(fm), fm);
+
+  // now with an id Sleeper would actually issue
+  sleeperRoutes['/draft/1394053712187506688'] = {
+    ...sleeperRoutes['/draft/M9'], draft_id: '1394053712187506688' };
+  sleeperRoutes['/draft/1394053712187506688/picks'] = [];
+  d.querySelector('#followUrl').value = 'https://sleeper.app/draft/nfl/1394053712187506688';
+  d.querySelector('#followBtn').click();
+  await new Promise((r) => setTimeout(r, 400));
+  const fm2 = d.querySelector('#followMsg').textContent;
+  ok('the mock is followed', /Following/.test(fm2), fm2);
+  ok('it says where the scoring came from', /came across from Test League/.test(fm2), fm2);
+  ok('the mock joins the league dropdown',
+    /Mock/.test(d.querySelector('#league').textContent));
+
+  // pre_draft means no picks, and that is not an error - it is the normal state of a mock
+  // you have opened before it fills up.
+  d.querySelector('#syncOnce').click();
+  await new Promise((r) => setTimeout(r, 300));
+  ok('a mock that has not started says so plainly',
+    /has not started yet/.test(d.querySelector('#syncMsg').textContent),
+    d.querySelector('#syncMsg').textContent);
+
+  // In a mock there is no roster_id and an autopick has no picked_by, so the seat is the
+  // only thing that can tell you which picks are yours.
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  const slotBox = d.querySelector('#slot');
+  slotBox.value = '4';
+  fire(slotBox, 'input');
+  await settle();
+  sleeperRoutes['/draft/1394053712187506688/picks'] = [
+    { player_id: players.players[0].id, picked_by: '', roster_id: null, draft_slot: 1, pick_no: 1, round: 1 },
+    { player_id: players.players[1].id, picked_by: '', roster_id: null, draft_slot: 4, pick_no: 4, round: 1 },
+    { player_id: players.players[2].id, picked_by: '', roster_id: null, draft_slot: 7, pick_no: 7, round: 1 },
+  ];
+  d.querySelector('[data-v="setup"]').click();
+  d.querySelector('#syncOnce').click();
+  await new Promise((r) => setTimeout(r, 300));
+  const sm = d.querySelector('#syncMsg').textContent;
+  ok('mock picks read', /3 picks made/.test(sm), sm);
+  ok('your seat is what makes a pick yours', /1 yours/.test(sm), sm);
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  ok('the mock pick lands on the board as yours',
+    d.querySelectorAll('.row.mine').length === 1);
+  ok('the clock reads the mock, not the practice room',
+    /Pick 8\b/.test(d.querySelector('#clockNow').textContent),
+    d.querySelector('#clockNow').textContent);
+
+  // Re-importing your real leagues must not silently drop a mock you are mid-draft in.
+  d.querySelector('[data-v="setup"]').click();
+  d.querySelector('#user').value = 'zclukey';
+  d.querySelector('#importL').click();
+  await new Promise((r) => setTimeout(r, 400));
+  ok('a followed mock survives re-importing your leagues',
+    /Mock/.test(d.querySelector('#league').textContent));
 }
 
 // ---------------------------------------------------------------- 7. offline

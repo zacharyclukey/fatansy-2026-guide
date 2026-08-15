@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain } from './engine.js?v=202608151624';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608151624';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608151624';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608151624';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608151624';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain } from './engine.js?v=202608151648';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608151648';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608151648';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608151648';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608151648';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608151624';
+const BUILD = '202608151648';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -606,6 +606,7 @@ function startMock() {
   st.mock = { league: st.league, slot, disc: +($('#disc')?.value ?? 40),
     seed: Math.floor(Math.random() * 1e6) + 1, log: [], done: false };
   st.picks[st.league] = { drafted: [], mine: [] };
+  if (st.clockAt) delete st.clockAt[st.league];
   lastCols = '';                       // the row buttons change wording during a mock
   advanceMock();
   save();
@@ -725,8 +726,12 @@ function tickClock() {
   const lg = board?.league || data.leagues[st.league];
   // per league: slot 4 in one is not slot 4 in another
   const slot = st.slots?.[st.league] ?? lg?.slot ?? null;
-  // the pick on the clock is simply however many are already off the board, plus one
-  const now = picks().drafted.length + 1;
+  // The pick on the clock is however many are already off the board, plus one - unless a
+  // live sync has told us the real pick number, which is the better answer whenever the
+  // room has taken someone this board does not carry. A practice draft keeps its own log
+  // and must not read a leftover number from a Sleeper draft on the same league.
+  const synced = mock() ? 0 : (st.clockAt?.[st.league] ?? 0);
+  const now = Math.max(picks().drafted.length, synced) + 1;
   clock = draftContext(lg, slot, now);
   const bar = $('#clockBar');
   if (!bar) return;
@@ -753,6 +758,10 @@ function rescore() {
   board = buildBoard(data, {
     ...st,
     mine: picks().mine.map((id) => byId(id)?.pos),
+    // The same men, by id. `mine` is positions and cannot answer "is the man he is standing
+    // behind on MY roster", which is the whole difference between insurance and a lottery
+    // ticket on somebody else's bad luck. See benchWorth in engine.js.
+    mineIds: [...picks().mine],
     // however many are off the board, plus one. Feeding it in here is what makes the
     // Type column move as the draft goes rather than sitting on its pre-draft answer.
     atPick: picks().drafted.length + 1,
@@ -1598,10 +1607,20 @@ async function doImport() {
     const { userId, leagues } = await importLeagues(name, $('#season').value.trim(), data.scoreKeys);
     st.sleeperUser = name;
     st.sleeperId = userId;
-    st.imported = leagues;
-    // a fresh import replaces everything, sample league included
-    data.leagues = leagues;
+    // A fresh import replaces every real league, sample league included - but not a mock
+    // you are following. That is not one of your leagues, it came from a link, and
+    // re-importing would silently drop it mid-draft.
+    const kept = (st.imported || []).filter((l) => l.follow);
+    st.imported = [...leagues, ...kept];
+    data.leagues = [...st.imported];
     st.league = 0;
+    // The kept mocks have moved along the list, so their ticked-off players belong to
+    // whatever league now sits at that index. Clear them rather than mix two drafts up;
+    // an auto-sync puts a live one back within seconds.
+    for (let i = leagues.length; i < data.leagues.length; i++) {
+      st.picks[i] = { drafted: [], mine: [] };
+      if (st.clockAt) delete st.clockAt[i];
+    }
     for (let i = 0; i < data.leagues.length; i++) st.picks[i] ||= { drafted: [], mine: [] };
     save();
     renderChrome();
@@ -1617,25 +1636,87 @@ async function doSync() {
   const lg = data.leagues[st.league];
   if (!lg.draft_id) return msg('#syncMsg', 'This league has no draft on Sleeper yet.', 'bad');
   try {
-    const list = await draftPicks(lg.draft_id, st.sleeperId, lg.rosterId);
-    if (!list.length) return msg('#syncMsg', 'The draft has not started — no picks yet.');
+    const slot = st.slots?.[st.league] ?? lg.slot ?? null;
+    const list = await draftPicks(lg.draft_id, st.sleeperId, lg.rosterId, slot);
+    if (!list.length) {
+      return msg('#syncMsg', lg.follow
+        ? 'That mock has not started yet. Leave auto-sync running and it will pick up the '
+          + 'moment the first pick is made.'
+        : 'The draft has not started — no picks yet.');
+    }
     const known = new Set(data.players.map((p) => p.id));
     const pk = picks();
     let added = 0;
     let skipped = 0;
+    // The pick on the clock is Sleeper's pick_no, NOT how many players we managed to tick
+    // off. Those two are the same number only if every man taken is on our board, and over
+    // sixteen rounds he is not - a deep-bench tight end nobody projects gets skipped here
+    // and the clock silently runs a pick or two behind for the rest of the draft. Which is
+    // the one number the whole recommendation is built on.
+    let upto = 0;
     for (const p of list) {
+      if (p.pick > upto) upto = p.pick;
       if (!known.has(p.playerId)) { skipped += 1; continue; }
       if (!pk.drafted.includes(p.playerId)) { pk.drafted.push(p.playerId); added += 1; }
       if (p.mine && !pk.mine.includes(p.playerId)) pk.mine.push(p.playerId);
     }
+    st.clockAt ||= {};
+    st.clockAt[st.league] = upto;
     save();
     rebuild();
     st.lastSync = Date.now();
     $('#syncClock').textContent = `last synced ${new Date().toLocaleTimeString()}`;
     msg('#syncMsg', `${list.length} picks made, ${added} new, ${pk.mine.length} yours.`
-      + (skipped ? ` ${skipped} not in the player pool — deep bench, safe to ignore.` : ''), 'good');
+      + (skipped ? ` ${skipped} not in the player pool — deep bench, safe to ignore.` : '')
+      + (lg.follow && !slot ? ' Set your draft slot on the Board tab so it knows which '
+        + 'picks are yours.' : ''), 'good');
   } catch (e) {
     msg('#syncMsg', e instanceof SleeperError ? e.message : `Sync failed: ${e.message}`, 'bad');
+  }
+}
+
+// Follow a Sleeper mock draft by its link.
+//
+// A mock arrives as one more league in the dropdown rather than as a mode of its own. That
+// is the whole trick: once it is a league, the board, the clock, the Type column, cost of
+// waiting and the recommendation all work on it without knowing anything has changed.
+async function doFollow() {
+  const id = parseDraftId($('#followUrl').value);
+  if (!id) {
+    return msg('#followMsg', 'That does not look like a Sleeper draft link. It should look '
+      + 'like https://sleeper.app/draft/nfl/1394053712187506688 — open the mock on Sleeper '
+      + 'and copy the address bar.', 'bad');
+  }
+  msg('#followMsg', 'Reading that draft…');
+  try {
+    const lg = await followDraft(id, data.scoreKeys, st.sleeperId);
+    st.imported = [...(st.imported || [])];
+    const at = st.imported.findIndex((l) => l.draft_id === lg.draft_id);
+    if (at >= 0) {
+      // re-following refreshes the settings and keeps whatever is already ticked off
+      st.imported[at] = { ...lg, slot: lg.slot ?? st.imported[at].slot ?? null };
+      st.league = at;
+    } else {
+      st.imported.push(lg);
+      st.league = st.imported.length - 1;
+    }
+    data.leagues = [...st.imported];
+    st.picks[st.league] ||= { drafted: [], mine: [] };
+    st.slots ||= {};
+    if (lg.slot) st.slots[st.league] = lg.slot;
+    save();
+    renderChrome();
+    rebuild();
+    const shape = Object.entries(lg.starters).map(([k, v]) => `${v}${k}`).join(' · ');
+    msg('#followMsg', `Following ${lg.name} — ${lg.teams} teams, ${lg.rounds || '?'} rounds, `
+      + `${shape}. ${lg.scoringFrom
+        ? `Scoring came across from ${lg.scoringFrom}.`
+        : 'Sleeper only publishes one word of scoring for a standalone mock, so the board '
+          + 'is using ordinary scoring — no bonuses, no fines.'} `
+      + `${lg.slot ? `You are in seat ${lg.slot}.` : 'Set your draft slot on the Board tab.'} `
+      + 'Then press Start auto-sync above.', 'good');
+  } catch (e) {
+    msg('#followMsg', e instanceof SleeperError ? e.message : `Could not read it: ${e.message}`, 'bad');
   }
 }
 
@@ -1990,6 +2071,7 @@ function wire() {
   $('#reset').onclick = () => {
     remember('cleared the draft');
     st.picks[st.league] = { drafted: [], mine: [] };
+    if (st.clockAt) delete st.clockAt[st.league];   // or the clock keeps a cleared board's pick number
     st.mock = st.mock?.league === st.league ? null : st.mock;
     lastCols = '';
     save(); renderChrome(); rebuild();
@@ -2046,6 +2128,7 @@ function wire() {
   $('#importL').onclick = doImport;
   $('#syncOnce').onclick = doSync;
   $('#syncAuto').onclick = toggleAuto;
+  $('#followBtn').onclick = doFollow;
   $('#dryBtn').onclick = doDryRun;
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };
 

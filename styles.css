@@ -280,6 +280,8 @@ span.nm:hover { text-decoration: none; }
 }
 .lede { color: var(--ink2); font-size: 14px; max-width: 70ch; margin: 2px 0 18px; }
 .rowbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+/* a pasted draft link is long; let the field take the room rather than scroll inside itself */
+.rowbtns .grow { flex: 1 1 22em; min-width: 0; }
 .fileBtn {
   display: inline-flex; align-items: center; font-size: 14px; font-weight: 500; cursor: pointer;
   border: 1px solid var(--line2); border-radius: var(--r); padding: 0 12px; height: 34px;
