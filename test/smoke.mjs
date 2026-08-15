@@ -112,6 +112,13 @@ const fire = (el, type) => {
   const missing = needed.filter((n) => !exported.includes(n));
   ok('every engine export the app imports still exists', missing.length === 0, missing.join(', '));
 
+  // There must be exactly ONE way to work out what waiting costs. costOfWaiting survived
+  // the planner as the board reading's private sum, and the two disagreed on screen: the
+  // reading said 22 points at receiver while the panel two inches above said 46. Whichever
+  // was right, having both is indefensible, so the loser is deleted rather than fixed.
+  ok('there is only one cost of waiting left in the engine',
+    !exported.includes('costOfWaiting'));
+
   // The drift runs BOTH ways, and this list only ever guarded one of them. RAW_FIELDS,
   // unusedStats and influence sat in it for weeks after the page that used them was
   // deleted - so the suite was actively insisting that ninety lines of dead engine stay
@@ -855,6 +862,51 @@ const fire = (el, type) => {
       `${res.cost[0].pos} ${res.cost[0].loss}`);
     ok('nothing is ever priced better than the recommendation',
       res.cost.every((c) => c.loss >= 0));
+
+    // ---- a flex pick IS a receiver ------------------------------------------
+    // From a live practice draft: slot 7, pick 7, and the panel said "Take RB Jonathan
+    // Taylor — waiting costs about 14 at running backs and 46 at receivers", with a pill
+    // beside it saying starting at receiver instead cost 1. Two numbers for the same
+    // question, and the loud one argued for the position it was not recommending.
+    //
+    // The cause: the winning plan read "RB now, RB at 18, flex at 31, TE at 42, QB at 55",
+    // and the flex takes a receiver. Keyed by SLOT there was no receiver anywhere in that
+    // branch, so waiting on receivers got priced at pick 55 - the far end of the plan -
+    // while running backs were priced at pick 18. A cost measured forty picks later is not
+    // a comparison, it is a different question.
+    {
+      const strat = await import(`file://${DIR}/strategies.js`);
+      const real = players.leagues.find((x) => (x.starters?.FLEX || 0) > 0) || lg;
+      const bb2 = m2.buildBoard(JSON.parse(JSON.stringify(players)),
+        { ...m2.DEFAULT_SETTINGS(players), mine: [] });
+      const pool = bb2.rows.filter((r) => m2.inLeague(r.p, real));
+      const off = new Set(pool.slice(0, 6).map((r) => r.p.id));
+      const c7 = m2.draftContext(real, 7, 7);
+      const r7 = m2.planDraft(pool, c7, off, real, {}, { candidates: 10 });
+      const flex = r7.top.steps.find((s) => s.slot === 'FLEX' && s.take);
+      ok('the winning plan really does cover a position through the flex',
+        !!flex, r7.top.steps.map((s) => `${s.slot}[${s.take?.p.pos}]`).join(' '));
+      if (flex) {
+        const cov = r7.cost.find((c) => c.pos === flex.take.p.pos);
+        ok('so waiting on that position is priced where the flex lands, not at the far end',
+          Math.abs(cov.wait - flex.value) < 0.001,
+          `wait ${cov.wait.toFixed(1)}, flex ${flex.value.toFixed(1)}, `
+          + `far end ${r7.drop[cov.pos].later.toFixed(1)}`);
+        ok('and the fixture reproduces the bug - the far end really is much worse',
+          r7.drop[cov.pos].later < flex.value - 8,
+          `${r7.drop[cov.pos].later.toFixed(1)} vs ${flex.value.toFixed(1)}`);
+        ok('the position it covers is named as covered, with the pick',
+          cov.at === flex.pick, `${cov.at} vs ${flex.pick}`);
+      }
+      // and the two readouts now quote one number each, from the same field
+      const lean = strat.suggestLean(r7.cost.map((c) => ({ pos: c.pos, cost: c.gap })));
+      ok('the board reading quotes the plan\'s own cost of waiting',
+        lean.why.includes(`${r7.cost.find((c) => c.pos === 'RB').gap.toFixed(0)} points at running back`)
+        && lean.why.includes(`${r7.cost.find((c) => c.pos === 'WR').gap.toFixed(0)} points at receiver`),
+        lean.why);
+      ok('and it describes the draft rather than ordering a pick',
+        !/can wait|hammer|fade/i.test(lean.why), lean.why);
+    }
 
     // ---- and the turn case is unchanged ------------------------------------
     // Slot 1 at pick 24: your next pick is the very next one, so almost everyone comes

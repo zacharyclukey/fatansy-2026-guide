@@ -1,12 +1,12 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608141502';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608141502';
-import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608141502';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608141502';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608141502';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED } from './engine.js?v=202608150903';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608150903';
+import { importLeagues, draftPicks, dryRun, SleeperError } from './sleeper.js?v=202608150903';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608150903';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608150903';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608141502';
+const BUILD = '202608150903';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -361,8 +361,10 @@ function recommendation(drafted, have) {
   //    starting slot you still need, and takes whoever leaves the best roster. See the
   //    long note above planDraft in engine.js for the draft that forced it.
   //
-  // costOfWaiting is still here for the board reading and the strategy blurbs, but it no
-  // longer decides anything: the panel's numbers and the panel's pick come from one sum.
+  // costOfWaiting is gone. It survived as a second sum feeding the board reading, and a
+  // second sum is exactly what this panel keeps getting caught doing: it printed "waiting
+  // costs 22 at receiver" directly under a panel printing 46 for the same phrase. One
+  // calculation now answers every question on this screen.
   const res = planDraft(board.rows, clock, drafted, board.league, have,
     { candidates: 10, horizon: PLAN_HORIZON });
   if (!res?.plan?.length) return null;

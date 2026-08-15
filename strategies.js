@@ -98,8 +98,17 @@ export function activeLean(st) {
 //
 // The right question was already being answered elsewhere: cost of waiting. It is not
 // "which position is deeper in the abstract" but "which position will still have someone
-// comparable when I next pick" - which depends on your slot and on who has gone. So the
-// lean is read straight off that, and it only appears once the app knows your draft slot.
+// comparable when I next pick" - which depends on your slot and on who has gone.
+//
+// It is now fed the planner's own cost of waiting - the same field the recommendation and
+// its pills use - rather than a separate sum of its own. Two sums meant two answers to the
+// same English sentence sitting one above the other on screen, and this one lost: it said
+// "receivers are the scarce thing, so backs can wait" directly beneath "Take RB".
+//
+// It is also worded as a shape, not an instruction. This box describes the whole draft
+// ahead of you; the panel above it decides the pick in front of you, with more information
+// than a two-position comparison has. When they point different ways the panel is right,
+// so this must not read like a competing order.
 export function suggestLean(costs) {
   if (!costs?.length) return null;
   const by = Object.fromEntries(costs.map((c) => [c.pos, c]));
@@ -116,11 +125,12 @@ export function suggestLean(costs) {
   }
   if (gap >= 8) {
     return { key: 'robustrb',
-      why: `${both}. Backs are the ones that will not come back to you.` };
+      why: `${both}. Backs are thinning faster, so expect your early picks to go there.` };
   }
   if (gap <= -8) {
     return { key: 'zerorb',
-      why: `${both}. Receivers are the scarce thing right now, so backs can wait.` };
+      why: `${both}. Receivers are thinning faster, so expect to spend more of your early `
+        + `picks there — pick by pick, follow the panel above.` };
   }
   return { key: 'none', why: `${both}. Close enough that you should just take the better player.` };
 }

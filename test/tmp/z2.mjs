@@ -18,3 +18,7 @@ console.log('drop', Object.entries(res.drop).map(([k,v])=>`${k} ${v.now.toFixed(
 const win=res.plan[0], riv=res.plan.find(c=>c.row.p.pos===res.cost.find(x=>x.pos!==res.top.row.p.pos).pos);
 console.log('winner fill', JSON.stringify(win.fill,null,0).replace(/\.\d+/g,''));
 console.log('rival ', riv.row.p.name, 'fill', JSON.stringify(riv.fill).replace(/\.\d+/g,''));
+console.log('\n--- what the panel and the lean now say ---');
+const s = await import(`file://${DIR}/strategies.js`);
+for (const c of res.cost) console.log(`  ${c.pos}: best ${c.now.toFixed(1)} -> wait ${c.wait.toFixed(1)} = costs ${c.gap.toFixed(0)}  | start elsewhere loses ${c.loss.toFixed(1)}${c.at?`  (covered at pick ${c.at})`:''}`);
+console.log('  LEAN:', JSON.stringify(s.suggestLean(res.cost.map(c=>({pos:c.pos,cost:c.gap})))));
