@@ -2350,6 +2350,160 @@ const fire = (el, type) => {
   ok('none of it threw', errs.length === 0, errs.join(' | '));
 }
 
+// -------------------------------------------- 11b. what the panel calls a mistake
+// The bug this exists to keep fixed: the board took a man twenty picks before the room
+// would have, BECAUSE it rated him higher, and then the report called that same pick a
+// reach. One fact - "we like him more than the market" - counted twice, once as the reason
+// and once as the crime. The app was arguing with itself in front of the person using it.
+//
+// So the four cases below are the definition, in arithmetic, with the odds handed in
+// rather than read off an ADP curve. `pickShot` needs a planDraft result, and a planDraft
+// result is four fields, so they are written out here by hand: what matters is the
+// verdict, not where the totals came from.
+{
+  const e = await import(`file://${DIR}/engine.js`);
+  const man = (id, name, adp, rank, score) => ({ p: { id, name, pos: 'WR', adp }, rank, score });
+  // ADP is chosen so the survival curve answers the question each case needs. At pick 10
+  // with the next pick at 22: an ADP of 90 lasts easily, an ADP of 12 does not.
+  const SAFE = 90;
+  const DOOMED = 12;
+  const clock = { currentPick: 10, target: 22 };
+  const res = (rows) => ({ plan: rows });
+
+  // 1. Taken well before the room would take him - and he was not going to last. The old
+  //    panel called this a reach on the ADP gap alone. It is not one: nobody was lost.
+  {
+    const you = man('a', 'Your Guy', DOOMED, 1, 90);
+    const v = e.pickCost(e.pickShot(res([{ row: you, total: 300 }]), 'a', clock));
+    ok('a man taken before his ADP who would not have lasted is not a reach',
+      v.kind !== 'wasted', v.kind);
+    ok('and taking the top of your own board costs zero points', v.points === 0
+      && v.kind === 'top', `${v.kind} / ${v.points}`);
+  }
+
+  // 2. The real error. You took a man who was going nowhere, and the man your own board
+  //    rated higher went to somebody else while you did it.
+  {
+    const kept = man('a', 'Would Have Kept', SAFE, 40, 20);
+    const gone = man('b', 'Gone By Then', DOOMED, 5, 60);
+    const v = e.pickCost(e.pickShot(res([{ row: gone, total: 320 },
+      { row: kept, total: 300 }]), 'a', clock));
+    ok('a pick that lost you a player IS a reach', v.kind === 'wasted', v.kind);
+    ok('and it names both men', /Would Have Kept/.test(v.why) && /Gone By Then/.test(v.why),
+      v.why);
+    ok('and puts a number on what it cost', v.points === 20, `${v.points}`);
+  }
+
+  // 3. Below the top of the board, but the better man was going anyway - so there was
+  //    nothing to wait for and nothing was lost. Not a reach, and it must not read as one.
+  {
+    const took = man('a', 'Took Him', DOOMED, 40, 20);
+    const better = man('b', 'Also Doomed', DOOMED, 5, 60);
+    const v = e.pickCost(e.pickShot(res([{ row: better, total: 320 },
+      { row: took, total: 300 }]), 'a', clock));
+    ok('going below the top of your board is not automatically a reach',
+      v.kind !== 'wasted', v.kind);
+    ok('but the points given up are still reported', v.points === 20, `${v.points}`);
+  }
+
+  // 4. Two men a coin flip apart. The panel must not manufacture a criticism to fill space.
+  {
+    const took = man('a', 'Took Him', SAFE, 6, 58);
+    const other = man('b', 'The Other', SAFE, 5, 60);
+    const v = e.pickCost(e.pickShot(res([{ row: other, total: 301 },
+      { row: took, total: 300 }]), 'a', clock));
+    ok('a pick a point off the top costs nothing', v.points === 0 && v.kind === 'fine',
+      `${v.kind} / ${v.points}`);
+  }
+
+  // 5. No record of the pick - an old saved draft, or one ticked off before the app was
+  //    watching. It has to say so rather than invent a verdict.
+  ok('a pick with no record says so', e.pickCost(null).kind === 'unknown');
+
+  // 6. ADP survives as information and never as the scorer.
+  const mkt = e.marketNote({ adp: 90, at: 10 });
+  ok('the market note reads as a disagreement, not a verdict',
+    /rated him higher/.test(mkt) && !/reach/i.test(mkt), mkt);
+}
+
+// ------------------------------- 11c. the app must never call its own advice a mistake
+// The whole draft, played by the app following its own recommendation on every pick, with
+// the report then read back. If the panel calls any of those picks a reach, the app is
+// contradicting itself - which is the bug. It is also the only test here that exercises
+// the real board, the real clock and the real plan end to end.
+{
+  const e = await import(`file://${DIR}/engine.js`);
+  const R = e.roundsOf(e.SAMPLE_LEAGUE);
+  for (const slot of [1, 12]) {
+    const { d, errs } = await boot();
+    d.querySelector('[data-v="mock"]').click();
+    await settle();
+    d.querySelector('#mockSlot').value = String(slot);
+    d.querySelector('#mockAll').click();
+    await settle();
+    d.querySelector('[data-v="mock"]').click();
+    await settle();
+
+    const rows = [...d.querySelectorAll('#mockOut .row.costPick:not(.head)')];
+    ok(`slot ${slot}: every pick is on the report`, rows.length === R, `${rows.length}`);
+    // STEP 3, asked for by name: where WE rated him, on every row, beside the room's price.
+    const ranked = rows.filter((r) => /^#\d+/.test(r.querySelector('.ourRk').textContent.trim()));
+    ok(`slot ${slot}: every row shows our own rank`, ranked.length === rows.length,
+      `${ranked.length} of ${rows.length}`);
+    ok(`slot ${slot}: and the score beside it`,
+      rows.every((r) => /·\s*-?\d/.test(r.querySelector('.ourRk').textContent)),
+      rows[0]?.querySelector('.ourRk')?.textContent);
+
+    // the self-contradiction, in one assertion
+    const blamed = rows.filter((r) => /cost you a player/.test(r.querySelector('.cost').textContent));
+    ok(`slot ${slot}: the app never calls its own pick a reach`, blamed.length === 0,
+      blamed.map((r) => r.querySelector('.nm').textContent.trim()).join(', '));
+    // and it must not go the other way either - "nothing went wrong" has to be said out loud
+    ok(`slot ${slot}: the summary says so in plain words`,
+      /No pick of yours was spent on a man who was going to be there anyway/
+        .test(d.querySelector('#mockOut').textContent));
+    ok(`slot ${slot}: nothing threw`, errs.length === 0, errs.join(' | '));
+  }
+}
+
+// ------------------------------- 11d. and it must still be able to say something went wrong
+// The danger in 11c is a panel that has learned to say "fine" about everything. So: start a
+// practice draft and deliberately take a man a long way down the board, then read the cost
+// view on the My team tab - which is the other place it renders, and the one Zach's fiancee
+// is most likely to be looking at.
+{
+  const { d } = await boot();
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockSlot').value = '6';
+  d.querySelector('#mockStart').click();
+  await settle();
+  // the 60th man available, which is nobody's idea of the best pick on the board
+  const rows = [...d.querySelectorAll('.row.player:not(.drafted)')];
+  rows[59].querySelector('[data-m]').click();
+  await settle();
+
+  d.querySelector('[data-v="roster"]').click();
+  await settle();
+  const row = d.querySelector('#costPicks .row.costPick:not(.head)');
+  ok('the My team cost view lists the pick', !!row);
+  ok('it shows where our own board had him',
+    /^#\d+/.test(row?.querySelector('.ourRk')?.textContent?.trim() || ''),
+    row?.querySelector('.ourRk')?.textContent);
+  ok('and a deep pick is not waved through as fine',
+    /left on the table|cost you a player|paid to make sure/i
+      .test(row?.querySelector('.cost')?.textContent || ''),
+    row?.querySelector('.cost')?.textContent);
+  ok('and it names the better man rather than just scolding',
+    /\w/.test(row?.querySelector('.costWhy')?.textContent || '')
+    && !/ADP/.test(row?.querySelector('.costWhy')?.textContent || ''),
+    row?.querySelector('.costWhy')?.textContent?.slice(0, 120));
+  ok('the summary counts the points left behind',
+    /Points left behind/.test(d.querySelector('#cost').textContent));
+  // the whole point: no jargon anywhere in the panel
+  ok('the cost view never says ADP', !/\bADP\b/.test(d.querySelector('#v-roster').textContent));
+}
+
 // ---------------------------------------------------- 12. draft night without a mouse
 // A name is called every thirty seconds. Finding that row with a mouse and clicking Gone
 // is what makes people stop tracking in round four, at which point the board is a lie and

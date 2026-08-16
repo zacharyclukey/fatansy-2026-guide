@@ -1640,6 +1640,33 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
   const bench = !slots.length;
   if (bench) slots = ['ANY'];
 
+  // And you are ALREADY drafting a bench when the only starting slots left are the kicker
+  // and the defence, because the app will not spend this pick on either of them - see the
+  // rule in autoPick, which has always been "a kicker and a defence go last, always".
+  //
+  // Without this the panel had nothing else to offer. `wanted` is built from the open
+  // slots, so from the moment the last real starter was filled the ONLY men the plan would
+  // consider were kickers and defences: the advice panel said "Take DEF LAR Defense" on six
+  // consecutive picks of a fifteen-round draft while the auto-drafter, following the rule,
+  // quietly took receivers instead. The app was giving advice it would not take itself, and
+  // the cost view - which grades a pick against the best the plan could see - then read the
+  // difference back as a hundred-point mistake on every bench pick.
+  //
+  // Charging the kicker is not skipped, only deferred: the streamed slots stay in the list
+  // and the tail pays for them at the far end, which is where they will really be filled.
+  // The ANY slot goes on the END, not the front. `slots.findIndex(slotTakes)` decides which
+  // slot a candidate is filling, and ANY matches everybody - put it first and a defence
+  // fills the ANY slot while the plan still schedules a second defence for the DEF slot,
+  // which prices him twice and hands him the recommendation all over again.
+  // Counted BEFORE the ANY slot is added, because this is "how many starting slots are
+  // still empty" and a bench spot is not one. Adding ANY first made the count one too high
+  // and quietly turned the streamed rule off for the last pick but one.
+  const leftToPick = clock.picks.filter((p) => p >= at).length;
+  const openCount = slots.length;
+  if (!bench && leftToPick > openCount && slots.every((s) => STREAMED.includes(s))) {
+    slots = [...slots, 'ANY'];
+  }
+
   // one bucket per position, best first, so the rollout never re-filters the whole board.
   // 25 deep is plenty: the expectation walk below multiplies by the chance everyone above
   // has gone, which is under a thousandth long before the twenty-fifth man.
@@ -1762,10 +1789,37 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
   // whole point - the case above turns on an elite quarterback who sat below ten better
   // players, so any candidate list cut purely by score would never have seen him.
   const wanted = new Set(slots.flatMap(posFor));
-  const cands = live.filter((r) => wanted.has(r.p.pos)).slice(0, opts.candidates ?? 10);
+  let cands = live.filter((r) => wanted.has(r.p.pos)).slice(0, opts.candidates ?? 10);
   for (const pos of wanted) {
     const b = (byPos.get(pos) || [])[0];
     if (b && !cands.includes(b)) cands.push(b);
+  }
+  // A kicker and a defence go last, always. This is not a new rule - autoPick has enforced
+  // it since the day it was written, because a starting kicker really is worth more than
+  // the sixtieth receiver and he is also still going to be there in round fifteen.
+  //
+  // It is enforced HERE now, where the advice is made, rather than only there, where the
+  // pick is made. The two disagreed, and the disagreement was not small: from the moment
+  // the last real starting slot was filled, `wanted` contained nothing but K and DEF, so
+  // the panel told Zach to "Take DEF LAR Defense" on six consecutive picks of a fifteen-
+  // round draft while the auto-drafter, following the rule, quietly took receivers. The
+  // app was giving advice it would not take itself. Everything downstream inherited it:
+  // autoPick fell through to raw board order because the man it was handed was illegal,
+  // and the cost view then read the gap between the two back as a mistake by Zach.
+  //
+  // The test is autoPick's own: once your remaining picks are down to the slots you still
+  // have to fill, they go on the table. Not before.
+  if (openCount < leftToPick) {
+    const real = cands.filter((r) => !STREAMED.includes(r.p.pos));
+    if (real.length) cands = real;         // never leave the plan with nothing to say
+  }
+  // The other rule autoPick enforces and the plan did not know about: nobody carries five
+  // tight ends. Left out, the plan named a third quarterback on the last skill pick of
+  // every draft, autoPick refused him, and the pick fell through to raw board order - which
+  // is the same self-disagreement as the kicker one, one pick further down.
+  if (opts.caps) {
+    const under = cands.filter((r) => (have[r.p.pos] || 0) < (opts.caps[r.p.pos] ?? 99));
+    if (under.length) cands = under;
   }
   // `must` names men who have to be priced whatever the shortlist thinks of them. Only one
   // caller wants this: the cost view, which has to know what the plan made of the man you
@@ -1904,10 +1958,21 @@ const r1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
 // question "who else could you have had" has no answer.
 //
 // `res` is a planDraft result that priced the man taken - pass his id in opts.must.
-export function pickShot(res, id, clock) {
+//
+// `opts.skipStreamed` drops kickers and defences from the list of men you are held against.
+// This is not the panel being kind. The app has one hard rule about them, stated in autoPick
+// and never broken - "a kicker and a defence go last, always", because they are not going
+// anywhere - and it would be dishonest to mark a pick down against an alternative the app
+// itself refuses to make. It matters because the plan prices a deep bench receiver at MINUS
+// seventy (he almost never reaches your lineup) and a starting defence at plus eight, so
+// without this every bench pick in the draft reads as an eighty-point disaster.
+export function pickShot(res, id, clock, opts = {}) {
   if (!res?.plan?.length) return null;
   const me = res.plan.find((c) => c.row.p.id === id);
   if (!me) return null;
+  // the man taken is always in the pool, whoever he is - you cannot grade a pick without him
+  const pool = res.plan.filter((c) => c.row.p.id === id
+    || !(opts.skipStreamed && STREAMED.includes(c.row.p.pos)));
   const now = clock?.currentPick ?? null;
   const next = clock?.target ?? null;
   const keepOf = (row) => (next ? availability(row.p.adp, next, now) : null);
@@ -1917,13 +1982,13 @@ export function pickShot(res, id, clock) {
   // The best man you also wanted who probably would NOT have been there next time. Read
   // off the plan, so "wanted" means the app wanted him too, not merely that he was famous.
   let lost = null;
-  for (const c of res.plan) {
+  for (const c of pool) {
     if (c.total <= me.total) continue;
     const p = keepOf(c.row);
     if (p == null || p >= PROBABLE) continue;
     if (!lost || c.total > lost.total) lost = c;
   }
-  const top = res.plan[0];
+  const top = pool[0];                       // pool keeps planDraft's order, best first
   return {
     at: now,
     next,
@@ -1957,8 +2022,8 @@ export function pickCost(shot) {
 
   if (!top) {
     return { kind: 'top', points: 0, head: 'Nothing better was there',
-      why: `He was the top of your board at that pick. You cannot do better than the best `
-        + `man you have, so this cost you nothing at all.` };
+      why: 'He was the top of your own board when you took him, so this pick left nothing '
+        + 'behind.' };
   }
   if (gap < STAR_BAND) {
     return { kind: 'fine', points: 0, head: 'As good as anything left',

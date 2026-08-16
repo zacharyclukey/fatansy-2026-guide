@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote } from './engine.js?v=202608160744';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote } from './engine.js?v=202608160810';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608160744';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608160744';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608160744';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608160744';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608160810';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608160810';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608160810';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608160810';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608160744';
+const BUILD = '202608160810';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -444,8 +444,10 @@ function recommendation(drafted, have) {
   // second sum is exactly what this panel keeps getting caught doing: it printed "waiting
   // costs 22 at receiver" directly under a panel printing 46 for the same phrase. One
   // calculation now answers every question on this screen.
+  // The caps go in so the panel cannot name a man the app itself would refuse to draft -
+  // a third quarterback, a fifth tight end. One recommendation, one set of rules.
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON });
+    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league) });
   if (!res?.plan?.length) return null;
 
   const top = { pos: res.top.row.p.pos, best: res.top.row, total: res.top.total };
@@ -691,8 +693,14 @@ function stampShot(id) {
     if (p) have[p.pos] = (have[p.pos] || 0) + 1;
   }
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON, must: [id] });
-  const shot = pickShot(res, id, clock);
+    { candidates: 10, horizon: PLAN_HORIZON, must: [id], caps: capsOf(board.league) });
+  // The same rule autoPick follows, worked out the same way: until your remaining picks are
+  // down to the slots you still have to fill, a kicker and a defence are not on the table.
+  // The cost view must not hold a pick against a man the app would have refused to take.
+  const roster = picks().mine.map((x) => byId(x)).filter(Boolean);
+  const left = roundsOf(board.league) - roster.length;
+  const forced = needsOf(roster, board.league).total >= left;
+  const shot = pickShot(res, id, clock, { skipStreamed: !forced });
   if (!shot) return;
   // Kept outside st.picks on purpose: a practice draft rebuilds that object wholesale from
   // its log on every pick, and the records would go with it.
@@ -2051,7 +2059,7 @@ function renderLean() {
   // "receivers are the scarce thing, so backs can wait" immediately below "Take RB".
   // Same field the pills and the reason sentence use now.
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON });
+    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league) });
   if (!res) { box.innerHTML = ''; return; }
   const s = suggestLean(res.cost.map((c) => ({ pos: c.pos, cost: c.gap })));
   const on = activeLean(st) || 'custom';
