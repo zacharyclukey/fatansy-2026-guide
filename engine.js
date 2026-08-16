@@ -22,6 +22,10 @@ export const DEFAULT_SETTINGS = (data) => ({
   fit: { td: 0, asc: 0, dur: 0, pen: 0 },
   fitExtra: {},       // extra scoring keys you have added to a point-based axis
   fitOn: true,
+  // How much time you assume players miss. See DUR_ANCHORS. Defaults to the middle stop,
+  // which is what the app silently assumed before the dial existed, so nobody's board
+  // moves on the day this shipped.
+  durAnchor: DUR_DEFAULT,
   need: 8,            // draft-score bonus for a position you still need
   style: 50,          // 0 = safest floor, 100 = highest ceiling
   rookie: true,       // pay up for rookies you trust
@@ -284,16 +288,48 @@ export function ascent(p) {
 // missed - per-game accuracy is fine. Projections quietly assume a full year.
 //
 // But WHICH assumption is right for a given man is genuinely unknown, so this is a dial
-// rather than a fixed haircut:
-//
-//   risk-accepting  -> assume he plays the full season, like the raw projection does
-//   middle          -> assume he plays what his position typically plays
-//   injury-averse   -> assume he plays what HE has played
-//
-// Nobody can tell you which is true. What the app can do is show you the number each
-// assumption produces and let you pick the one you are willing to be wrong about.
+// rather than a fixed haircut. Nobody can tell you which setting is true. What the app can
+// do is show you the number each assumption produces and let you pick the one you are
+// willing to be wrong about.
 export const FULL_GAMES = 17;
 export const DRAFTABLE = 36;
+
+// The dial, in four stops, written out for the first time. It was described in this
+// comment for weeks and never actually existed: `availableShare` quietly hardcoded the
+// middle one, so the "assumption you have set" that the explanations kept referring to was
+// not settable. It is now.
+//
+// The stops are not four severities of the same question. `typical` and `own` are
+// genuinely DIFFERENT questions - one asks what an average draftable man plays, the other
+// asks what THIS man played - and for a durable player they point opposite ways. Only the
+// two ends are ordered: `full` is the most optimistic reading available and `cautious` the
+// least, because it refuses to give anybody the benefit of the doubt in either direction.
+//
+// Every stop is computed off the shipped data. None of them is a fitted number and none
+// forecasts: this is a question about what YOU are willing to assume, and the app's whole
+// job is to price the consequences of your answer rather than to answer for you.
+export const DUR_ANCHORS = [
+  { key: 'full', short: 'Nobody gets hurt',
+    label: 'Assume everyone plays all 17 games',
+    blurb: 'Take every projection exactly as it is published. This is the most optimistic '
+      + 'reading there is, and it is the one the raw numbers already make.' },
+  { key: 'typical', short: 'An average amount of time missed',
+    label: 'Assume everyone misses what a typical player misses',
+    blurb: 'The average draftable player over the last six years, measured off this data '
+      + 'file rather than assumed.' },
+  { key: 'own', short: 'As much time as he missed last year',
+    label: 'Assume everyone misses what he himself missed',
+    blurb: 'Games played repeat year to year, but only weakly (0.27 at back, 0.29 at '
+      + 'receiver, 0.31 at tight end, 0.56 at quarterback). A lean, not a law. A man with '
+      + 'no last season counts as average rather than as a risk.' },
+  { key: 'cautious', short: 'The gloomiest of the two',
+    label: 'Assume the worse of those two, for everybody',
+    blurb: 'Nobody gets the benefit of the doubt: a player who has missed time is assumed '
+      + 'to keep missing it, and one who has not is still only assumed to be average.' },
+];
+export const DUR_DEFAULT = 'typical';
+export const durAnchor = (key) => DUR_ANCHORS.find((x) => x.key === key)
+  || DUR_ANCHORS.find((x) => x.key === DUR_DEFAULT);
 
 export function positionGames(players, depth = DRAFTABLE) {
   const byPos = {};
@@ -321,6 +357,41 @@ export function ownGames(p, games) {
     return Math.max(0, Math.min(FULL_GAMES, p.m.games_2025));
   }
   return games.pos?.[p.pos] ?? games.league ?? FULL_GAMES;
+}
+
+// How many games ONE man is assumed to play, under the stop you have the dial set to.
+// This is the only place the four anchors turn into a number, so everything downstream -
+// the handcuff price, the pooled availability, the words on the card - moves together and
+// cannot disagree with itself.
+export function expectedGames(p, games, anchor = DUR_DEFAULT) {
+  // A kicker cannot pull a hamstring in any way this data would record, and a defence
+  // cannot get hurt at all. They have no availability signal, so no anchor may invent one
+  // for them - the same call injuryGap already makes, for the same reason.
+  if (!RATE_POS.includes(p.pos)) return FULL_GAMES;
+  const typical = games?.league ?? FULL_GAMES;
+  const own = ownGames(p, games);
+  const clamp = (g) => Math.max(0, Math.min(FULL_GAMES, g));
+  if (anchor === 'full') return FULL_GAMES;
+  if (anchor === 'own') return clamp(own);
+  if (anchor === 'cautious') return clamp(Math.min(own, typical));
+  return clamp(typical);
+}
+
+// The same question asked of the POOL rather than of a man: across draftable players, what
+// share of a season is one of them available for? This is what decides how often the men
+// ahead of somebody on YOUR bench are all unavailable at once, which is a different
+// population from any single starter and so deserves its own number.
+//
+// Averaged over the real pool rather than reasoned about, because for `cautious` there is
+// no closed form - it is the mean of a per-man minimum - and guessing at it would be
+// exactly the invented constant the rest of this file refuses to carry.
+export function poolAvailable(players, games, anchor = DUR_DEFAULT) {
+  if (anchor === 'full') return 1;
+  const list = (players || []).filter((p) => RATE_POS.includes(p.pos)
+    && p.m && p.m.has2025 && p.m.games_2025 != null);
+  if (!list.length) return availableShare(games, anchor);
+  const mean = list.reduce((a, p) => a + expectedGames(p, games, anchor), 0) / list.length;
+  return Math.max(0.05, Math.min(1, mean / FULL_GAMES));
 }
 
 // THE POINTS AT RISK. Not a new projection - the distance between the projection as
@@ -658,8 +729,16 @@ export function buildBoard(data, st, cache) {
   const inLeaguePlayers = data.players.filter((p) => inLeague(p, league));
   const shares = flexShares(inLeaguePlayers, league);
   const slots = startableSlots(league, shares);
-  const avail = availableShare(pg);
-  const chart = depthChart(inLeaguePlayers, league);
+  // The availability assumption you have set, reaching the two places it belongs: the pool
+  // (how often the men ahead of somebody on your bench are all out at once) and each
+  // individual starter (how long his backup's job is open). Same dial, two populations.
+  const anchor = st.durAnchor || DUR_DEFAULT;
+  const avail = poolAvailable(inLeaguePlayers, pg, anchor);
+  const byId = new Map(inLeaguePlayers.map((p) => [p.id, p]));
+  const chart = new Map();
+  for (const [id, hc] of depthChart(inLeaguePlayers, league)) {
+    chart.set(id, handcuffValue(hc, repl, pg, byId.get(hc.leadId), anchor));
+  }
   const mineIds = new Set(st.mineIds || []);
   const queue = {};                     // how many of each position you already own
   for (const q of st.mine || []) queue[q] = (queue[q] || 0) + 1;
@@ -700,7 +779,23 @@ export function buildBoard(data, st, cache) {
       // replacement levels sit within three points of each other here: RB 125, WR 128,
       // TE 127) keeps it continuous with the men who are filling a real slot.
       const fillsSlot = (queue[p.pos] || 0) < (slots[p.pos] ?? 1);
-      const benchVor = fillsSlot ? lineup - (repl[p.pos] || 0) : lineup - benchBar;
+      const plainVor = fillsSlot ? lineup - (repl[p.pos] || 0) : lineup - benchBar;
+      // And the one case that shared bar cannot price. A handcuff's gross worth is small
+      // because he is projected low by definition, so subtracting a starting back's
+      // replacement level from it buries him beneath men who will never reach your lineup -
+      // the exact fault this whole section was written to fix, reappearing one step later.
+      // His `gain` is already net of what you would otherwise have started, so it is
+      // compared against the bar rather than run through it. Whichever reading is kinder to
+      // him wins, because both are true statements about the same player and the board
+      // should take the better of them rather than the first one written.
+      //
+      // The guard is not tidiness. Written as a plain Math.max against zero it also floored
+      // everybody ELSE at zero, and below replacement this board deliberately keeps an
+      // ordered band rather than a floor - clamping there once put 142 of 259 players on the
+      // same score. The simulator caught it immediately: with the band flattened the room
+      // could no longer tell one bench receiver from another and reached 49 picks early for
+      // one. Only a man with something to inherit is allowed near this.
+      const benchVor = bw.gain > 0 ? Math.max(plainVor, bw.gain) : plainVor;
       const cached = cache?.get(p.id);
       const scores = cached ? { ...cached } : (() => {
         const s = {};
@@ -710,7 +805,7 @@ export function buildBoard(data, st, cache) {
         return s;
       })();
       scores.floorish = floorScore(scores);   // display only, never weighted
-      return { p, pts, vor, benchVor, scores, hc, lineup,
+      return { p, pts, vor, benchVor, scores, hc, lineup, hcGain: bw.gain || 0,
         mineLead: !!hc && mineIds.has(hc.leadId) };
     });
 
@@ -1169,7 +1264,11 @@ export function markTiers(rows) {
 // games (share 0.24); 2025 alone was healthier at 14.2 (share 0.17). Pooled across
 // positions on purpose - the positional durability gap was tested over six seasons and is
 // not real, so splitting it would be fitting noise.
-export function availableShare(games) {
+// The `anchor` argument is what makes the dial reach this far. At the optimistic stop
+// everybody is available every week, so a second tight end is worth nothing at all and the
+// board should say so; at the cautious stop the bench starts earning its place.
+export function availableShare(games, anchor = DUR_DEFAULT) {
+  if (anchor === 'full') return 1;
   const g = Math.max(1, Math.min(FULL_GAMES, games?.league ?? FULL_GAMES - 3));
   return g / FULL_GAMES;
 }
@@ -1196,6 +1295,13 @@ export function lineupChance(j, s, a) {
   const lo = Math.floor(s);
   const frac = s - lo;
   const cdf = (k) => {                           // P(Binomial(ahead, a) <= k)
+    // a = 1 is a real setting now, not a theoretical edge: the optimistic stop on the
+    // durability dial says nobody ever misses a game. The recurrence below multiplies by
+    // a/(1-a), so at a = 1 it divided by zero and put NaN into benchVor, which then
+    // travelled all the way to a player's rank. With everyone ahead of him always
+    // available the answer needs no arithmetic - he plays only if there are fewer men
+    // ahead of him than there are slots.
+    if (a >= 1) return ahead <= k ? 1 : 0;
     let sum = 0;
     let term = (1 - a) ** ahead;                 // P(exactly 0 available)
     for (let i = 0; i <= k && i <= ahead; i += 1) {
@@ -1254,12 +1360,25 @@ export const HANDCUFF_GAP = 2.2;      // the lead man must be worth this many ti
 export const HANDCUFF_MIN = 40;       // and the job itself has to be worth having
 
 // How many men at a position hold a real job on ONE NFL team. A club fields one starting
-// quarterback, one feature back and one tight end who matters, but three receivers. This
-// is a fact about football rather than a number fitted to anything, and it is what stops
-// the depth chart calling every WR2 in the league a handcuff: Jauan Jennings is not
-// insurance for Justin Jefferson, he is a starter on the same team. The man who INHERITS
-// is the first one below the jobs that already exist.
-export const ROOM_JOBS = { QB: 1, RB: 1, TE: 1, WR: 3 };
+// quarterback, one feature back and one tight end who matters. This is a fact about
+// football rather than a number fitted to anything, and the man who INHERITS is the first
+// one below the jobs that already exist.
+//
+// RECEIVERS ARE DELIBERATELY ABSENT, and this is the correction rather than an oversight.
+// The entry used to read WR: 3, on the reasoning that a club starts three receivers and so
+// the fourth is the man in line. Run against the real file that produced eleven "handcuffs"
+// and not one of them was one: it paired Brandon Aiyuk with De'Zhaun Stribling, Marquez
+// Valdes-Scantling with Ryan Flournoy, Bo Melton with Matthew Golden. What the rule had
+// found was simply each club's fourth-best receiver, which is not a fact about anybody.
+//
+// The reason it cannot work at receiver is the reason it works at running back. When a
+// feature back goes down his carries do not evaporate, they go to ONE man, and that man is
+// knowable in advance. When a receiver goes down his targets are spread across everybody
+// left on the field, and the fourth man inherits some fraction of them alongside the first
+// and second. There is no single heir, so naming one would be inventing him. Backs are
+// where this idea is real; tight ends and quarterbacks have the same one-man job and are
+// kept for that reason.
+export const ROOM_JOBS = { QB: 1, RB: 1, TE: 1 };
 
 export function depthChart(players, league, ptsOf = projectedPoints) {
   const rooms = new Map();
@@ -1278,10 +1397,49 @@ export function depthChart(players, league, ptsOf = projectedPoints) {
     const next = scored[jobs];                           // and the man behind him
     if (!lead || !next || lead.pts < HANDCUFF_MIN) continue;
     if (next.pts * HANDCUFF_GAP > lead.pts) continue;    // a committee, not a handcuff
-    out.set(next.p.id, { leadId: lead.p.id, leadName: lead.p.name,
-      leadPts: lead.pts, ownPts: next.pts });
+    out.set(next.p.id, { leadId: lead.p.id, leadName: lead.p.name, pos: lead.p.pos,
+      team: lead.p.team, leadPts: lead.pts, ownPts: next.pts });
   }
   return out;
+}
+
+// WHAT THE INHERITANCE IS WORTH, which is the whole reason this section exists.
+//
+// Two facts have to meet here and neither is a forecast.
+//
+// FIRST, HOW LONG THE JOB IS OPEN. That is not a property of the backup at all - it is the
+// availability you have assumed for the man in front of him, read straight off the dial. At
+// `full` the job never opens and the handcuff is worth exactly nothing; at `cautious`,
+// behind somebody who missed six games last year, it is open a third of the year. This is
+// the one draft move that turns the strongest thing five years of testing found - every
+// projection overshoots, and the entire gap is games missed - into an actual pick, and it
+// needs no forecasting to do it. It needs only your answer to a question the app has now
+// stopped pretending it can answer for you.
+//
+// SECOND, WHAT THE JOB IS WORTH WHILE HE HOLDS IT - and the honest answer is NOT the lead
+// man's points. If your starter misses a week you do not score zero in his place, you start
+// whoever is on waivers. So what owning the heir actually buys you is the lead's points
+// MINUS a replacement's, which is the same VOR the rest of this board is denominated in.
+//
+// That subtraction is not bookkeeping, it is the entire difference between a real handcuff
+// and a fake one, and leaving it out produced a board that was visibly wrong. Priced on
+// gross points, backup quarterbacks swept the top of the handcuff list: Kyle Allen came out
+// worth more than Isiah Pacheco, because Josh Allen's 362 points is a bigger number than
+// Jahmyr Gibbs's 331. Over replacement the ordering inverts and reads like football.
+// Replacement at quarterback is 296 of Allen's 362, so four fifths of an elite quarterback
+// is sitting on the waiver wire and insuring him buys you 66 points of nothing much. At
+// running back replacement is 169 of Gibbs's 331, so half of him cannot be replaced at all.
+// THAT asymmetry is why backs are the position where handcuffing pays, and it falls out of
+// the league's own replacement levels rather than being asserted about positions.
+export function handcuffValue(hc, repl, games, leadPlayer, anchor = DUR_DEFAULT) {
+  if (!hc) return null;
+  const leadGames = leadPlayer ? expectedGames(leadPlayer, games, anchor) : FULL_GAMES;
+  const share = Math.max(0, Math.min(1, 1 - leadGames / FULL_GAMES));
+  // What the job is worth over the man you would otherwise have had to start.
+  const jobGain = Math.max(0, hc.leadPts - (repl?.[hc.pos] || 0));
+  return { ...hc, leadGames, share, jobGain,
+    weeks: Math.round(share * FULL_GAMES),
+    gain: share * jobGain };
 }
 
 // What a bench pick is worth to a particular roster, in projected points.
@@ -1309,19 +1467,44 @@ export function depthChart(players, league, ptsOf = projectedPoints) {
 // therefore the right weight on the bar he is measured against. Without it a handcuff was
 // charged the full price of a starting running back for a job he holds three weeks a year,
 // and finished below a fourth tight end again.
+// Returns THREE numbers now, because the third is the one that makes a handcuff a handcuff.
+// `worth` is the gross points he puts in your lineup across a season and `chance` the share
+// of the season he is in it - both unchanged, both still measured in whole points, because
+// the board subtracts a replacement bar from `worth` further down and the two have to be in
+// the same currency.
+//
+// `gain` is the new one and it is already NET of that bar: it is what owning him wins you
+// over the man you would otherwise have started, and it exists because for a handcuff the
+// ordinary sum gets the answer wrong. A handcuff is projected low BY DEFINITION, so his
+// gross worth is small and subtracting a starting back's replacement level from it buries
+// him under men who will never see your lineup. See handcuffValue above.
+//
+// `a` (the pool) and `hc.share` (this particular starter) are deliberately different
+// numbers. How often the men ahead of him on YOUR bench are all out at once is a question
+// about a pool of players; how long his job is open is a question about ONE man and comes
+// off the dial. Using the pooled figure for both was why the value did not move when the
+// assumption changed.
 export function benchWorth(pts, j, slots, a, hc, ownLead) {
   const mine = lineupChance(j, slots, a);
-  if (hc && ownLead) {
-    // One event, priced once: the share of the season the man ahead of him misses. He is
-    // not competing with your own depth for the slot, because the thing that empties the
-    // slot is the same thing that gives him the job.
-    const insure = { worth: (1 - a) * hc.leadPts, chance: 1 - a };
-    return insure.worth > pts * mine ? insure : { worth: pts * mine, chance: mine };
+  const plain = { worth: pts * mine, chance: mine, gain: 0 };
+  if (!hc) return plain;
+  const share = hc.share ?? (1 - a);          // share of the season the man ahead misses
+  if (ownLead) {
+    // One event, priced once: he is not competing with your own depth for the slot,
+    // because the thing that empties the slot is the same thing that gives him the job.
+    // That is what "insurance" means, and it is why a handcuff for a man you own is worth
+    // more than the same player would be to anybody else.
+    const worth = share * hc.leadPts;
+    return worth > plain.worth
+      ? { worth, chance: share, gain: hc.gain ?? 0 }
+      : { ...plain, gain: hc.gain ?? 0 };
   }
-  // What he would be worth in a week he plays: his own projection, plus the part of the
-  // job ahead of him that falls to him when that man is out.
-  const job = pts + (hc ? (1 - a) * Math.max(0, hc.leadPts - pts) : 0);
-  return { worth: mine * job, chance: mine };
+  // Behind SOMEBODY ELSE'S starter the two events are independent: their man has to go
+  // down AND your own depth has to have failed before any of it reaches your lineup. A
+  // lottery ticket on another manager's bad luck - worth something, worth less. Multiplying
+  // is exactly that discount, and nobody had to choose its size.
+  const job = pts + share * Math.max(0, hc.leadPts - pts);
+  return { worth: mine * job, chance: mine, gain: (hc.gain ?? 0) * mine };
 }
 
 // ---------------------------------------------------------------- saying why

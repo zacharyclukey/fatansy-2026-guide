@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608161323" />
+<link rel="stylesheet" href="styles.css?v=202608161940" />
 </head>
 <body>
 
@@ -95,6 +95,17 @@
         <span class="knobLabel"><span data-tip="need" tabindex="0">Need bonus</span> <em id="needOut">8</em></span>
         <input id="need" type="range" min="0" max="20" step="1" value="8" />
         <span class="hint">Nudge toward positions you still have to fill</span>
+      </label>
+      <!-- How much time you assume players miss. This was the app's single biggest hidden
+           assumption: every projection quietly expects a full 17 games, the measured
+           shortfall is entirely games missed, and until now the middle answer was picked
+           for you without being shown. It is the only setting on this panel that changes
+           what a backup is worth, because a backup's whole value is the time the man in
+           front of him does not play. -->
+      <label class="knob">
+        <span class="knobLabel"><span data-tip="durdial" tabindex="0">Time missed</span></span>
+        <select id="durAnchor" aria-label="How much time you assume players miss"></select>
+        <span class="hint" id="durHint"></span>
       </label>
       <div class="checks">
         <label class="check">
@@ -308,6 +319,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608161323"></script>
+<script type="module" src="app.js?v=202608161940"></script>
 </body>
 </html>

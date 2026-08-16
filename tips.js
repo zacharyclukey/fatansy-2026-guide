@@ -94,6 +94,14 @@ export const TIPS = {
   star: ['Your own view of him. Click to cycle.',
     'Liked lifts him above anyone within 5 points, faded drops him below. Never further.'],
 
+  handcuff: ['He takes over the job if the man ahead of him cannot play.',
+    'Worth the points that job is above a waiver-wire replacement, for as long as you have '
+    + 'assumed that man is out. Set that under Time missed.'],
+
+  durdial: ['How much time you assume players miss.',
+    'Projections are accurate per game and too high per season, and the whole gap is games '
+    + 'missed. Nobody knows the right answer, so it is yours to pick.'],
+
   byeclash: ['This bye week already costs you starters.',
     'Counts only players filling a starting or flex slot, not your bench.'],
 

@@ -635,6 +635,17 @@ span.nm:hover { text-decoration: none; }
   border-radius: 3px; padding: 0 4px; line-height: 14px; flex: none; cursor: help;
   white-space: nowrap;
 }
+
+/* "if Gibbs sits" / "covers your Gibbs" - the man next in line for somebody's job. Two
+   weights on purpose: cover for a player you already own is a different and better
+   purchase than a bet on another manager's luck, so the owned one is filled in and the
+   other is only outlined. */
+.hcTag {
+  font-size: 9px; font-weight: 700; color: var(--ink2); border: 1px solid var(--line2);
+  border-radius: 3px; padding: 0 4px; line-height: 14px; flex: none; cursor: help;
+  white-space: nowrap;
+}
+.hcTag.mine { color: var(--chalk); background: var(--field); border-color: var(--field); }
 .footBtns { display: flex; gap: 8px; }
 #undo:disabled { opacity: .45; cursor: default; }
 #undo:disabled:hover { background: var(--card); border-color: var(--line2); }

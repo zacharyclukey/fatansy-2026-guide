@@ -12,10 +12,20 @@
 
 // One line on purpose: the jsdom harness strips imports with a per-line regex, so a
 // wrapped import statement leaves a stray brace behind and the whole app fails to evaluate.
-import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608161323';
+import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608161940';
 
 // Everything the bench pricing needs, worked out once for a whole draft rather than once
 // per pick. See the long note above benchWorth in engine.js for what this is for.
+// THE ROOM DOES NOT SHARE YOUR OPINION ABOUT INJURIES, and that is deliberate rather than
+// an oversight. The board runs its depth chart through handcuffValue, which prices each
+// heir off the availability YOU assumed for the man in front of him. Nothing here does, so
+// `dc` carries the plain chart and benchWorth falls back to the pooled figure below - which
+// is exactly what it did before the dial existed.
+//
+// Leaving it that way is the point. These are eleven other managers, and modelling them as
+// eleven copies of Zach's current setting would mean sliding "Time missed" to its gloomiest
+// stop made the whole room start hoarding backup running backs. The room drafts to the
+// going rate; the board is where your own assumptions get to matter.
 export function benchModel(players, league) {
   const shares = flexShares(players, league);
   return {

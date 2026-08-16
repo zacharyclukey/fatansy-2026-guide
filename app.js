@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS } from './engine.js?v=202608161323';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608161940';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608161323';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608161323';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608161323';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608161323';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608161940';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608161940';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608161940';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608161940';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608161323';
+const BUILD = '202608161940';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -376,18 +376,49 @@ function benchLine(r) {
   const weeks = Math.round(Math.min(1, share) * 17);
   const hc = r.hc;
 
-  // The insurance case: he is next in line behind a man you already own.
-  if (hc && r.mineLead) {
-    return `<p class="dSub"><b>He is the backup to ${esc(hc.leadName)}, who is already on
-your team.</b> If ${esc(hc.leadName.split(' ').pop())} gets hurt, this is the man who takes
-over his job — so you would be covered in the one week you would otherwise be stuck. That
-is worth more than his own projection says, and it is why he is this high.</p>`;
-  }
+  // The insurance case, in the plainest words there are. Both branches state the same three
+  // things in the same order - who he is behind, how long that job is expected to be open
+  // and why, and what the cover is worth in points - because those are the only three facts
+  // in it and burying any of them in prose is how this ended up a word nobody understood.
+  //
+  // The middle fact is the one that earns its place. A handcuff is not worth a fixed amount;
+  // he is worth exactly as much time as you assume the man ahead of him misses, which is a
+  // number YOU set on the Draft-day settings panel. Saying so on the card is what stops this
+  // reading as a forecast.
   if (hc) {
-    return `<p class="dSub">He is the backup to ${esc(hc.leadName)}, who plays for another
-team in real life and is not on your roster. If ${esc(hc.leadName.split(' ').pop())} gets
-hurt this man inherits the job — a decent bet, but a bet on somebody else's bad luck rather
-than cover for your own.</p>`;
+    const surname = esc(hc.leadName.split(' ').pop());
+    const anchor = durAnchor(st.durAnchor || DUR_DEFAULT);
+    const gain = Math.round(r.hcGain || 0);
+    // The setting is quoted in brackets rather than folded into the sentence, because the
+    // four stops are noun phrases of very different shapes ("Nobody gets hurt", "As much
+    // time as he missed last year") and every attempt to read one of them mid-clause came
+    // out ungrammatical for at least one of the four.
+    const dial = `Your <b>Time missed</b> setting (<b>${esc(anchor.short)}</b>)`;
+    const open = hc.weeks > 0
+      ? `${dial} puts ${esc(hc.leadName)} at <b>${hc.leadGames.toFixed(0)} games of
+${FULL_GAMES}</b> — so the job is open about <b>${hc.weeks} week${hc.weeks === 1 ? '' : 's'}</b>
+of the season.`
+      : `${dial} has ${surname} playing all ${FULL_GAMES} games — so on your own settings this
+job never opens and this man is worth nothing to you. Change that assumption and he starts to
+matter.`;
+
+    if (r.mineLead) {
+      return `<p class="dSub"><b>${esc(hc.leadName)} is already on your team, and this is the
+man who takes over his job if he cannot play.</b> ${open}</p>
+${gain > 0 ? `<p class="dSub">Taking him is <b>insurance on a player you already own</b>. In
+the weeks ${surname} is out you would otherwise be starting whoever is left on the waiver
+wire; having this man instead is worth about <b>${gain} points</b> across the season. That is
+why he is this high — it is not a claim that he is good.</p>` : ''}
+<p class="dNote">This is the one pick that pays for the thing the data is surest about:
+projections are accurate per game and too high per season, and the whole difference is
+games missed by the man in front.</p>`;
+    }
+    return `<p class="dSub"><b>He is next in line behind ${esc(hc.leadName)}, who is not on
+your team.</b> ${open}</p>
+${gain > 0 ? `<p class="dSub">So this is a <b>bet on another manager's bad luck</b>, not cover
+for your own — you only ever get paid if ${surname} misses time AND you still have room in
+your line-up for this man. Worth about <b>${gain} points</b> to you, which already allows for
+the chance that neither happens.</p>` : ''}`;
   }
   if (share > 0.9) return '';                    // he starts; nothing to explain
 
@@ -907,12 +938,31 @@ function renderAll() {
 let rowEls = new Map();
 let lastCols = '';
 
+// The badge that says a man is next in line for somebody else's job.
+//
+// It must be readable by someone who has never heard the word "handcuff", which rules the
+// word out - so the badge says what the situation IS rather than naming it. "if Gibbs sits"
+// is the whole idea in three words: this man plays when that man does not. When the man in
+// front is on YOUR team it says so, because that is a different purchase entirely - cover
+// for a hole you would otherwise have, rather than a bet on another manager's bad luck.
+//
+// Silent when the job is never open. At the optimistic stop on the durability dial nobody
+// misses a game, so there is nothing to inherit and nothing to say; the badge appearing and
+// disappearing as that dial moves is the point rather than a glitch.
+function hcBadge(r) {
+  if (!r.hc || !(r.hcGain > 0.5)) return '';
+  const last = esc(r.hc.leadName.split(' ').pop());
+  return r.mineLead
+    ? `<span class="hcTag mine" data-tip="handcuff">covers your ${last}</span>`
+    : `<span class="hcTag" data-tip="handcuff">if ${last} sits</span>`;
+}
+
 function rowHTML(r, cols, d, m) {
   return `<span class="rk">${r.rank}</span>
 <span class="who">${posTag(r.p.pos)}
 <button class="nm" data-open="${r.p.id}" title="Show detail">${r.p.name} <span class="tm">${r.p.team || ''}</span></button>
 ${r.p.rookie ? '<span class="rook">R</span>' : ''}${injBadge(r.p)}
-${r.lastOfTier ? `<span class="tierEnd" data-tip="cliff">last ${r.p.pos}${r.tier}</span>` : ''}
+${r.lastOfTier ? `<span class="tierEnd" data-tip="cliff">last ${r.p.pos}${r.tier}</span>` : ''}${hcBadge(r)}
 ${byeClash(r.p.bye) >= 2 ? `<span class="byeClash" data-tip="byeclash">bye ${r.p.bye} ×${byeClash(r.p.bye) + 1}</span>` : ''}</span>
 ${cols.map((c) => `<span class="num ${c[3]}">${c[1](r)}</span>`).join('')}
 <span class="acts">
@@ -1004,6 +1054,17 @@ function renderBoard() {
       } else if (r.lastOfTier && badge) {
         badge.textContent = `last ${r.p.pos}${r.tier}`;
       } else if (badge) { badge.remove(); }
+      // The same treatment for "if Montgomery sits", and it needs it more than the others
+      // do. Rows are reused rather than rebuilt, so anything written into .who once stays
+      // written; this badge changes on two events that do not touch a single number in the
+      // row - moving the durability dial, and marking the man in front as yours. Left out
+      // of this loop it went stale both ways: seventeen badges survived a switch to "nobody
+      // gets hurt", still promising an inheritance the board had just priced at zero.
+      const hc = who.querySelector('.hcTag');
+      const want = hcBadge(r);
+      if (want && !hc) who.insertAdjacentHTML('beforeend', want);
+      else if (want && hc.outerHTML !== want) hc.outerHTML = want;
+      else if (!want && hc) hc.remove();
       // During a practice draft there is no Gone button, so this cannot assume three.
       const acts = el.querySelectorAll('.acts button');
       const sb = acts[0];
@@ -2589,6 +2650,22 @@ function renderChrome() {
   $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
   if ($('#rookie')) $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
+  const dur = $('#durAnchor');
+  if (dur) {
+    const now = st.durAnchor || DUR_DEFAULT;
+    if (!dur.options.length) {
+      dur.innerHTML = DUR_ANCHORS.map((x) => `<option value="${x.key}">${x.short}</option>`).join('');
+    }
+    dur.value = now;
+    const a = durAnchor(now);
+    const games = board?.games;
+    // The stop, then what it actually works out to, because "an average amount" means
+    // nothing until you are told it is 14 games out of 17.
+    const num = games && now !== 'full'
+      ? ` Works out to about ${(games.league ?? FULL_GAMES).toFixed(0)} games of ${FULL_GAMES}`
+      + `${now === 'typical' ? ' for everybody' : ' on average'}.` : '';
+    $('#durHint').textContent = `${a.blurb}${num}`;
+  }
   const tb = $('#teamBtn');
   if (tb) {
     tb.setAttribute('aria-expanded', String(!!st.showTeam));
@@ -2948,6 +3025,17 @@ function wire() {
   $('#followBtn').onclick = doFollow;
   $('#dryBtn').onclick = doDryRun;
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };
+  // Changing the assumption changes what every bench player is worth, so this rebuilds the
+  // board rather than just repainting it.
+  const durSel = $('#durAnchor');
+  if (durSel) {
+    // renderChrome as well as rebuild: the hint under the dial spells out what the stop you
+    // just picked works out to in games, and that line lives in the chrome rather than on
+    // the board. rebuild() alone left it describing the setting you had a moment ago.
+    durSel.onchange = (e) => {
+      st.durAnchor = e.target.value; save(); rebuild(); renderChrome();
+    };
+  }
 
   // ratings profile as a file, so you and someone else can keep different ones.
   //
