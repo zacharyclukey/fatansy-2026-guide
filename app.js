@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote } from './engine.js?v=202608160905';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS } from './engine.js?v=202608161323';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608160905';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608160905';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608160905';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608160905';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608161323';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608161323';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608161323';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608161323';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608160905';
+const BUILD = '202608161323';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -702,6 +702,14 @@ function stampShot(id) {
   const forced = needsOf(roster, board.league).total >= left;
   const shot = pickShot(res, id, clock, { skipStreamed: !forced });
   if (!shot) return;
+  // His value window AT THE MOMENT you took him, which is the only moment it means
+  // anything. Fifteen picks later the need bonus has moved every rank on the board and a
+  // window read off the finished board would be a different question. Read straight off
+  // the row valueWindow already wrote - not recomputed here.
+  const row = board.rows.find((x) => x.p.id === id);
+  if (row) {
+    shot.win = { from: row.worthFrom, to: row.worthTo, open: !!row.openEnded, kind: row.kind || null };
+  }
   // Kept outside st.picks on purpose: a practice draft rebuilds that object wholesale from
   // its log on every pick, and the records would go with it.
   st.shots ||= {};
@@ -872,6 +880,7 @@ function scheduleRebuild() {
 function renderAll() {
   if (view === 'board') {
     renderMockBar(); renderBoard(); renderAdvice(); renderLean(); renderTeamStrip(); renderKeys();
+    renderCompare();
   }
   if (view === 'roster') renderRoster();
   if (view === 'mock') renderMock();
@@ -1114,6 +1123,8 @@ function detail(r) {
   return `<div class="detail">
 <div class="dHead">${head}</div>
 ${chips ? `<p class="dChips">${chips}</p>` : ''}
+<p class="dCmp"><button data-cmp="${r.p.id}" class="chipBtn">Compare him with someone</button>
+<span class="hint">Put him side by side with one other player.</span></p>
 
 ${sec(`Why he is #${r.rank} on your board`, e ? `<p class="dSub">${esc(e.rank)}</p>
 ${e.prefLine ? `<p class="dNote">${esc(e.prefLine)}</p>` : ''}
@@ -1158,6 +1169,321 @@ ${sec('Last season', `${statCards(r)}
     : 'No 2025 data — his place on the board comes from the projection.'}
 Describes last season; it is not what predicts this one.</p>`)}
 </div>`;
+}
+
+// ---------------------------------------------------------------- compare two
+// "Him or him." Between picks that is the only question there is, and answering it used to
+// mean opening one card, reading it, closing it, opening a second and holding the first in
+// your head. Two menus and one screen instead.
+//
+// Nothing on this panel is a new sum. The window comes from valueWindow, the label from
+// pickType, the availability numbers from injuryGap and ownGames, the preference labels
+// from fitTags, the odds he lasts from availability - all of it read straight off the row
+// the board already built. If any of those change, this changes with them.
+//
+// The band inside which it refuses to name a winner is STAR_BAND, which is what this
+// engine already means by "too close to call": it is exactly how far a star moves a player
+// (no further, deliberately) and it is the band pickCost uses to say a pick left nothing
+// behind. Inside it the panel says coin flip and stops. That refusal is the feature. A
+// comparison screen that always crowns somebody trains you to trust a gap that is not
+// there, and on this board a three-point gap really is nothing.
+let cmpA = null;
+let cmpB = null;
+
+const rowFor = (id) => (id ? board?.rows.find((r) => r.p.id === id) || null : null);
+
+// The window, in the same words the card uses.
+const windowWords = (r) => (r.openEnded ? `pick ${r.worthFrom} onwards`
+  : r.worthFrom === r.worthTo ? `pick ${r.worthFrom}` : `picks ${r.worthFrom}–${r.worthTo}`);
+
+// What his projection becomes if you assume he plays what he has actually played, rather
+// than the full season the published projection quietly assumes. This is the durability
+// dial's own arithmetic - injuryGap - not a second version of it, and it is shown as a
+// number beside the projection rather than folded into it. The board never edits a
+// forecast; see the note over positionGames in engine.js.
+function availView(r) {
+  const games = board?.games;
+  if (!r || !games) return null;
+  const gap = injuryGap(r.p, board.league, games);
+  const gp = ownGames(r.p, games);
+  const known = !!(r.p.m?.has2025 && r.p.m.games_2025 != null);
+  return { gap, gp, known, at: Math.max(0, r.pts - gap) };
+}
+
+const cmpCell = (main, sub) => `<span class="cmpCell"><b>${main}</b>${
+  sub ? `<i>${sub}</i>` : ''}</span>`;
+
+const cmpRow = (label, a, b, note = '') => `<div class="cmpRow">
+<span class="cmpLab">${label}${note ? `<i>${note}</i>` : ''}</span>${a}${b}</div>`;
+
+// The one sentence the whole panel exists to produce. It is allowed to say "neither".
+function cmpVerdict(a, b) {
+  const gap = Math.abs(a.score - b.score);
+  const [hi, lo] = a.score >= b.score ? [a, b] : [b, a];
+  const flip = gap < STAR_BAND;
+  const pts = Math.abs(a.pts - b.pts);
+  if (flip) {
+    return { flip, hi, lo, gap,
+      head: 'Coin flip — take either',
+      why: `Your board separates them by ${gap.toFixed(1)} points of draft score, and `
+        + `anything under ${STAR_BAND} is inside the margin this board treats as no `
+        + `difference at all. It is not being coy: on these numbers there is no better `
+        + `man here. Take the one you would rather watch, or the one whose bye week suits `
+        + `you — and do not spend the clock on it.` };
+  }
+  return { flip, hi, lo, gap,
+    head: `Your board prefers ${hi.p.name}`,
+    why: `By ${gap.toFixed(1)} points of draft score — #${hi.rank} against #${lo.rank}. `
+      + `That is outside the ${STAR_BAND}-point band this board calls a coin flip, so the `
+      + `preference is real, but it is a preference about price and scarcity today, not a `
+      + `claim that ${hi.p.name.split(' ').pop()} will score more `
+      + `(${pts < 1 ? 'their projections are level' : `the projections are ${pts.toFixed(0)} points apart`}).` };
+}
+
+// Where the two differ on the four preferences. Read off the same traits fitTags reads,
+// so the panel cannot say one thing while the card says another.
+//
+// The words are FIT_TAGS' words, not the slider's. The slider's ends say what YOU want
+// ("Ignore it" / "Demand it"); FIT_TAGS says what the PLAYER is ("Injury risk" /
+// "Ever-present"). An earlier version printed the slider's ends against the player and
+// produced "Gibbs is further toward Demand it", which is not a sentence about anybody.
+function cmpPrefs(a, b) {
+  const league = board.league;
+  const leans = st.fit || {};
+  const axes = FIT_AXES.filter((x) => !x.needsPenalties || hasPenalties(league));
+  const out = [];
+  for (const ax of axes) {
+    // A kicker or defence has no trait here, only a placeholder tie at 50, and comparing
+    // placeholders is exactly the invented opinion the rest of the app refuses to give.
+    if (!a.rated || !b.rated) break;
+    const pa = a.traits?.[ax.key];
+    const pb = b.traits?.[ax.key];
+    if (pa == null || pb == null) continue;
+    const d = pa - pb;
+    if (Math.abs(d) < 15) continue;             // the same, near enough, on this axis
+    const [ahead, behind] = d > 0 ? [a, b] : [b, a];
+    const lean = leans[ax.key] || 0;
+    const [hiTag, loTag] = FIT_TAGS[ax.key] || [[ax.right], [ax.left]];
+    // Does the difference point the way you said you wanted, the other way, or nowhere?
+    // A positive lean is a vote for the high end of the trait - see the Fit sum in
+    // buildBoard - so a positive lean favours whoever is further up it.
+    const suits = lean === 0 ? null : (lean > 0) === (d > 0) ? ahead : behind;
+    out.push({ axis: ax.key, label: ax.label,
+      want: lean === 0 ? null : lean > 0 ? ax.right : ax.left,
+      ahead: ahead.p.name, behind: behind.p.name,
+      hiTag: hiTag[0], loTag: loTag[0], suits: suits?.p.name || null,
+      lean: fitWord(lean), gap: Math.abs(Math.round(d)) });
+  }
+  return out;
+}
+
+function compareHTML(a, b) {
+  const lg = board.league;
+  const v = cmpVerdict(a, b);
+  const av = availView(a);
+  const bv = availView(b);
+  const drafted = new Set(picks().drafted);
+  const at = clock?.currentPick || null;
+  const kindCell = (r) => {
+    const k = r.kind ? KINDS[r.kind] : null;
+    return cmpCell(k ? `<em class="kind ${r.kind}">${k[0]}</em>` : '<em class="kind soft">Not yet</em>',
+      k ? k[1] : 'His range is still a long way off — the board is not asking you to take him here.');
+  };
+  const tagCell = (r) => {
+    if (!r.rated) {
+      return cmpCell('No labels', `There are no ${r.p.pos} stats to describe, so your `
+        + 'preferences have nothing to say about him either way.');
+    }
+    if (!r.tags?.length) return cmpCell('Nothing stands out', 'He is unremarkable on all four of your preferences.');
+    return cmpCell(r.tags.map((t) => `<span class="tag${t.match === true ? ' want'
+      : t.match === false ? ' against' : ''}" title="${tip(t.why)}">${t.tag}</span>`).join(' '),
+    r.tags.map((t) => t.why).join('; '));
+  };
+  const availCell = (r, x) => {
+    if (!x) return cmpCell('—', '');
+    if (!x.gap) {
+      return cmpCell(`${Math.round(r.pts)}`, STREAMED.includes(r.p.pos)
+        ? `A ${r.p.pos === 'K' ? 'kicker' : 'defence'} has no availability record worth the `
+          + 'name, so nothing is taken off.'
+        : 'No games missed on record, so this assumption takes nothing off him.');
+    }
+    return cmpCell(`${Math.round(x.at)} <s>${Math.round(r.pts)}</s>`,
+      `${x.known ? `He played ${x.gp} of ${FULL_GAMES} games last season`
+        : `He has no record, so this uses what a ${r.p.pos} typically plays (${x.gp.toFixed(1)} of ${FULL_GAMES})`}`
+      + ` — ${Math.round(x.gap)} points behind a full season.`);
+  };
+  const waitCell = (r) => {
+    const w = waitAdvice(r, drafted);
+    return cmpCell(w || '—', w ? '' : 'Set your draft slot on this page to see whether he comes back to you.');
+  };
+
+  // Does the availability assumption change the answer? This is the only thing on the
+  // panel that is worth a sentence of its own, because it is the one place two men can
+  // swap order without anybody's rating moving.
+  let durLine = '';
+  if (av && bv && !(a.rated && b.rated)) {
+    // One of them is a kicker or a defence, which have no availability record worth the
+    // name - injuryGap returns zero for them by design, not because they are indestructible.
+    // Reading that zero as "the safer man" would be the panel inventing a fact.
+    const un = a.rated ? b : a;
+    durLine = `<p class="cmpNote">Availability cannot be compared here. A ${
+      un.p.pos === 'K' ? 'kicker' : 'defence'} has no games record worth the name, so the
+board takes nothing off ${esc(un.p.name)} — that is an absence of information, not a clean
+bill of health.</p>`;
+  } else if (av && bv) {
+    const rawLead = a.pts - b.pts;
+    const adjLead = av.at - bv.at;
+    const bigger = av.gap > bv.gap ? a : b;
+    const gapDiff = Math.abs(av.gap - bv.gap);
+    if (rawLead !== 0 && adjLead !== 0 && Math.sign(rawLead) !== Math.sign(adjLead)) {
+      durLine = `<p class="cmpNote warnNote"><b>This is where they actually differ.</b> On the
+published projections ${esc(rawLead > 0 ? a.p.name : b.p.name)} is ahead. Assume instead that
+each plays what he has actually played, and ${esc(adjLead > 0 ? a.p.name : b.p.name)} comes out
+ahead. Nobody can tell you which assumption is right — but if you believe the games, this is a
+different call.</p>`;
+    } else if (gapDiff >= 15) {
+      durLine = `<p class="cmpNote"><b>${esc(bigger.p.name)} carries the bigger availability
+question</b> — ${Math.round(gapDiff)} more points of the difference between them rides on him
+staying on the field. It does not change which one the board prefers.</p>`;
+    } else {
+      durLine = '<p class="cmpNote">Availability is not what separates these two — both are '
+        + 'carrying about the same question about games played.</p>';
+    }
+  }
+
+  const byeLine = a.p.bye && a.p.bye === b.p.bye
+    ? `<p class="cmpNote">They share <b>bye week ${a.p.bye}</b>, so taking both leaves you a
+hole in the same week. That matters more than it looks if you have already got starters on
+that bye.</p>` : '';
+
+  const prefs = cmpPrefs(a, b);
+  const prefLine = !(a.rated && b.rated)
+    ? `<p class="cmpNote">Your preferences cannot separate these two — there are no
+${esc(a.rated ? b.p.pos : a.p.pos)} stats to describe, so every trait a ${
+  esc(a.rated ? b.p.pos : a.p.pos)} appears to have is a placeholder rather than a fact
+about him.</p>`
+    : !prefs.length
+      ? '<p class="cmpNote">On your four preferences these two look much the same.</p>'
+      : `<ul class="cmpPrefs">${prefs.map((x) => `<li><b>${esc(x.label)}</b> — of the two, your
+board calls ${esc(x.ahead)} <b>${esc(x.hiTag.toLowerCase())}</b> and ${esc(x.behind)}
+<b>${esc(x.loTag.toLowerCase())}</b> (${x.gap} points of percentile apart).${x.want
+    ? ` You said you lean toward <b>${esc(x.want.toLowerCase())}</b> — ${x.lean} — so this one
+favours <b>${esc(x.suits)}</b>.`
+    : ' You have no preference set here, so it is information rather than a nudge.'}</li>`).join('')}</ul>`;
+
+  const head = (r) => `<span class="cmpWho">${posTag(r.p.pos)}<b>${esc(r.p.name)}</b>
+<i>${esc(r.p.team || '')}${r.p.rookie ? ' · rookie' : ''}${r.p.inj ? ` · ${esc(r.p.inj)}` : ''}</i></span>`;
+
+  return `<div class="cmp">
+<div class="cmpVerdict ${v.flip ? 'flip' : 'clear'}">
+<b>${esc(v.head)}</b><span>${esc(v.why)}</span></div>
+
+<div class="cmpGrid">
+<div class="cmpRow cmpHead"><span class="cmpLab"></span>${head(a)}${head(b)}</div>
+
+${cmpRow('Projected points', cmpCell(Math.round(a.pts), ''), cmpCell(Math.round(b.pts), ''),
+    `A full season in ${esc(lg.name)} scoring`)}
+
+${cmpRow('Where your board has him',
+    cmpCell(`#${a.rank}`, `${a.p.pos}${a.posRank} on your board`),
+    cmpCell(`#${b.rank}`, `${b.p.pos}${b.posRank} on your board`),
+    'Draft score order, not a grade')}
+
+${cmpRow('Worth taking at',
+    cmpCell(windowWords(a), `The room takes him around pick ${a.adpRank}`),
+    cmpCell(windowWords(b), `The room takes him around pick ${b.adpRank}`),
+    'The picks he is the equal of anyone left')}
+
+${cmpRow(at ? `At pick ${at}, right now` : 'Before the draft starts', kindCell(a), kindCell(b))}
+
+${cmpRow('Bye week', cmpCell(a.p.bye || '—', ''), cmpCell(b.p.bye || '—', ''),
+    'The week he scores you nothing')}
+
+${cmpRow('If he plays what he has played', availCell(a, av), availCell(b, bv),
+    'The projection assumes a full season. This does not.')}
+
+${cmpRow('What you said you like', tagCell(a), tagCell(b),
+    'Your preferences, not a forecast')}
+
+${cmpRow('Still there next time you pick?', waitCell(a), waitCell(b),
+    'From how far the room usually lets him fall')}
+</div>
+
+${durLine}
+${byeLine}
+${prefLine}
+
+<p class="cmpFoot"><b>What this panel is not.</b> It cannot tell you which of these two will
+score more this season. Nothing can — that is the one thing five years of testing on this
+data said could not be done. What it can tell you is which one is better value at the pick
+in front of you, what each one costs you if he misses time, and which of them matches what
+you said you wanted. When those come out level it says so.</p>
+</div>`;
+}
+
+// The menu of everyone you could compare, in board order, so the top of your board is the
+// top of the list. Drafted players stay in it deliberately: "should I have taken him
+// instead" is a question worth being able to ask afterwards.
+// Rebuilt only when the list would actually read differently. Every pick in a practice
+// draft calls renderAll, and re-writing 260 options each time threw away the scroll
+// position of a menu somebody was in the middle of reading.
+let cmpSig = '';
+
+function cmpOptions(a, b) {
+  const drafted = new Set(picks().drafted);
+  const rows = board.rows.slice(0, 260);
+  const sig = `${st.league}|${rows.length}|${drafted.size}|${rows[0]?.p.id}|${rows.at(-1)?.p.id}`;
+  if (sig !== cmpSig) {
+    const opts = ['<option value="">— pick a player —</option>'];
+    for (const r of rows) {
+      opts.push(`<option value="${r.p.id}">#${r.rank} ${esc(r.p.name)} · ${r.p.pos} `
+        + `${esc(r.p.team || '')}${drafted.has(r.p.id) ? ' (gone)' : ''}</option>`);
+    }
+    const html = opts.join('');
+    a.innerHTML = html;
+    b.innerHTML = html;
+    cmpSig = sig;
+  }
+  a.value = cmpA || '';
+  b.value = cmpB || '';
+}
+
+function renderCompare() {
+  const panel = $('#cmpPanel');
+  if (!panel || panel.hidden || !board) return;
+  cmpOptions($('#cmpA'), $('#cmpB'));
+  const out = $('#cmpOut');
+  const a = rowFor(cmpA);
+  const b = rowFor(cmpB);
+  if (!a || !b) {
+    out.innerHTML = `<p class="facts">Choose two players above. You can also open any
+player's card on the board and press <b>Compare him with someone</b>${a || b
+  ? ' — one is already chosen.' : '.'}</p>`;
+    return;
+  }
+  if (a.p.id === b.p.id) {
+    out.innerHTML = '<p class="facts">That is the same player twice. Pick a different one on one side.</p>';
+    return;
+  }
+  try {
+    out.innerHTML = compareHTML(a, b);
+  } catch (err) {
+    console.error('compare failed', err);
+    out.innerHTML = '<p class="facts">Could not build that comparison.</p>';
+  }
+}
+
+// From a card on the board: fill the first empty side, or replace the older one.
+function compareWith(id) {
+  if (!id || cmpA === id || cmpB === id) return;
+  if (!cmpA) cmpA = id;
+  else if (!cmpB) cmpB = id;
+  else { cmpA = cmpB; cmpB = id; }
+  const p = $('#cmpPanel');
+  if (p) p.hidden = false;
+  const btn = $('#cmpBtn');
+  if (btn) btn.setAttribute('aria-expanded', 'true');
+  renderCompare();
 }
 
 // ---------------------------------------------------------------- my team
@@ -1547,6 +1873,245 @@ ${body}</table></section>`;
 </body></html>`;
 }
 
+// ---------------------------------------------------------------- how you drafted
+// A grade for a practice draft, with one hard rule: it is NOT allowed to grade the team.
+//
+// Grading a draft on outcomes would mean predicting who scores, and predicting who scores
+// is the thing that failed four separate ways when it was measured on 2020-2025 - historic
+// stats added nothing to the projections, boom rate does not repeat, projection bias does
+// not persist, individual beats are not foreseeable. A number claiming to know how this
+// roster will do would be a lie with a decimal point on it, and it would be the most
+// believed thing in the whole app because it is the only thing shaped like a verdict.
+//
+// So this grades the DECISIONS, every one of which is a fact available right now:
+//
+//   1. what was still on the board when you picked, against what you took   (pickShot)
+//   2. whether you took a man before his price                              (valueWindow)
+//   3. whether you can field a starting lineup                              (needsOf)
+//   4. whether your starters are all off in the same week                   (lineupOf)
+//   5. whether you followed your own stated preferences                     (fitTags)
+//
+// Every one of those is measurable, none of them is a forecast, and all five are things a
+// person can actually do differently next time. That is what makes the grade worth having.
+
+// Points given up on ONE pick that cost a full mark. Chosen, not measured: 25 points over
+// a season is about a point and a half a week, roughly the distance between a starter and
+// the man who would replace him. It is a scale for turning points into a mark out of a
+// hundred, and the raw points beside it are the number that actually means something.
+const GRADE_LOST = 25;
+// Starters allowed on one bye week before it counts against you. Two is a week you can
+// paper over from the bench; three is a week you lose.
+const BYE_OK = 2;
+
+const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+const clamp100 = (x) => Math.max(0, Math.min(100, Math.round(x)));
+
+// 1. What else was on the board. Inside STAR_BAND nothing was lost - the same rule
+// pickCost already states in words on the pick-by-pick table below.
+function gradeLeft(mine) {
+  const each = [];
+  for (const x of mine) {
+    const shot = shotFor(x.id);
+    if (!shot) continue;
+    const gap = shot.gap || 0;
+    each.push({ n: x.n, id: x.id, gap, lost: Math.max(0, gap - STAR_BAND), top: shot.top });
+  }
+  if (!each.length) return null;
+  const lost = each.reduce((a, e) => a + e.lost, 0);
+  const worst = each.filter((e) => e.lost > 0).sort((a, b) => b.lost - a.lost)[0] || null;
+  return {
+    score: clamp100(100 * mean(each.map((e) => Math.max(0, 1 - e.lost / GRADE_LOST)))),
+    lost: Math.round(lost), counted: each.length,
+    clean: each.filter((e) => e.lost === 0).length, worst,
+  };
+}
+
+// 2. Reaching, in picks, against the value window the board had him in AT THE TIME.
+//
+// The gate is the board's OWN verdict at that moment - the `kind` pickType wrote on the
+// row while you were looking at it - not a fresh cut of my own. That matters twice over.
+// Under SLACK picks early is a rounding error and pickType does not call it a reach; past
+// REACH_RANGE it does not call it anything at all, because a man that far down the board
+// is not being priced yet, he is simply not in range. Those are almost all late bench
+// picks, and marking them as the biggest reaches of the draft - which an earlier cut of
+// this did, calling a round-13 flier a 54-pick reach - would make the grade harsher than
+// the label the app was showing you while you made the pick.
+function gradeReach(mine) {
+  const each = [];
+  let unpriced = 0;
+  for (const x of mine) {
+    const win = shotFor(x.id)?.win;
+    if (!win || win.from == null) continue;
+    const early = win.from - x.n;               // + = taken before his window opened
+    const reach = win.kind === 'reach';
+    if (!reach && win.kind == null && early > SLACK) unpriced += 1;
+    each.push({ n: x.n, id: x.id, early, over: reach ? Math.max(0, early - SLACK) : 0 });
+  }
+  if (!each.length) return null;
+  const reaches = each.filter((e) => e.over > 0).sort((a, b) => b.early - a.early);
+  return {
+    score: clamp100(100 * mean(each.map((e) => Math.max(0, 1 - e.over / REACH_RANGE)))),
+    reaches: reaches.length, counted: each.length, unpriced,
+    picks: Math.round(reaches.reduce((a, e) => a + e.early, 0)), worst: reaches[0] || null,
+  };
+}
+
+// 3. Can you field a lineup? An empty starting slot scores zero every week, which is the
+// only thing on this page that is not a matter of degree.
+function gradeSlots(roster, lg) {
+  const need = needsOf(roster, lg);
+  const slots = Object.entries(lg.starters || {})
+    .reduce((a, [, v]) => a + (v || 0), 0) || 1;
+  const short = Object.entries(need.short).filter(([, v]) => v > 0).map(([p, v]) => `${v} ${p}`);
+  if (need.flex > 0) short.push(`${need.flex} flex`);
+  return { score: clamp100(100 * (1 - need.total / slots)), empty: need.total, short, slots };
+}
+
+// 4. Bye weeks among the men who actually start. A clash on the bench is not a problem.
+function gradeByes(cards) {
+  const starters = cards.filter((c) => c.role !== 'Bench');
+  const by = {};
+  for (const c of starters) if (c.r.p.bye) (by[c.r.p.bye] ||= []).push(c.r.p.name);
+  const bad = Object.entries(by).filter(([, list]) => list.length > BYE_OK)
+    .map(([wk, list]) => ({ week: +wk, names: list }))
+    .sort((a, b) => b.names.length - a.names.length);
+  const excess = bad.reduce((a, x) => a + (x.names.length - BYE_OK), 0);
+  return { score: clamp100(100 - 25 * excess), worst: bad[0] || null, starters: starters.length, bad };
+}
+
+// 5. Did you follow your own preferences? The tags are fitTags' own answer to "does this
+// man match what you said you liked", so this counts them rather than re-deciding.
+function gradePrefs(mine) {
+  let want = 0;
+  let against = 0;
+  const missed = [];
+  for (const x of mine) {
+    const r = rowFor(x.id);
+    if (!r?.tags?.length) continue;
+    for (const t of r.tags) {
+      if (t.match === true) want += 1;
+      else if (t.match === false) { against += 1; missed.push(`${r.p.name} — ${t.tag}`); }
+    }
+  }
+  if (!want && !against) return null;           // your sliders are neutral; nothing to follow
+  return { score: clamp100(100 * (want / (want + against))), want, against, missed };
+}
+
+const GRADE_WORDS = [[85, 'Disciplined'], [70, 'Sound'], [55, 'Loose'], [0, 'Rushed']];
+const gradeWord = (n) => (GRADE_WORDS.find(([c]) => n >= c) || [0, 'Rushed'])[1];
+
+function draftGrade(m, lg) {
+  const mine = m.log.filter((x) => x.team === m.slot);
+  const roster = picks().mine.map((id) => byId(id)).filter(Boolean);
+  const cards = lineupOf(picks().mine, lg);
+  const parts = {
+    left: gradeLeft(mine),
+    reach: gradeReach(mine),
+    slots: gradeSlots(roster, lg),
+    byes: gradeByes(cards),
+    prefs: gradePrefs(mine),
+  };
+  const live = Object.values(parts).filter((x) => x && x.score != null).map((x) => x.score);
+  const overall = live.length ? Math.round(mean(live)) : null;
+  return { parts, overall, word: overall == null ? null : gradeWord(overall), mine };
+}
+
+// `data` is for the test suite, not the screen: "No reaches" is the right wording for a
+// person and a useless thing to assert on, so the count it stands for is carried where a
+// machine can read it without the prose having to change shape.
+const gradeCard = (label, score, head, why, data = '') => `<div class="gradeCard"${data}>
+<span class="gradeN ${score >= 85 ? 'up' : score >= 55 ? '' : 'dn'}">${score}</span>
+<span class="gradeL">${label}</span>
+<b>${head}</b><span class="gradeWhy">${why}</span></div>`;
+
+function gradeHTML(m, lg) {
+  const g = draftGrade(m, lg);
+  if (g.overall == null) return '';
+  const { left, reach, slots, byes, prefs } = g.parts;
+  const nm = (id) => esc(byId(id)?.name || 'that pick');
+  const cards = [];
+
+  if (left) {
+    cards.push(gradeCard('Points left on the board', left.score,
+      left.lost === 0 ? 'Nothing left behind' : `${left.lost} points left behind`,
+      `On ${left.clean} of your ${left.counted} picks, nothing better than the man you took `
+      + `was sitting there. ${left.worst
+        ? `The one that cost most was pick ${left.worst.n} — your board had `
+          + `${esc(left.worst.top?.name || 'someone')} ${Math.round(left.worst.gap)} points higher.`
+        : 'You took the best man on your own board, or something level with him, every time.'} `
+      + `Anything under ${STAR_BAND} points apart is counted as nothing lost, because on this `
+      + 'board that really is a coin flip.'));
+  }
+  if (reach) {
+    const aside = reach.unpriced
+      ? ` ${reach.unpriced === 1 ? 'One pick was' : `${reach.unpriced} picks were`} so far down `
+        + `the board that it had no price for ${reach.unpriced === 1 ? 'him' : 'them'} at all — `
+        + 'late bench men, mostly — and those count neither for nor against you.'
+      : '';
+    cards.push(gradeCard('Taking men before their price', reach.score,
+      reach.reaches === 0 ? 'No reaches' : `${reach.reaches} reach${reach.reaches === 1 ? '' : 'es'}`,
+      (reach.reaches === 0
+        ? `Not one of your ${reach.counted} picks was a man your own board would have called `
+          + 'a Reach at the moment you took him, so you never paid a pick you did not have to.'
+        : `${reach.picks} picks early in total. The biggest was ${nm(reach.worst.id)} at pick `
+          + `${reach.worst.n}, ${Math.round(reach.worst.early)} picks before his window opened. `
+          + 'Reaching is not automatically wrong — it is how you make sure of a man you want — '
+          + `but each one is a pick spent earlier than it needed to be. Under ${SLACK} picks `
+          + 'early is a rounding error and is not counted.') + aside,
+    ` data-reaches="${reach.reaches}" data-unpriced="${reach.unpriced}"`));
+  }
+  cards.push(gradeCard('Filling your starting slots', slots.score,
+    slots.empty === 0 ? 'Full lineup' : `${slots.empty} slot${slots.empty === 1 ? '' : 's'} empty`,
+    slots.empty === 0
+      ? `All ${slots.slots} starting slots filled. This is the one thing on this page that is `
+        + 'not a matter of taste — an empty slot scores nothing every single week.'
+      : `You finished with no ${slots.short.join(', no ')}. That is the one mistake worth `
+        + 'avoiding: an empty slot scores zero every week, whoever else is on your bench.'));
+  cards.push(gradeCard('Bye weeks among your starters', byes.score,
+    byes.worst
+      ? `${byes.bad.length === 1 ? `Week ${byes.worst.week}` : `${byes.bad.length} bad weeks`}: `
+        + `${byes.worst.names.length} out`
+      : 'No bad weeks',
+    byes.worst
+      ? `${byes.bad.map((x) => `Week ${x.week} takes out ${x.names.map(esc).join(', ')}`)
+        .join('. ')}. More than ${BYE_OK} starters on one bye is a week you lose rather than `
+        + 'a week you paper over from the bench.'
+      : `No week takes more than ${BYE_OK} of your ${byes.starters} starters out at once.`));
+  if (prefs) {
+    cards.push(gradeCard('Following your own preferences', prefs.score,
+      `${prefs.want} for, ${prefs.against} against`,
+      `Counting the labels on the men you took: ${prefs.want} matched what you said you `
+      + `liked on the Ratings page and ${prefs.against} cut against it. ${prefs.against
+        ? `The ones that went the other way: ${prefs.missed.slice(0, 3).map(esc).join('; ')}`
+          + `${prefs.missed.length > 3 ? '…' : ''}. ` : ''}`
+      + 'Neither is right or wrong — this only asks whether the draft you made matches the '
+      + 'draft you said you wanted.'));
+  }
+  const noPrefs = prefs ? '' : `<p class="gradeAside">Your four preference sliders are all
+sitting in the middle, so there was nothing of your own for this draft to follow or ignore —
+that measure is left out of the mark rather than guessed at. Move them on the
+<b>Ratings</b> tab and run another practice draft to see whether you actually draft the way
+you say you want to.</p>`;
+
+  return `<h2 class="h2">How you drafted</h2>
+<div class="gradeTop">
+<span class="gradeBig"><b>${g.overall}</b><i>out of 100</i></span>
+<span class="gradeSay"><b>${g.word}</b>
+<span>This is a grade for the ${g.mine.length} decisions you made, averaged across the
+measures below. It is not a score for your team.</span></span>
+</div>
+<p class="gradeWarn"><b>This says how you drafted, not how your team will do.</b> Nobody can
+grade a draft on results — who scores this season is the one thing that could not be
+predicted when it was tested against five years of real data, and a number here pretending
+otherwise would be the most believed and least honest thing in the app. What it can measure,
+and what all of it is, is your decisions: what was on the board when you picked, whether you
+paid before you had to, whether you can put out a lineup, and whether you did what you said
+you wanted to do. A perfect 100 here would not mean you will win. It would mean you drafted
+tidily.</p>
+<div class="gradeCards">${cards.join('')}</div>
+${noPrefs}`;
+}
+
 // ---------------------------------------------------------------- practice results
 // Written for someone who has never drafted before. Every number on this page is followed
 // by a sentence saying what it means, and the whole thing leads with what happened rather
@@ -1640,6 +2205,8 @@ and waiting would have got you somebody else as well.`
 
 <div class="cards">${costCards(costs)
 + costCard('Starting slots', short.length ? `${need.total} empty` : 'Full', 'Empty slots score nothing.')}</div>
+
+${gradeHTML(m, lg)}
 
 <h2 class="h2">Every pick you made</h2>
 <div class="board costPicks">
@@ -2257,6 +2824,16 @@ function wire() {
     save();
     renderTeamStrip();
   };
+  $('#cmpBtn').onclick = (e) => {
+    const p = $('#cmpPanel');
+    p.hidden = !p.hidden;
+    e.target.setAttribute('aria-expanded', String(!p.hidden));
+    renderCompare();
+  };
+  $('#cmpA').onchange = (e) => { cmpA = e.target.value || null; renderCompare(); };
+  $('#cmpB').onchange = (e) => { cmpB = e.target.value || null; renderCompare(); };
+  $('#cmpSwap').onclick = () => { [cmpA, cmpB] = [cmpB, cmpA]; renderCompare(); };
+  $('#cmpClear').onclick = () => { cmpA = null; cmpB = null; renderCompare(); };
   $('#saveBoard').onclick = () => {
     const what = filter === 'ALL' ? 'board' : `board-${filter.toLowerCase()}`;
     saveFile(`${what}-${stampFor(board.league.name)}-${today()}.csv`, 'text/csv', boardCsv());
@@ -2447,7 +3024,8 @@ function wire() {
       renderChrome();
       document.querySelectorAll('[data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === filter)));
       renderBoard();
-    } else if (b.dataset.open) { open = open === b.dataset.open ? null : b.dataset.open; renderBoard(); }
+    } else if (b.dataset.cmp) { compareWith(b.dataset.cmp); }
+    else if (b.dataset.open) { open = open === b.dataset.open ? null : b.dataset.open; renderBoard(); }
     else if (b.dataset.star) {
       const id = b.dataset.star;
       st.stars ||= []; st.fades ||= [];

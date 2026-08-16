@@ -923,7 +923,11 @@ export function buildBoard(data, st, cache) {
     list.forEach((r, i) => { r.posRated = i + 1; r.posCount = list.length; });
   }
 
-  return { rows, repl, league, weights: cw };
+  // `games` goes out with the board because the availability assumption is a thing the
+  // screen has to be able to show three ways - full season, what his position usually
+  // plays, what HE has played - and recomputing it outside here would be a second copy of
+  // the same sum drifting away from this one.
+  return { rows, repl, league, weights: cw, games: pg };
 }
 
 // ---------------------------------------------------------------- draft clock

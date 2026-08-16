@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608160905" />
+<link rel="stylesheet" href="styles.css?v=202608161323" />
 </head>
 <body>
 
@@ -29,6 +29,7 @@
     <nav class="filters" id="filters" aria-label="Position filter"></nav>
     <span class="spacer"></span>
     <button id="teamBtn" aria-expanded="false">Your team</button>
+    <button id="cmpBtn" aria-expanded="false">Compare two</button>
     <button id="saveBtn" aria-expanded="false">Save or print</button>
     <button id="settingsBtn" aria-expanded="false">Settings</button>
   </div>
@@ -64,6 +65,28 @@
           starts. For looking back at afterwards.</span>
       </div>
     </div>
+  </div>
+
+  <!-- Him or him. Between picks that is the only question there is, and answering it used
+       to mean opening one card, reading it, closing it, opening another and holding the
+       first one in your head. Two menus and one screen instead. When the two are close
+       enough that the board cannot separate them, it says so rather than inventing a
+       winner - that honesty is the point of the panel, not a caveat on it. -->
+  <div id="cmpPanel" class="panel cmpPanel" hidden>
+    <p class="saveLede">Pick two players and see them side by side. Everything here is the
+      same board, the same league and the same preferences you have already set — nothing
+      on this panel changes anything.</p>
+    <div class="cmpPick">
+      <label class="cmpSel">First player
+        <select id="cmpA" aria-label="First player to compare"></select>
+      </label>
+      <label class="cmpSel">Second player
+        <select id="cmpB" aria-label="Second player to compare"></select>
+      </label>
+      <button id="cmpSwap" class="ghost">Swap</button>
+      <button id="cmpClear" class="ghost">Clear</button>
+    </div>
+    <div id="cmpOut" aria-live="polite"></div>
   </div>
 
   <div id="settings" class="panel" hidden>
@@ -285,6 +308,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608160905"></script>
+<script type="module" src="app.js?v=202608161323"></script>
 </body>
 </html>

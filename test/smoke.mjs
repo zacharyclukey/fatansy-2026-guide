@@ -2667,6 +2667,170 @@ const fire = (el, type) => {
     JSON.stringify((st2.mock?.log || []).slice(0, 3)));
 }
 
+// ------------------------------------------------------- 13. compare two players
+// The panel exists for the person who does not follow football, so the thing being tested
+// is not that it renders - it is that it says the honest thing. A comparison screen that
+// always crowns a winner would teach her to trust a three-point gap, and on this board a
+// three-point gap is nothing at all.
+{
+  const e = await import(`file://${DIR}/engine.js`);
+  const { d, errs } = await boot();
+  d.querySelector('#cmpBtn').click();
+  await settle();
+  ok('the compare panel opens', !d.querySelector('#cmpPanel').hidden);
+
+  const sel = d.querySelector('#cmpA');
+  const opts = [...sel.options].slice(1);              // drop the "pick a player" row
+  ok('the compare menu is the board, in board order', opts.length > 100, `${opts.length}`);
+  const posOf = (o) => (o.textContent.split('·')[1] || '').trim().split(/\s+/)[0];
+  const firstOf = (pos) => opts.find((o) => posOf(o) === pos);
+
+  // reads the verdict, and the gap it claims, out of the rendered panel
+  const compare = async (idA, idB) => {
+    const a = d.querySelector('#cmpA');
+    const b = d.querySelector('#cmpB');
+    a.value = idA; fire(a, 'change');
+    b.value = idB; fire(b, 'change');
+    await settle();
+    const text = d.querySelector('#cmpOut').textContent.replace(/\s+/g, ' ');
+    const m = text.match(/(?:by|separates them by) ([\d.]+) points of draft score/i);
+    return { text, gap: m ? +m[1] : null,
+      flip: /Coin flip/.test(text), prefers: /Your board prefers/.test(text) };
+  };
+
+  // ---- two players of different positions
+  const rb = firstOf('RB');
+  const wr = firstOf('WR');
+  ok('the board has both a back and a receiver to compare', !!rb && !!wr);
+  const cross = await compare(rb.value, wr.value);
+  ok('comparing two positions renders', cross.text.length > 400, `${cross.text.length} chars`);
+  for (const heading of ['Projected points', 'Worth taking at', 'Bye week',
+    'If he plays what he has played', 'What you said you like']) {
+    ok(`the comparison shows ${heading.toLowerCase()}`, cross.text.includes(heading));
+  }
+  ok('it says one thing or the other, never both', cross.flip !== cross.prefers);
+  ok('it refuses to say who will score more',
+    /cannot tell you which of these two will score more/.test(cross.text));
+
+  // ---- a kicker or a defence, which have no rating at all
+  // Every trait a kicker has is a placeholder, so the panel must not invent an opinion out
+  // of it - the exact mistake the 0-100 rating made before it was taken off them.
+  for (const pos of ['K', 'DEF']) {
+    const s = firstOf(pos);
+    if (!s) continue;
+    const res = await compare(s.value, wr.value);
+    ok(`comparing a ${pos} does not throw`, res.text.length > 400 && errs.length === 0,
+      errs.join('; '));
+    ok(`a ${pos} is shown as having no preference labels`, /No labels/.test(res.text));
+    ok(`a ${pos} still gets a verdict`, res.flip || res.prefers);
+  }
+
+  // ---- the coin-flip band, tested as a rule rather than on one lucky pair
+  // Deep in the board the scores flatten, so an adjacent pair down there should be inside
+  // the band. Whichever pair it lands on, the claim has to match the number it prints.
+  let flipSeen = null;
+  for (let i = 60; i < 140 && !flipSeen; i += 1) {
+    if (!opts[i] || !opts[i + 1]) break;
+    const res = await compare(opts[i].value, opts[i + 1].value);
+    if (res.flip) flipSeen = res;
+  }
+  ok('two players a hair apart are called a coin flip', !!flipSeen);
+  if (flipSeen) {
+    ok('and the gap it prints really is inside the band',
+      flipSeen.gap != null && flipSeen.gap < e.STAR_BAND, `${flipSeen.gap} vs ${e.STAR_BAND}`);
+    ok('a coin flip names no winner', !/Your board prefers/.test(flipSeen.text));
+  }
+
+  // ---- and the top of the board against the bottom is not a coin flip
+  const far = await compare(opts[0].value, opts[opts.length - 1].value);
+  ok('the best man on the board beats the last one', far.prefers && !far.flip);
+  ok('and that gap is outside the band',
+    far.gap != null && far.gap >= e.STAR_BAND, `${far.gap} vs ${e.STAR_BAND}`);
+
+  ok('nothing on the compare panel threw', errs.length === 0, errs.join('; '));
+}
+
+// -------------------------------------------------- 13b. compare, from a player's card
+{
+  const { d } = await boot();
+  const nm = d.querySelector('.row.player .nm');
+  nm.click();
+  await settle();
+  const btn = d.querySelector('[data-cmp]');
+  ok('a card offers to compare him with someone', !!btn);
+  btn.click();
+  await settle();
+  ok('and doing so opens the compare panel', !d.querySelector('#cmpPanel').hidden);
+  ok('with him already chosen', d.querySelector('#cmpA').value === btn.dataset.cmp,
+    `${d.querySelector('#cmpA').value} vs ${btn.dataset.cmp}`);
+  ok('and it waits for the second man rather than guessing one',
+    /Choose two players/.test(d.querySelector('#cmpOut').textContent));
+}
+
+// -------------------------------------------- 14. a grade for how you drafted
+// The hard constraint: this grades the PROCESS. It is not allowed to imply it knows how
+// the team will do, because predicting that is the thing that failed four ways when it was
+// measured. So the test checks the disclaimer as carefully as it checks the arithmetic.
+{
+  const { d, errs } = await boot();
+  d.querySelector('[data-v="mock"]').click();
+  await settle();
+  d.querySelector('#mockSlot').value = '6';
+  d.querySelector('#mockAll').click();
+  await settle();
+  const out = d.querySelector('#mockOut');
+  const text = out.textContent.replace(/\s+/g, ' ');
+
+  ok('a finished practice draft is graded', /How you drafted/.test(text));
+  ok('the grade runs without throwing', errs.length === 0, errs.join('; '));
+  const big = out.querySelector('.gradeBig b');
+  const n = big ? +big.textContent : null;
+  ok('the grade is a number from 0 to 100', n != null && n >= 0 && n <= 100, `${n}`);
+  ok('and it is labelled as being out of 100', /out of 100/.test(text));
+
+  for (const measure of ['Points left on the board', 'Taking men before their price',
+    'Filling your starting slots', 'Bye weeks among your starters']) {
+    ok(`it grades ${measure.toLowerCase()}`, text.includes(measure));
+  }
+  const cards = out.querySelectorAll('.gradeCard');
+  ok('every measure carries its own mark', cards.length >= 4, `${cards.length} cards`);
+  const marks = [...cards].map((c) => +c.querySelector('.gradeN').textContent);
+  ok('and every mark is in range', marks.every((x) => x >= 0 && x <= 100), marks.join(', '));
+
+  // the honesty, which is the whole point
+  ok('it says out loud that this is not a forecast',
+    /not how your team will do/.test(text));
+  ok('it says why a result grade would be dishonest',
+    /could not be predicted/.test(text));
+  ok('it says a perfect mark would not mean winning',
+    /would not mean you will win/.test(text));
+  const claims = /(will finish|projected to finish|expected wins|championship odds|your team will score|points this season)/i;
+  ok('and it never claims to know the season', !claims.test(text), (text.match(claims) || [])[0]);
+
+  // The grade must not be harsher than the label the app was showing while you picked.
+  // An earlier cut counted every pick whose window opened later than the pick number,
+  // which made a round-13 flier read as a 54-pick reach - a verdict the board itself
+  // refuses to give, because past REACH_RANGE it says nothing at all rather than "reach".
+  fire(d.defaultView, 'pagehide');
+  const saved = JSON.parse(d.defaultView.localStorage.getItem('draft2026') || '{}');
+  const shots = Object.values(saved.shots?.[0] || {});
+  const mineIds = new Set(saved.picks?.[0]?.mine || []);
+  const owned = Object.entries(saved.shots?.[0] || {}).filter(([id]) => mineIds.has(id));
+  const boardCalled = owned.filter(([, s]) => s.win?.kind === 'reach').length;
+  const said = out.querySelector('[data-reaches]')?.dataset.reaches;
+  ok('every pick has its window recorded at the moment it was made',
+    shots.length > 0 && shots.every((s) => s.win && s.win.from != null), `${shots.length} shots`);
+  ok('the reach measure ran at all', said != null);
+  ok('and it counts exactly the reaches the board itself called',
+    +said === boardCalled, `grade said ${said}, board called ${boardCalled}`);
+  // the ones it declined to price must be excluded rather than silently marked down
+  const unpriced = +out.querySelector('[data-unpriced]').dataset.unpriced;
+  const boardSilent = owned.filter(([, s]) => s.win?.kind == null
+    && s.win.from - (saved.mock.log.find((y) => y.id === s.me.id)?.n ?? 0) > 4).length;
+  ok('and it excludes every pick the board had no price for',
+    unpriced === boardSilent, `grade excluded ${unpriced}, board was silent on ${boardSilent}`);
+}
+
 // ---------------------------------------------------------------- report
 console.log(`\n${pass} passed, ${fails.length} failed`);
 for (const f of fails) console.log('  FAIL', f);

@@ -805,3 +805,130 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
   display: block; margin-top: 4px; font-size: 12px; color: var(--ink3, var(--ink2));
   opacity: 0.85;
 }
+
+/* ---------------------------------------------------------------- compare two
+   Two columns and a verdict. The verdict is the widest thing on the panel on purpose:
+   when the answer is "coin flip" that is the sentence somebody has to read, and burying
+   it under a table of numbers would be the same as not saying it. */
+.cmpPanel { display: block; }
+.cmpPick {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 10px 0 14px;
+}
+.cmpSel {
+  display: flex; flex-direction: column; gap: 4px; flex: 1 1 240px; min-width: 0;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink3);
+}
+.cmpSel select {
+  font: inherit; font-size: 13px; font-weight: 400; text-transform: none;
+  letter-spacing: 0; color: var(--ink);
+  padding: 7px 8px; border: 1px solid var(--line2); border-radius: var(--r);
+  background: var(--card); max-width: 100%;
+}
+
+.cmpVerdict {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 12px 14px; border-radius: var(--r); margin: 0 0 14px;
+  border-left: 4px solid var(--line2); background: var(--panel);
+}
+.cmpVerdict.clear { border-left-color: var(--field); background: var(--fieldSoft); }
+.cmpVerdict.flip { border-left-color: var(--warn); background: var(--panel2); }
+.cmpVerdict b { font-size: 16px; color: var(--ink); }
+.cmpVerdict span { font-size: 13px; color: var(--ink2); line-height: 1.5; }
+
+.cmpGrid { display: grid; gap: 0; }
+.cmpRow {
+  display: grid; grid-template-columns: minmax(120px, 0.9fr) 1fr 1fr;
+  gap: 12px; padding: 9px 0; border-top: 1px solid var(--line); align-items: start;
+}
+.cmpRow.cmpHead { border-top: 0; padding-top: 0; }
+.cmpLab {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink3); line-height: 1.4;
+}
+.cmpLab i {
+  display: block; font-style: normal; font-weight: 400; text-transform: none;
+  letter-spacing: 0; font-size: 11px; color: var(--ink3); opacity: .85; margin-top: 2px;
+}
+.cmpWho { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.cmpWho b { font-size: 15px; color: var(--ink); }
+.cmpWho i { font-style: normal; font-size: 11px; color: var(--ink3); }
+.cmpCell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cmpCell b {
+  font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums;
+  font-weight: 600; overflow-wrap: anywhere;
+}
+.cmpCell b s { color: var(--ink3); font-weight: 400; font-size: 13px; margin-left: 4px; }
+.cmpCell i { font-style: normal; font-size: 12px; color: var(--ink3); line-height: 1.45; }
+
+.cmpNote { margin: 12px 0 0; font-size: 13px; color: var(--ink2); line-height: 1.55; }
+.cmpNote.warnNote {
+  background: var(--badSoft); border-left: 3px solid var(--bad);
+  padding: 10px 12px; border-radius: 0 var(--r) var(--r) 0;
+}
+.cmpPrefs { margin: 12px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink2); }
+.cmpPrefs li { margin-bottom: 5px; line-height: 1.5; }
+.cmpFoot {
+  margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--ink3); line-height: 1.55;
+}
+.dCmp { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+
+@media (max-width: 620px) {
+  .cmpRow { grid-template-columns: 1fr 1fr; }
+  .cmpLab { grid-column: 1 / -1; }
+}
+
+/* ---------------------------------------------------------------- how you drafted
+   A grade for the decisions. The warning under the number is not small print - it is the
+   sentence that stops the number being read as a forecast, so it is set at the same size
+   as the rest of the page and sits above the detail rather than under it. */
+.gradeTop {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
+  padding: 14px 16px; border-radius: var(--r);
+  background: var(--fieldSoft); margin: 0 0 12px;
+}
+.gradeBig { display: flex; flex-direction: column; line-height: 1; }
+.gradeBig b {
+  font-size: 42px; font-weight: 700; color: var(--field);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+}
+.gradeBig i {
+  font-style: normal; font-size: 11px; color: var(--ink3);
+  text-transform: uppercase; letter-spacing: .06em; margin-top: 4px;
+}
+.gradeSay { display: flex; flex-direction: column; gap: 4px; flex: 1 1 240px; }
+.gradeSay b { font-size: 18px; color: var(--ink); }
+.gradeSay span { font-size: 13px; color: var(--ink2); line-height: 1.5; }
+
+.gradeWarn {
+  margin: 0 0 14px; padding: 12px 14px; border-radius: 0 var(--r) var(--r) 0;
+  border-left: 3px solid var(--warn); background: var(--panel);
+  font-size: 13px; color: var(--ink2); line-height: 1.6;
+}
+.gradeWarn b { color: var(--ink); }
+
+.gradeCards {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.gradeCard {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--card);
+}
+.gradeN {
+  font-size: 26px; font-weight: 700; color: var(--ink);
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.gradeN.up { color: var(--good); }
+.gradeN.dn { color: var(--bad); }
+.gradeL {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--ink3); margin-top: 4px;
+}
+.gradeCard b { font-size: 14px; color: var(--ink); margin-top: 2px; }
+.gradeWhy { font-size: 12px; color: var(--ink2); line-height: 1.55; }
+.gradeAside {
+  margin: 10px 0 0; font-size: 12px; color: var(--ink3); line-height: 1.55;
+}
