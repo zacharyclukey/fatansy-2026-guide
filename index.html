@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608151648" />
+<link rel="stylesheet" href="styles.css?v=202608160744" />
 </head>
 <body>
 
@@ -28,6 +28,7 @@
     <input id="search" type="search" placeholder="Search players" aria-label="Search players" />
     <nav class="filters" id="filters" aria-label="Position filter"></nav>
     <span class="spacer"></span>
+    <button id="teamBtn" aria-expanded="false">Your team</button>
     <button id="saveBtn" aria-expanded="false">Save or print</button>
     <button id="settingsBtn" aria-expanded="false">Settings</button>
   </div>
@@ -95,6 +96,13 @@
   <div id="advice" class="advice" data-tip="advice" tabindex="0"></div>
   <div id="lean" class="lean"></div>
 
+  <!-- Your team, without leaving the board. On draft night the question "what do I still
+       need" comes up on every single pick, and answering it meant tabbing to My team and
+       back, losing the board's scroll position and the row you were about to take. It is
+       off by default because it costs vertical space, and on a laptop the board is what
+       you want to see. -->
+  <div id="teamStrip" class="teamStrip" hidden></div>
+
   <div class="colBar">
     <span class="colBarLabel">Show</span>
     <span id="colToggles" class="chips"></span>
@@ -125,6 +133,7 @@
     <div id="byes" class="byes"></div>
     <h2 class="h2">What the draft cost</h2>
     <div id="cost" class="cards"></div>
+    <div id="costPicks"></div>
     <h2 class="h2">What you still need</h2>
     <div id="needs" class="board"></div>
   </main>
@@ -276,6 +285,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608151648"></script>
+<script type="module" src="app.js?v=202608160744"></script>
 </body>
 </html>

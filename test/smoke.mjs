@@ -1454,6 +1454,65 @@ const fire = (el, type) => {
     /Mock/.test(d.querySelector('#league').textContent));
 }
 
+// ------------------------------------------------- 6c. your team, without leaving the board
+// The strip exists so nobody has to tab away mid-pick. Its one hard requirement is that it
+// never disagrees with the My team tab about who is starting - they share lineupOf(), and
+// this checks the two really do come out the same.
+{
+  const { d } = await boot();
+  // a first boot with no leagues imported opens on Setup, and the strip lives on the board
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  const strip = d.querySelector('#teamStrip');
+  ok('the roster strip is off until you ask for it', strip.hidden === true);
+
+  d.querySelector('#teamBtn').click();
+  await settle();
+  ok('the toggle opens it', strip.hidden === false);
+  ok('the toggle says it is pressed',
+    d.querySelector('#teamBtn').getAttribute('aria-expanded') === 'true');
+
+  // an empty roster: every starting slot open, and it says so in words
+  const empties = strip.querySelectorAll('.slot.empty').length;
+  ok('an empty team shows every starting slot as empty', empties === 9, `${empties}`);
+  ok('and says what is missing without jargon',
+    /still need/.test(strip.textContent) && /receivers/.test(strip.textContent)
+    && !/2 WR/.test(strip.textContent), strip.querySelector('.teamNeed').textContent);
+
+  // draft four men and the slots fill
+  const rows = [...d.querySelectorAll('.row.player')];
+  for (const r of rows.slice(0, 4)) r.querySelector('[data-m]').click();
+  await settle();
+  const filled = strip.querySelectorAll('.slot.filled').length;
+  ok('picks fill the slots', filled === 4, `${filled}`);
+  ok('the pick count keeps up', /4 of \d+ picks/.test(strip.textContent), strip.textContent);
+
+  // the two views must name the same starters
+  const stripNames = [...strip.querySelectorAll('.slot.filled b')].map((x) => x.textContent.trim());
+  d.querySelector('[data-v="roster"]').click();
+  await settle();
+  const tabStarters = [...d.querySelectorAll('#lineup .row.lineup:not(.head)')]
+    .filter((r) => !/Bench/.test(r.querySelector('.role').textContent))
+    .map((r) => r.querySelector('.nm').childNodes[0].textContent.trim());
+  const sameSet = tabStarters.length === stripNames.length
+    && tabStarters.every((n) => stripNames.some((s) => n.endsWith(s.replace(/^\w\. /, ''))));
+  ok('the strip and the My team tab name the same starters', sameSet,
+    `${stripNames.join(', ')} vs ${tabStarters.join(', ')}`);
+
+  // and it is remembered, because it is a way of working and not a panel you peek into
+  d.querySelector('[data-v="board"]').click();
+  await settle();
+  const store = JSON.parse(d.defaultView.localStorage.getItem('draft2026'));
+  ok('the choice is saved', store.showTeam === true);
+}
+{
+  const store = { draft2026: JSON.stringify({ showTeam: true, league: 0 }) };
+  const { d } = await boot({ store });
+  ok('and it comes back open next time', d.querySelector('#teamStrip').hidden === false);
+  ok('the button comes back pressed too',
+    d.querySelector('#teamBtn').getAttribute('aria-expanded') === 'true');
+}
+
 // ---------------------------------------------------------------- 7. offline
 {
   const { d, errs } = await boot({ offline: true });

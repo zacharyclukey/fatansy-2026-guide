@@ -1,12 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain } from './engine.js?v=202608151648';
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, adpWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608151648';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608151648';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608151648';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608151648';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote } from './engine.js?v=202608160744';
+// adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
+// which is exactly the judgement the cost view has stopped making - see costTable below.
+// It survives in mock.js because it is still an honest description of what the ROOM did.
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608160744';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608160744';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608160744';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608160744';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608151648';
+const BUILD = '202608160744';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -359,6 +362,46 @@ function verdict(r) {
     + (wv < 45 ? ` The worry: ${WORRY[wk]} (${Math.round(wv)}).` : '');
 }
 
+// How often this man would actually be in your lineup, and why - in the plainest words
+// there are, because this panel is read by someone who does not follow football.
+//
+// It is the one number on the card that depends on the team YOU have already got, and it
+// is the answer to "why is the app telling me to take a backup running back instead of
+// this tight end who is projected for more points". Silent for anyone who would walk
+// straight into your starting lineup, because for him there is nothing to explain.
+function benchLine(r) {
+  if (!r || r.lineup == null || !(r.pts > 0)) return '';
+  const share = r.lineup / r.pts;
+  const have = picks().mine.map((id) => byId(id)?.pos).filter((q) => q === r.p.pos).length;
+  const weeks = Math.round(Math.min(1, share) * 17);
+  const hc = r.hc;
+
+  // The insurance case: he is next in line behind a man you already own.
+  if (hc && r.mineLead) {
+    return `<p class="dSub"><b>He is the backup to ${esc(hc.leadName)}, who is already on
+your team.</b> If ${esc(hc.leadName.split(' ').pop())} gets hurt, this is the man who takes
+over his job — so you would be covered in the one week you would otherwise be stuck. That
+is worth more than his own projection says, and it is why he is this high.</p>`;
+  }
+  if (hc) {
+    return `<p class="dSub">He is the backup to ${esc(hc.leadName)}, who plays for another
+team in real life and is not on your roster. If ${esc(hc.leadName.split(' ').pop())} gets
+hurt this man inherits the job — a decent bet, but a bet on somebody else's bad luck rather
+than cover for your own.</p>`;
+  }
+  if (share > 0.9) return '';                    // he starts; nothing to explain
+
+  const pos = word(r.p.pos, true);
+  const own = have === 0 ? '' : ` You already have ${have} ${have === 1 ? word(r.p.pos) : pos}.`;
+  const rounded = weeks <= 0 ? 'almost never' : `about ${weeks} week${weeks === 1 ? '' : 's'}`;
+  return `<p class="dSub"><b>${rounded} of the season.</b>${own} He would sit on your bench
+and only play when the ${pos} ahead of him are hurt or on a bye — so he is worth
+<b>${Math.round(r.lineup)}</b> points to your lineup, not the
+${Math.round(r.pts)} on his card.</p>
+<p class="dNote">Every bench pick is judged this way: not on his projection, but on how
+often he would end up in your team and what he would be doing there.</p>`;
+}
+
 // ---------------------------------------------------------------- board
 // User-added stats are spliced into the component definitions and given percentiles,
 // so from here on they behave exactly like the built-in ones.
@@ -606,6 +649,7 @@ function startMock() {
   st.mock = { league: st.league, slot, disc: +($('#disc')?.value ?? 40),
     seed: Math.floor(Math.random() * 1e6) + 1, log: [], done: false };
   st.picks[st.league] = { drafted: [], mine: [] };
+  clearShots();
   if (st.clockAt) delete st.clockAt[st.league];
   lastCols = '';                       // the row buttons change wording during a mock
   advanceMock();
@@ -621,12 +665,43 @@ function startMock() {
 function endMock(keep) {
   if (!st.mock) return;
   st.mock = null;
-  if (!keep) st.picks[st.league] = { drafted: [], mine: [] };
+  if (!keep) { st.picks[st.league] = { drafted: [], mine: [] }; clearShots(); }
   lastCols = '';
   save();
   renderChrome();
   rebuild();
 }
+
+// ---------------------------------------------------------------- what a pick cost
+// The alternatives to a pick only exist at the moment it is made. Ten seconds later half
+// of them are off the board and "who else could you have had" has no answer left, which is
+// why the old cost panel fell back on ADP: it was the only thing still around afterwards.
+// So the record is taken here, on the way past, for every pick that is yours.
+//
+// It runs the plan a second time, with the man you took forced into the shortlist so he
+// gets priced even when the app would never have suggested him. That is the extra cost of
+// this - one more rollout per pick of yours, about fifteen a draft.
+function stampShot(id) {
+  if (!clock?.picks?.length || !board?.rows) return;
+  const drafted = new Set(picks().drafted);
+  if (drafted.has(id)) return;                 // must be recorded BEFORE the pick lands
+  const have = {};
+  for (const x of picks().mine) {
+    const p = byId(x);
+    if (p) have[p.pos] = (have[p.pos] || 0) + 1;
+  }
+  const res = planDraft(board.rows, clock, drafted, board.league, have,
+    { candidates: 10, horizon: PLAN_HORIZON, must: [id] });
+  const shot = pickShot(res, id, clock);
+  if (!shot) return;
+  // Kept outside st.picks on purpose: a practice draft rebuilds that object wholesale from
+  // its log on every pick, and the records would go with it.
+  st.shots ||= {};
+  (st.shots[st.league] ||= {})[id] = shot;
+}
+
+const shotFor = (id) => st.shots?.[st.league]?.[id] || null;
+const clearShots = () => { if (st.shots) st.shots[st.league] = {}; };
 
 // A pick made by the person, from the real board. Everything else follows from it.
 function mockTake(id, by) {
@@ -637,6 +712,7 @@ function mockTake(id, by) {
   if (pickTeam(n, teamsOf(lg)) !== m.slot) return false;
   const p = byId(id);
   if (!p || m.log.some((x) => x.id === id)) return false;
+  stampShot(id);
   if (by !== 'app') remember(`${p.name} in the practice draft`);
   m.log.push({ n, team: m.slot, id, pos: p.pos, adp: p.adp ?? null, by: by || 'you' });
   advanceMock();
@@ -671,6 +747,7 @@ function autoDraft(all) {
     const p = autoPick(board.rows, drafted, roster, lg, rounds - roster.length, caps,
       rec ? { id: rec.top.best.p.id, pos: rec.top.pos } : null);
     if (!p) break;
+    stampShot(p.id);                     // before the pick lands, while the board is intact
     m.log.push({ n: m.log.length + 1, team: m.slot, id: p.id, pos: p.pos,
       adp: p.adp ?? null, by: 'app' });
     syncMockPicks();
@@ -785,7 +862,9 @@ function scheduleRebuild() {
 }
 
 function renderAll() {
-  if (view === 'board') { renderMockBar(); renderBoard(); renderAdvice(); renderLean(); renderKeys(); }
+  if (view === 'board') {
+    renderMockBar(); renderBoard(); renderAdvice(); renderLean(); renderTeamStrip(); renderKeys();
+  }
   if (view === 'roster') renderRoster();
   if (view === 'mock') renderMock();
   if (view === 'ratings') renderRatings();
@@ -1023,6 +1102,7 @@ function detail(r) {
   const sec = (title, body, cls = '') => (body
     ? `<section class="dSec ${cls}"><h4>${title}</h4>${body}</section>` : '');
 
+
   return `<div class="detail">
 <div class="dHead">${head}</div>
 ${chips ? `<p class="dChips">${chips}</p>` : ''}
@@ -1043,6 +1123,8 @@ ${why ? ` ${why}` : ''}</p>`)}
 
 ${sec('Will he still be there next time you pick?', wait
     ? `<p class="dSub">${wait}</p>` : '')}
+
+${sec('If you took him, how often would he be in your lineup?', benchLine(r))}
 
 ${sec('How he matches what you said you like', r.tags?.length
     ? `<p class="tags">${r.tags.map((t) => `<span class="tag${
@@ -1129,6 +1211,69 @@ function byesHTML(cards) {
     : '<p class="facts">Nothing drafted yet.</p>';
 }
 
+// ---------------------------------------------------------------- what the draft cost
+// This used to be four numbers about ADP, and ADP is the wrong scorer. A pick taken before
+// the room takes him was called a reach - which meant the app was calling its own advice a
+// mistake every time its board disagreed with the market, which is the entire reason to
+// have a board of your own. See the long note above pickShot in engine.js.
+//
+// What it asks now is what a person actually wants to know afterwards: was there somebody
+// better sitting right there, and did taking this man cost me anybody. Both come off the
+// record taken at the moment of the pick, in the same units the recommendation panel uses,
+// so the two cannot contradict each other.
+const COST_TONE = { top: 'up', fine: 'up', paid: '', left: 'dn', wasted: 'bad', unknown: '' };
+
+function costList(ids) {
+  return ids.map((id) => {
+    const p = byId(id);
+    if (!p) return null;
+    const shot = shotFor(id);
+    return { id, p, shot, v: pickCost(shot), mkt: marketNote(shot) };
+  }).filter(Boolean);
+}
+
+const costCard = (label, val, note) => `<div class="card"><span class="cardV">${val}</span>
+<span class="cardL">${label}</span><span class="hint">${note}</span></div>`;
+
+function costCards(list) {
+  const known = list.filter((x) => x.shot);
+  const lost = known.filter((x) => x.v.kind === 'wasted');
+  const clean = known.filter((x) => x.v.kind === 'top' || x.v.kind === 'fine');
+  const points = Math.round(known.reduce((a, x) => a + x.v.points, 0));
+  return costCard('Picks made', list.length, 'Every player you have taken.')
+    + costCard('Best man on the board', `${clean.length} of ${known.length || 0}`,
+      'Picks where nothing better was sitting there. These cost you nothing at all.')
+    + costCard('Points left behind', points,
+      'Added up over the draft, against the best man your own board had at each pick.')
+    + costCard('Picks that lost you a player', lost.length,
+      lost.length ? `${lost.map((x) => x.v && x.p.name).join(', ')} — you could have waited `
+        + 'and did not.'
+        : 'None. No pick of yours was spent on a man who was going to be there anyway.');
+}
+
+function costTable(list) {
+  if (!list.length) {
+    return '<p class="empty">Tick <b>Mine</b> on the board as you draft and every pick '
+      + 'appears here with what it cost.</p>';
+  }
+  return `<div class="board costPicks">
+<div class="row head costPick"><span>Pick</span><span>Player</span><span>Your board</span>
+<span>The room</span><span>What it cost</span></div>
+${list.map(({ p, shot, v, mkt }) => `<div class="row costPick">
+<span class="num">${shot?.at ?? '—'}</span>
+<span class="who">${posTag(p.pos)}<span class="nm">${p.name}
+<span class="tm">${p.team || ''}</span></span></span>
+<span class="ourRk">${shot ? `#${shot.me.rank}<span class="tm"> · ${Math.round(shot.me.score)}</span>` : '—'}</span>
+<span class="num">${p.adp ? p.adp.toFixed(0) : '—'}</span>
+<span class="cost ${COST_TONE[v.kind]}"><b>${v.head}</b></span>
+<span class="costWhy">${v.why}${mkt ? ` <span class="mkt">${mkt}</span>` : ''}</span></div>`).join('')}</div>
+<p class="hint"><b>Your board</b> is where your own ratings had him and what they scored him,
+so you can see for yourself where you disagreed with everyone else. <b>The room</b> is the
+pick the rest of the fantasy world usually takes him at — that is information about them,
+not a mark against you. The only thing counted as a mistake here is taking a man who was
+not going anywhere while somebody you wanted more went to another team.</p>`;
+}
+
 function renderRoster() {
   const lg = board.league;
   renderAdvice2();
@@ -1137,16 +1282,10 @@ function renderRoster() {
   $('#lineup').innerHTML = lineupTable(cards);
   $('#byes').innerHTML = byesHTML(cards);
 
-  const withPick = cards.filter((c) => c.pick);
-  const avg = withPick.length
-    ? withPick.reduce((a, c) => a + c.vsAdp, 0) / withPick.length : 0;
-  const card = (label, val, note) => `<div class="card"><span class="cardV">${val}</span>
-<span class="cardL">${label}</span><span class="hint">${note}</span></div>`;
-  $('#cost').innerHTML = card('Picks made', cards.length, 'Players you have ticked Mine.')
-    + card('Average vs ADP', avg.toFixed(1), 'Positive means they fell to you.')
-    + card('Bargains', withPick.filter((c) => c.vsAdp >= 8).length, 'Taken 8+ picks after the room had them.')
-    + card('Risky picks', cards.filter((c) => /^Risky|dart throw/.test(riskOf(c.r))).length,
-      'Balance these against the safe ones.');
+  const list = costList(picks().mine);
+  $('#cost').innerHTML = costCards(list);
+  const table = $('#costPicks');
+  if (table) table.innerHTML = costTable(list);
 
   const have = {};
   for (const c of cards) have[c.r.p.pos] = (have[c.r.p.pos] || 0) + 1;
@@ -1157,6 +1296,78 @@ function renderRoster() {
 <span class="num">${want}</span><span class="num">${got}</span>
 <span class="${got < want ? 'dn' : 'up'}">${got < want ? `Need ${want - got} more` : `Filled — ${got} drafted`}</span></div>`;
     }).join('');
+}
+
+// ---------------------------------------------------------------- team strip
+// The same question, asked on every pick: what have I got, and what is still empty?
+//
+// It is answered on the My team tab already, and this does NOT compute a second answer -
+// it calls the same lineupOf() that fills that tab. Two functions working out who your
+// starting flex is would eventually disagree, and then the app is arguing with itself on
+// draft night. So the slot maths lives in one place and this is a second view of it.
+
+// Plain English, because half the point of this app is that someone who does not follow
+// football can read it. "You still need 2 WR" is jargon; "two receivers" is not. The
+// position words are the recommendation panel's own - one list, so the two boxes on this
+// screen cannot end up calling the same position different things.
+const COUNT_WORD = ['no', 'a', 'two', 'three', 'four', 'five', 'six'];
+function needPhrase(pos, n) {
+  const one = pos === 'FLEX' ? 'flex spot' : word(pos, false);
+  const many = pos === 'FLEX' ? 'flex spots' : word(pos, true);
+  if (n === 1) return `${/^[aeiou]/.test(one) ? 'an' : 'a'} ${one}`;
+  return `${COUNT_WORD[n] || n} ${many}`;
+}
+const joinWords = (list) => (list.length < 2 ? (list[0] || '')
+  : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
+// first initial and surname - a full name does not fit a slot chip and truncating with an
+// ellipsis makes two different players look the same
+const shortName = (name) => {
+  const bits = String(name || '').split(' ');
+  return bits.length < 2 ? name : `${bits[0][0]}. ${bits.slice(1).join(' ')}`;
+};
+
+const SLOT_ORDER = ['QB', 'RB', 'WR', 'TE', 'FLEX', 'K', 'DEF'];
+
+function renderTeamStrip() {
+  const el = $('#teamStrip');
+  if (!el) return;
+  el.hidden = !st.showTeam;
+  if (!st.showTeam) return;
+  const lg = board.league;
+  const cards = lineupOf(picks().mine, lg);
+
+  const slots = SLOT_ORDER.filter((p) => lg.starters[p] > 0);
+  const gaps = [];
+  const cells = [];
+  for (const pos of slots) {
+    const want = lg.starters[pos];
+    const got = cards.filter((c) => (pos === 'FLEX' ? c.role === 'FLEX'
+      : c.role === 'Starter' && c.r.p.pos === pos));
+    for (let i = 0; i < want; i += 1) {
+      const c = got[i];
+      cells.push(`<span class="slot ${c ? 'filled' : 'empty'}">
+<i class="pos ${POSCOL[pos] || ''}">${pos}</i>
+<b>${c ? shortName(c.r.p.name) : 'empty'}</b>
+${c?.r.p.bye ? `<em>bye ${c.r.p.bye}</em>` : ''}</span>`);
+    }
+    if (got.length < want) gaps.push([pos, want - got.length]);
+  }
+
+  const bench = cards.filter((c) => c.role === 'Bench');
+  const benchMax = lg.bench || 0;
+  const total = roundsOf(lg);
+  const line = gaps.length
+    ? `You still need ${joinWords(gaps.map(([p, n]) => needPhrase(p, n)))}.`
+    : 'Every starting spot is filled — from here on you are drafting your bench.';
+
+  el.innerHTML = `<div class="teamHead"><b>Your team</b>
+<span class="hint">${cards.length} of ${total} picks made</span></div>
+<div class="slots">${cells.join('')}</div>
+${benchMax ? `<div class="benchLine"><span class="benchLbl">Bench ${bench.length} of ${benchMax}</span>
+<span class="benchWho">${bench.length
+  ? bench.map((c) => `${posTag(c.r.p.pos)}${shortName(c.r.p.name)}`).join('')
+  : '<span class="hint">nobody yet</span>'}</span></div>` : ''}
+<p class="teamNeed${gaps.length ? '' : ' done'}">${line}</p>`;
 }
 
 // ---------------------------------------------------------------- save and print
@@ -1386,10 +1597,11 @@ player you want.<div class="rowbtns"><button data-v="board" class="primary">Back
   // "your best bit of business was the Dallas defence" is noise. The headline is about
   // the picks that decided something.
   const called = rated.filter((x) => !['K', 'DEF'].includes(x.pos));
-  const gaps = rated.map((x) => vsAdp(x.n, x.adp));
-  const avg = gaps.length ? gaps.reduce((a, b) => a + b, 0) / gaps.length : 0;
   const best = [...called].sort((a, b) => (b.n - b.adp) - (a.n - a.adp))[0];
-  const worst = [...called].sort((a, b) => (a.n - a.adp) - (b.n - b.adp))[0];
+  // The verdicts, in pick order, off the records taken as each pick was made.
+  const costs = costList(mineLog.map((x) => x.id));
+  const byPick = new Map(costs.map((c) => [c.id, c]));
+  const wasted = costs.filter((c) => c.v.kind === 'wasted');
   const short = Object.entries(need.short).filter(([, v]) => v > 0)
     .map(([p, v]) => `${v} ${p}`);
   if (need.flex > 0) short.push(`${need.flex} flex`);
@@ -1403,9 +1615,6 @@ player you want.<div class="rowbtns"><button data-v="board" class="primary">Back
       : `You made ${mineLog.length - auto} of these picks and the app made ${auto} by `
         + 'following its own recommendation.';
 
-  const card = (label, val, note) => `<div class="card"><span class="cardV">${val}</span>
-<span class="cardL">${label}</span><span class="hint">${note}</span></div>`;
-
   out.innerHTML = `<h2 class="h2">What happened</h2>
 <p class="mockLede">You drafted from <b>slot ${m.slot} of ${teamsOf(lg)}</b> against a room that
 ${roomWord(m.disc)}. ${whose} ${short.length
@@ -1415,34 +1624,38 @@ That is the one mistake worth avoiding: an empty slot scores zero every week.`
 ${best && best.n - best.adp >= 6
     ? ` Your best bit of business was <b>${byId(best.id)?.name}</b>, who lasted
 ${Math.round(best.n - best.adp)} picks past his usual spot.` : ''}
-${worst && worst.n - worst.adp <= -10
-    ? ` You paid up for <b>${byId(worst.id)?.name}</b>, ${Math.round(-(worst.n - worst.adp))}
-picks before the room normally takes him — fine if you meant it.` : ''}</p>
+${wasted.length
+    ? ` The one thing that went wrong: <b>${wasted.map((c) => c.p.name).join('</b>, <b>')}</b>
+— ${wasted.length === 1 ? 'he was' : 'they were'} still going to be there next time round,
+and waiting would have got you somebody else as well.`
+    : ' <b class="good">No pick of yours was spent on a man who was going to be there anyway.</b>'}</p>
 
-<div class="cards">${card('Average vs ranking', `${avg > 0 ? '+' : ''}${avg.toFixed(1)}`,
-    `Above zero means players tended to fall to you. Counts the ${rated.length} of your `
-    + `${mineLog.length} picks the room ranks inside a ${total}-pick draft.`)
-+ card('Bargains', gaps.filter((g) => g >= 12).length, 'Taken 12+ picks past their usual spot.')
-+ card('Reaches', gaps.filter((g) => g <= -12).length, 'Taken 12+ picks early.')
-+ card('Starting slots', short.length ? `${need.total} empty` : 'Full', 'Empty slots score nothing.')}</div>
+<div class="cards">${costCards(costs)
++ costCard('Starting slots', short.length ? `${need.total} empty` : 'Full', 'Empty slots score nothing.')}</div>
 
 <h2 class="h2">Every pick you made</h2>
-<div class="board mockPicks">
-<div class="row head mockPick"><span>Rd</span><span>Pick</span><span>Player</span><span>Ranked</span><span>What it cost</span></div>
+<div class="board costPicks">
+<div class="row head costPick"><span>Pick</span><span>Player</span><span>Your board</span>
+<span>The room</span><span>What it cost</span></div>
 ${mineLog.map((x) => {
-    const p = byId(x.id);
-    const g = isRanked(x.adp, total) ? vsAdp(x.n, x.adp) : null;
-    return `<div class="row mockPick">
-<span class="rk">${roundOf(x.n, teamsOf(lg))}</span>
+    const c = byPick.get(x.id);
+    if (!c) return '';
+    const { p, shot, v, mkt } = c;
+    return `<div class="row costPick">
 <span class="num">${x.n}</span>
-<span class="who">${posTag(p?.pos || '')}<span class="nm">${p?.name || x.id}
-<span class="tm">${p?.team || ''}</span></span>${x.by === 'app' && auto < mineLog.length
+<span class="who">${posTag(p.pos)}<span class="nm">${p.name}
+<span class="tm">${p.team || ''}</span></span>${x.by === 'app' && auto < mineLog.length
       ? '<span class="autoMark" title="The app made this pick">auto</span>' : ''}</span>
+<span class="ourRk">${shot ? `#${shot.me.rank}<span class="tm"> · ${Math.round(shot.me.score)}</span>` : '—'}</span>
 <span class="num">${x.adp ? x.adp.toFixed(0) : '—'}</span>
-<span class="cost ${g == null ? '' : g >= 4 ? 'up' : g <= -4 ? 'dn' : ''}">${adpWord(x.n, x.adp, total)}</span></div>`;
+<span class="cost ${COST_TONE[v.kind]}"><b>${v.head}</b></span>
+<span class="costWhy">${v.why}${mkt ? ` <span class="mkt">${mkt}</span>` : ''}</span></div>`;
   }).join('')}</div>
-<p class="hint">"Ranked" is where the whole fantasy world usually takes him. Later than that
-means he fell to you; earlier means you wanted him more than everyone else did.</p>
+<p class="hint"><b>Your board</b> is where your own ratings had him at that moment and what
+they scored him. <b>The room</b> is where the rest of the fantasy world usually takes him.
+Taking somebody earlier than the room does is not a mistake — it is the whole reason to
+have ratings of your own. The only thing counted against you here is spending a pick on a
+man who was not going anywhere while somebody you wanted more went to another team.</p>
 
 <h2 class="h2">Your lineup</h2>
 ${lineupTable(cards)}
@@ -1797,6 +2010,11 @@ function renderChrome() {
   $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
   if ($('#rookie')) $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
+  const tb = $('#teamBtn');
+  if (tb) {
+    tb.setAttribute('aria-expanded', String(!!st.showTeam));
+    tb.classList.toggle('on', !!st.showTeam);
+  }
   readouts();
 }
 
@@ -1989,6 +2207,7 @@ function keyAct(mine) {
   }
   remember(`${r.p.name} ${mine ? 'to your team' : 'off the board'}`);
   if (mine) {
+    stampShot(r.p.id);
     toggle('mine', r.p.id);
     const dl = picks().drafted;
     if (!dl.includes(r.p.id)) dl.push(r.p.id);
@@ -2016,6 +2235,15 @@ function wire() {
     const p = $('#savePanel');
     p.hidden = !p.hidden;
     e.target.setAttribute('aria-expanded', String(!p.hidden));
+  };
+  // This one is remembered, unlike the two panels above it. Whether you want your roster
+  // on screen is a way of working, not a thing you open and close.
+  $('#teamBtn').onclick = (e) => {
+    st.showTeam = !st.showTeam;
+    e.target.setAttribute('aria-expanded', String(!!st.showTeam));
+    e.target.classList.toggle('on', !!st.showTeam);
+    save();
+    renderTeamStrip();
   };
   $('#saveBoard').onclick = () => {
     const what = filter === 'ALL' ? 'board' : `board-${filter.toLowerCase()}`;
@@ -2227,6 +2455,7 @@ function wire() {
       // which records it and then runs every other team up to your next turn.
       if (mock()) { mockTake(b.dataset.m); return; }
       remember(`${byId(b.dataset.m)?.name || 'a player'} to your team`);
+      stampShot(b.dataset.m);
       const on = toggle('mine', b.dataset.m);
       const dl = picks().drafted;
       if (on && !dl.includes(b.dataset.m)) dl.push(b.dataset.m);
