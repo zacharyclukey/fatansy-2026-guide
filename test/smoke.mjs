@@ -1445,6 +1445,58 @@ const fire = (el, type) => {
     /Pick 8\b/.test(d.querySelector('#clockNow').textContent),
     d.querySelector('#clockNow').textContent);
 
+  // ---- what Sleeper's own docs show, rather than what is convenient ----
+  // A pick carries roster_id as the string "1"; a roster carries it as the number 1. That
+  // branch exists purely to catch an autopick, which has no picked_by, so if the two types
+  // never compare equal then every pick made while you were away looks like a stranger's.
+  sleeperRoutes['/draft/D7/picks'] = [
+    { player_id: players.players[0].id, picked_by: '', roster_id: '3', draft_slot: 3, pick_no: 1, round: 1 },
+    { player_id: players.players[1].id, picked_by: '', roster_id: '5', draft_slot: 5, pick_no: 2, round: 1 },
+    // docs show picks that carry neither a roster_id nor a draft_slot at all
+    { player_id: players.players[2].id, picked_by: 'someone-else', pick_no: 3, round: 1 },
+  ];
+  // sleeper.js imported here is a real module, so it reaches for Node's fetch, not jsdom's.
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (u) => {
+    const p = String(u).replace('https://api.sleeper.app/v1', '');
+    if (!(p in sleeperRoutes)) return Promise.resolve({ ok: false, status: 404 });
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(sleeperRoutes[p]) });
+  };
+  const strPicks = await s.draftPicks('D7', null, 3, null);
+  ok('a string roster_id on a pick still matches your numeric roster',
+    strPicks.filter((p) => p.mine).length === 1 && strPicks[0].mine, JSON.stringify(strPicks));
+  ok('a pick with no roster_id or slot is nobody\'s by default',
+    strPicks[2].mine === false);
+  const noneMine = await s.draftPicks('D7', null, null, null);
+  ok('with no roster and no seat, roster_id 0 is not invented',
+    noneMine.every((p) => p.mine === false));
+
+  // A mock spun up from a league you are not in: the league read fails, the board still
+  // works, and the screen has to say which of the two fallbacks it took.
+  sleeperRoutes['/draft/1394053712187506699'] = {
+    ...sleeperRoutes['/draft/M9'], draft_id: '1394053712187506699',
+    metadata: { name: 'Someone Else\'s Room', league_id: 'PRIVATE', scoring_type: 'half_ppr' },
+  };
+  sleeperRoutes['/draft/1394053712187506699/picks'] = [];
+  const blocked = await s.followDraft('1394053712187506699', [], null);
+  ok('a mock from an unreadable league still produces a board',
+    blocked.teams === 12 && blocked.starters.RB === 2 && blocked.rounds === 16);
+  ok('and it falls back to the scoring word it was given',
+    blocked.scoring.rec === 0.5 && blocked.scoringFrom === null);
+  ok('and it knows the difference between no league and an unreadable one',
+    blocked.srcBlocked === true);
+  const plain = await s.followDraft('M9x', [], null).catch(() => null);
+  ok('a draft id Sleeper has never heard of is an error, not an empty board', plain === null);
+  globalThis.fetch = realFetch;
+
+  d.querySelector('[data-v="setup"]').click();
+  d.querySelector('#followUrl').value = '1394053712187506699';
+  d.querySelector('#followBtn').click();
+  await new Promise((r) => setTimeout(r, 400));
+  const fm3 = d.querySelector('#followMsg').textContent;
+  ok('the screen says the league could not be read, not that there was none',
+    /would not let the board read/.test(fm3) && !/standalone mock/.test(fm3), fm3);
+
   // Re-importing your real leagues must not silently drop a mock you are mid-draft in.
   d.querySelector('[data-v="setup"]').click();
   d.querySelector('#user').value = 'zclukey';

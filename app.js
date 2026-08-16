@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote } from './engine.js?v=202608160810';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote } from './engine.js?v=202608160905';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608160810';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608160810';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608160810';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608160810';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608160905';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608160905';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608160905';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608160905';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608160810';
+const BUILD = '202608160905';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -1932,8 +1932,12 @@ async function doFollow() {
     msg('#followMsg', `Following ${lg.name} — ${lg.teams} teams, ${lg.rounds || '?'} rounds, `
       + `${shape}. ${lg.scoringFrom
         ? `Scoring came across from ${lg.scoringFrom}.`
-        : 'Sleeper only publishes one word of scoring for a standalone mock, so the board '
-          + 'is using ordinary scoring — no bonuses, no fines.'} `
+        : lg.srcBlocked
+          ? 'That mock was made from a league Sleeper would not let the board read — most '
+            + 'likely a private one, or one you are not in. Scoring is ordinary PPR-style '
+            + 'rules, so if that league pays bonuses the ratings will be a little off.'
+          : 'Sleeper only publishes one word of scoring for a standalone mock, so the board '
+            + 'is using ordinary scoring — no bonuses, no fines.'} `
       + `${lg.slot ? `You are in seat ${lg.slot}.` : 'Set your draft slot on the Board tab.'} `
       + 'Then press Start auto-sync above.', 'good');
   } catch (e) {

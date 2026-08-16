@@ -186,6 +186,11 @@ export async function followDraft(draftId, scoreKeys = [], userId = null) {
   let ignored = [];
   let scoringFrom = null;
   let srcName = null;
+  // Three outcomes, not two, and they are not the same thing to a person reading the screen:
+  // the mock had no league behind it at all; it had one and we read it; it had one and we
+  // could not read it. The last is the only one where the board might be quietly wrong
+  // about scoring while a real set of rules exists somewhere, so it gets said out loud.
+  let srcBlocked = false;
   if (srcId) {
     try {
       const L = await getLeague(srcId);
@@ -195,9 +200,12 @@ export async function followDraft(draftId, scoreKeys = [], userId = null) {
         ignored = got.ignored;
         scoringFrom = L.name || 'the league it was made from';
         srcName = L.name || null;
-      }
+      } else srcBlocked = true;
       if (L?.roster_positions?.length) shape = starters(L.roster_positions);
-    } catch { /* the source league may be private or gone - the one word still works */ }
+    } catch {
+      // the source league may be private, or one you are not in - the one word still works
+      srcBlocked = true;
+    }
   }
 
   const teams = Number(d.settings?.teams) || 12;
@@ -217,6 +225,7 @@ export async function followDraft(draftId, scoreKeys = [], userId = null) {
     rosterId: null,
     status: d.status || 'pre_draft',
     scoringFrom,
+    srcBlocked,
     imported: true,
     follow: true,
   };
@@ -230,11 +239,18 @@ export async function followDraft(draftId, scoreKeys = [], userId = null) {
 // the app which seat is yours.
 export async function draftPicks(draftId, userId, rosterId, slot = null) {
   const picks = await getPicks(draftId);
+  // Sleeper hands back roster_id as the STRING "1" on a pick and the NUMBER 1 on a roster -
+  // its own docs show both. Compared with === those never match, which quietly killed the
+  // one branch that exists to catch an autopick (an autopick has no picked_by at all). So
+  // every id is compared as a number, and a missing one is left alone rather than becoming 0.
+  const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
+  const mineRoster = num(rosterId);
+  const mineSlot = num(slot);
   return (picks || []).map((p) => ({
     playerId: String(p.player_id),
     mine: (!!userId && p.picked_by === userId)
-      || (rosterId != null && p.roster_id === rosterId)
-      || (slot != null && Number(p.draft_slot) === Number(slot)),
+      || (mineRoster != null && num(p.roster_id) === mineRoster)
+      || (mineSlot != null && num(p.draft_slot) === mineSlot),
     pick: p.pick_no,
     round: p.round,
   }));
