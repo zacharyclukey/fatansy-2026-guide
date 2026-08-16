@@ -12,7 +12,7 @@
 
 // One line on purpose: the jsdom harness strips imports with a per-line regex, so a
 // wrapped import statement leaves a stray brace behind and the whole app fails to evaluate.
-import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608160744';
+import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608160810';
 
 // Everything the bench pricing needs, worked out once for a whole draft rather than once
 // per pick. See the long note above benchWorth in engine.js for what this is for.
