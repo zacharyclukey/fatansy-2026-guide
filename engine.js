@@ -644,12 +644,63 @@ export function buildBoard(data, st, cache) {
   const pg = positionGames(data.players);
   const repl = replacementLevels(data.players, league);
 
-  const rows = data.players
-    .filter((p) => inLeague(p, league))
+  // ---- what actually reaches your lineup ------------------------------------------
+  // VOR prices a man against the one you would otherwise START. That is the right question
+  // right up until your slots at his position are full, and then it quietly becomes the
+  // wrong one - which is how a fourth tight end came to outrank a handcuff, and how the
+  // practice room came to draft four of them. From here the board asks the honest version
+  // of the question instead: how much of him ends up in your lineup, and what job is he
+  // doing when he gets there. See the long note above benchWorth.
+  //
+  // This is the only roster-aware number on the board and it changes as you draft, exactly
+  // like the need bonus below it. It does NOT touch `pts`: the projection on screen is
+  // still the projection, which is the rule everything else here obeys.
+  const inLeaguePlayers = data.players.filter((p) => inLeague(p, league));
+  const shares = flexShares(inLeaguePlayers, league);
+  const slots = startableSlots(league, shares);
+  const avail = availableShare(pg);
+  const chart = depthChart(inLeaguePlayers, league);
+  const mineIds = new Set(st.mineIds || []);
+  const queue = {};                     // how many of each position you already own
+  for (const q of st.mine || []) queue[q] = (queue[q] || 0) + 1;
+  // The one bar every bench candidate is measured against - see benchVor below.
+  const benchBar = Math.max(...Object.keys(FLEX_FILL).map((q) => repl[q] || 0), 1);
+
+  const rows = inLeaguePlayers
     .map((p) => {
       const pts = projectedPoints(p, league);
       p._games = ownGames(p, pg);
+      const hc = chart.get(p.id) || null;
+      // Kickers and defences are asked the same question as everybody else, and they should
+      // be. A kicker with an empty kicker slot is certain to be in your lineup, so the
+      // question costs him nothing; a SECOND kicker plays 17% of the season, and without
+      // asking, he came out as the best thing on the board once every other position had
+      // been honestly discounted. When a kicker goes is a matter of timing and is handled
+      // by the need bonus below, which holds him back until the picks run out.
+      const bw = benchWorth(pts, (queue[p.pos] || 0) + 1, slots[p.pos] ?? 1, avail,
+        hc, !!hc && mineIds.has(hc.leadId));
+      const lineup = bw.worth;
       const vor = pts - (repl[p.pos] || 0);
+      // WHICH BAR HE IS MEASURED AGAINST, and this took three wrong answers to get right.
+      //
+      // Replacement level asks "who would I have to START instead". That is the right
+      // question for a man walking into your lineup and the wrong one for a bench body,
+      // twice over. Using his own position's bar punished a handcuff for backs having a
+      // high replacement level and rewarded a fourth tight end for tight ends having a low
+      // one - neither fact being about either man. Weighting the bar by his chance of
+      // playing looked more principled and was worse: it multiplies a NEGATIVE surplus by a
+      // fraction, so a receiver 28 points below replacement who plays 61% of weeks scored
+      // -17 while playing every week would have scored -28. Being less available made him
+      // better. It handed the plan a tight end at five bench picks in a row.
+      //
+      // Bench slots are fungible - any position can sit in any one of them - so every bench
+      // candidate is competing for the same slot against the same alternative, and the
+      // honest comparison between them is simply how many points each puts in your lineup.
+      // One shared bar does that, and taking it from the flex-eligible positions (whose
+      // replacement levels sit within three points of each other here: RB 125, WR 128,
+      // TE 127) keeps it continuous with the men who are filling a real slot.
+      const fillsSlot = (queue[p.pos] || 0) < (slots[p.pos] ?? 1);
+      const benchVor = fillsSlot ? lineup - (repl[p.pos] || 0) : lineup - benchBar;
       const cached = cache?.get(p.id);
       const scores = cached ? { ...cached } : (() => {
         const s = {};
@@ -659,7 +710,8 @@ export function buildBoard(data, st, cache) {
         return s;
       })();
       scores.floorish = floorScore(scores);   // display only, never weighted
-      return { p, pts, vor, scores };
+      return { p, pts, vor, benchVor, scores, hc, lineup,
+        mineLead: !!hc && mineIds.has(hc.leadId) };
     });
 
   // Projection is a percentile of projected points within position, so it needs the
@@ -720,15 +772,12 @@ export function buildBoard(data, st, cache) {
 
   // VOR on a 0-100 scale above replacement. Below replacement it keeps an ORDERED band
   // down to -25 - clamping at 0 once put 142 of 259 players on the same score.
+  //
   const mx = Math.max(...rows.map((r) => r.vor), 1);
   const mn = Math.min(...rows.map((r) => r.vor), -1);
 
   // What you already have, so the board can nudge you toward what you still need.
-  const have = {};
-  for (const q of st.mine || []) have[q] = (have[q] || 0) + 1;
-  const pool = (have.RB || 0) + (have.WR || 0) + (have.TE || 0);
-  const req = (league.starters.RB || 0) + (league.starters.WR || 0)
-    + (league.starters.TE || 0) + (league.starters.FLEX || 0);
+  const have = queue;
   // Picks you have left. Only used to decide when a kicker becomes a need.
   const left = roundsOf(league) - (st.mine || []).length;
   const needFor = (pos) => {
@@ -752,13 +801,16 @@ export function buildBoard(data, st, cache) {
       if (['K', 'DEF'].includes(pos) && left > LATE) return -st.need / 2;
       return st.need;
     }
-    // starters filled: still worth something while a flex slot is open, then a penalty
-    if (['RB', 'WR', 'TE'].includes(pos)) return pool < req ? st.need / 2 : -st.need / 2;
+    // Starters filled. There used to be a second rule here - half a bonus while a flex slot
+    // stood open, a half penalty after - and it was a crude stand-in for the question the
+    // VOR above now answers properly. Keeping both would charge a surplus tight end twice
+    // for the same fact, once in points and once in bonus. The bonus is only ever "fill
+    // your named slots first" now; how much a spare body is worth is priced, not nudged.
     return -st.need / 2;
   };
 
   for (const r of rows) {
-    r.vorPct = r.vor > 0 ? (r.vor / mx) * 100 : (r.vor / Math.abs(mn)) * 25;
+    r.vorPct = r.vor > 0 ? (r.vor / mx) * 100 : (Math.max(r.vor, mn) / Math.abs(mn)) * 25;
     // Kickers and defences have no stats we rate, so every component sits at a flat 50
     // and only the projection percentile moves. That is not a rating - it is "he is the
     // 3rd best defence" dressed up on the same 0-100 scale a receiver uses, which made
@@ -794,6 +846,34 @@ export function buildBoard(data, st, cache) {
       s += st.rookieMax * conf;
     }
     r.score = s;
+
+    // The same score, asked the roster-aware question: how much of him reaches YOUR
+    // lineup, and what job is he doing when he gets there. See the note above benchWorth.
+    //
+    // It is a SECOND number rather than a replacement for the first, and deliberately so.
+    // The board you read is a ruler - it says what a man is worth, full stop, and it must
+    // not move under you because you made a pick. Putting the discount straight into `vor`
+    // was tried and measured: with seven starting slots filled, most of the board fell
+    // below a kicker you are obliged to start, and 43 kickers and defences climbed into the
+    // top hundred. True in a narrow sense, useless on a screen. So the ruler stays raw and
+    // the ADVICE - planDraft, and therefore the recommendation panel and the auto-drafter -
+    // reads this one, which is the only place the question "what should I do with THIS
+    // pick, holding THIS roster" is actually being asked.
+    // ONE slope, all the way down, unlike the raw scale above. The raw board squashes
+    // everything below replacement into a 25-point band, which is right for a ruler nobody
+    // reads the bottom of and fatal here: on the bench EVERY man is below replacement, so
+    // the squash made a point of value worth a fifth of what it is worth up top while
+    // leaving your ratings at full size. Measured: a receiver worth 84 points to the lineup
+    // came out below one worth 66, on ratings alone. A point is a point on this scale.
+    const bPct = (r.benchVor / mx) * 100;
+    // Your ratings and preferences are an opinion about how good he is PER GAME, so they
+    // count in proportion to the games he plays for you. Left at full size they decided the
+    // whole bench: down in the discounted band the value differences are a point or two
+    // while a lean is worth twenty, and the plan put a receiver with a lineup value of 66
+    // ahead of one worth 84 purely on the ratings. Same size as the thing it is adjusting.
+    const share = r.pts > 0 ? Math.max(0, Math.min(1, r.lineup / r.pts)) : 1;
+    r.benchScore = (bPct + lean * share) * posx + r.need
+      + (st.rookie && r.p.rookie ? s - ((r.vorPct + lean) * posx + r.need) : 0);
   }
 
   // A star or a fade is a preference, not an override. It moves a player past anyone
@@ -1057,6 +1137,187 @@ export function markTiers(rows) {
     }
   }
   return rows;
+}
+
+// ---------------------------------------------------------------- the bench
+// WHY THIS EXISTS. Score is Value Over Replacement, and VOR is a STARTER'S idea: it prices
+// a man against whoever you would otherwise have to start. Once your slots at a position
+// are full that framing quietly stops meaning anything, and nothing in the app knew it. A
+// fourth tight end can only ever reach your lineup if the first three are all unavailable
+// on the same Sunday, and yet the board handed him his full VOR - which, late in a draft,
+// is a bigger number than a handcuff's, because a handcuff is projected low BY DEFINITION.
+// So the room drafted four tight ends and the recommendation would have told Zach to do
+// the same.
+//
+// The fix is not four new knobs for handcuffs, fliers and rookies. It is one question,
+// asked of every bench pick:
+//
+//     HOW OFTEN WILL HE ACTUALLY BE IN YOUR LINEUP, AND WHAT JOB WILL HE BE DOING?
+//
+// Both halves come from the ONE thing five years of measurement said was real: players
+// miss games, and the entire gap between a projection and a season is games missed. See
+// `injuryGap` above and the note on it. Nothing here forecasts a breakout, because boom
+// rate does not repeat year to year (measured 0.03-0.12) and pretending otherwise would be
+// inventing the same fiction the ratings editor was deleted for.
+
+// Chance a draftable player is available in a given week, measured off the current data
+// file rather than assumed. Six years of Sleeper data put draftable men at 13.0 of 17
+// games (share 0.24); 2025 alone was healthier at 14.2 (share 0.17). Pooled across
+// positions on purpose - the positional durability gap was tested over six seasons and is
+// not real, so splitting it would be fitting noise.
+export function availableShare(games) {
+  const g = Math.max(1, Math.min(FULL_GAMES, games?.league ?? FULL_GAMES - 3));
+  return g / FULL_GAMES;
+}
+
+// HALF ONE: how often is the j-th man you own at a position actually in your lineup?
+//
+// You have `s` startable slots there and he is `j`-th in line. He plays in any week when
+// fewer than `s` of the men ahead of him are available, so this is a binomial tail and not
+// a knob. With s = 1 (tight end) the second man plays 17% of the season, the third 3% and
+// the fourth 0.5% - which is the whole answer to "why four tight ends".
+//
+// `s` is fractional because a flex slot is a fraction of a position; see flexShares.
+export function lineupChance(j, s, a) {
+  const ahead = Math.max(0, Math.round(j) - 1);
+  // P(at most ceil(s)-1 of the men ahead are available), interpolated across the
+  // fractional part of s so that a third of a flex slot is worth a third of a slot.
+  //
+  // There was an `if (ahead < s) return 1` shortcut here and it was the whole bug in
+  // miniature. In an 18-team league tight ends win 19% of the flex spots, so s = 1.39, so
+  // a SECOND tight end came back "always in your lineup" - and every tight end after him
+  // escaped the pricing too, because the room only asked this question of men who were not
+  // filling a slot. Measured: it left 35% of rosters three deep at tight end. A fractional
+  // slot has to be worth a fraction, including for the man standing in it.
+  const lo = Math.floor(s);
+  const frac = s - lo;
+  const cdf = (k) => {                           // P(Binomial(ahead, a) <= k)
+    let sum = 0;
+    let term = (1 - a) ** ahead;                 // P(exactly 0 available)
+    for (let i = 0; i <= k && i <= ahead; i += 1) {
+      sum += term;
+      term *= ((ahead - i) / (i + 1)) * (a / (1 - a));
+    }
+    return Math.max(0, Math.min(1, sum));
+  };
+  const at = cdf(lo - 1);
+  return frac > 0 ? at + frac * (cdf(lo) - at) : at;
+}
+
+// How many startable slots a position really has, counting its share of the flex.
+//
+// Derived, never hardcoded. flexFill already works out who actually wins the flex spots
+// league-wide once every dedicated slot is filled, and in these PPR leagues the answer is
+// blunt: the flex goes 87% to receivers, 13% to backs and 0% to tight ends. So a tight end
+// has ONE startable slot, and the old rule - which handed the full flex allowance to every
+// flex-eligible position at once, as if you might start two tight ends in two flex spots -
+// was granting the same slot away three times over. A TE-premium league would move these
+// numbers on its own, which is the point of deriving them.
+export function flexShares(players, league, ptsOf = projectedPoints) {
+  const flex = (league.starters?.FLEX || 0) * (league.teams || 12);
+  const out = { RB: 0, WR: 0, TE: 0 };
+  if (!flex) return out;
+  const { used } = flexFill(players, league, ptsOf);
+  for (const pos of Object.keys(out)) {
+    out[pos] = Math.max(0, ((used[pos] || 0) - (league.starters?.[pos] || 0)
+      * (league.teams || 12)) / flex);
+  }
+  return out;
+}
+
+export function startableSlots(league, shares) {
+  const want = league.starters || {};
+  const out = {};
+  for (const [pos, n] of Object.entries(want)) {
+    if (pos === 'FLEX') continue;
+    out[pos] = n + (want.FLEX || 0) * (shares?.[pos] || 0);
+  }
+  return out;
+}
+
+// HALF TWO: what job would he be doing?
+//
+// There is no depth-chart feed in the data file and there does not need to be one: the
+// projections ARE the depth chart. A backup is projected low precisely because he is
+// behind somebody, so within one team and one position the best projection has the job and
+// the next man down is the one who inherits it. Isiah Pacheco is projected 54 points
+// because Jahmyr Gibbs is projected 331; that is the fact, stated twice.
+//
+// The gap has to be wide before this means anything. Two backs splitting a committee are
+// not a starter and a handcuff, and treating them as one would hand a lift to half the
+// league.
+export const HANDCUFF_GAP = 2.2;      // the lead man must be worth this many times the next
+export const HANDCUFF_MIN = 40;       // and the job itself has to be worth having
+
+// How many men at a position hold a real job on ONE NFL team. A club fields one starting
+// quarterback, one feature back and one tight end who matters, but three receivers. This
+// is a fact about football rather than a number fitted to anything, and it is what stops
+// the depth chart calling every WR2 in the league a handcuff: Jauan Jennings is not
+// insurance for Justin Jefferson, he is a starter on the same team. The man who INHERITS
+// is the first one below the jobs that already exist.
+export const ROOM_JOBS = { QB: 1, RB: 1, TE: 1, WR: 3 };
+
+export function depthChart(players, league, ptsOf = projectedPoints) {
+  const rooms = new Map();
+  for (const p of players) {
+    if (!ROOM_JOBS[p.pos]) continue;                     // nobody handcuffs a kicker
+    const key = `${p.team}|${p.pos}`;
+    if (!rooms.has(key)) rooms.set(key, []);
+    rooms.get(key).push(p);
+  }
+  const out = new Map();
+  for (const list of rooms.values()) {
+    const scored = list.map((p) => ({ p, pts: ptsOf(p, league) }))
+      .sort((a, b) => b.pts - a.pts);
+    const jobs = ROOM_JOBS[scored[0].p.pos];
+    const lead = scored[jobs - 1];                       // the last man with a real job
+    const next = scored[jobs];                           // and the man behind him
+    if (!lead || !next || lead.pts < HANDCUFF_MIN) continue;
+    if (next.pts * HANDCUFF_GAP > lead.pts) continue;    // a committee, not a handcuff
+    out.set(next.p.id, { leadId: lead.p.id, leadName: lead.p.name,
+      leadPts: lead.pts, ownPts: next.pts });
+  }
+  return out;
+}
+
+// What a bench pick is worth to a particular roster, in projected points.
+//
+// `j` is where he would sit in your queue at his position (1 = your first). `hc` is his
+// depth-chart entry if he has one, and `ownLead` says whether the man he is behind is on
+// YOUR roster - which is the difference Zach asked about, and it is a real one rather than
+// a preference:
+//
+//   - Behind YOUR starter, the two halves are the same event. Gibbs going down is what
+//     both opens your lineup slot and hands Pacheco the job, so you do not multiply two
+//     chances together - you pay for one. That is what "insurance" means, and it is why a
+//     handcuff for a man you own is worth more than the same player would be to anyone
+//     else.
+//   - Behind SOMEBODY ELSE'S starter, the two are independent: their man has to go down
+//     AND your own depth has to have failed. A lottery ticket on another manager's bad
+//     luck, worth something, worth less. Multiplying is exactly that discount, and nobody
+//     had to choose its size.
+//   - A fourth tight end is behind nobody and blocked by his own position: 0.5% of a
+//     season, times a tight end's job. He falls to the bottom on the same arithmetic that
+//     lifts the handcuff, which is the test of whether this is one idea or three.
+// Returns BOTH numbers, because both are needed and they are not the same question.
+// `worth` is the points he puts in your lineup across a season. `chance` is the share of
+// the season he is in it - which is what he displaces a replacement-level starter FOR, and
+// therefore the right weight on the bar he is measured against. Without it a handcuff was
+// charged the full price of a starting running back for a job he holds three weeks a year,
+// and finished below a fourth tight end again.
+export function benchWorth(pts, j, slots, a, hc, ownLead) {
+  const mine = lineupChance(j, slots, a);
+  if (hc && ownLead) {
+    // One event, priced once: the share of the season the man ahead of him misses. He is
+    // not competing with your own depth for the slot, because the thing that empties the
+    // slot is the same thing that gives him the job.
+    const insure = { worth: (1 - a) * hc.leadPts, chance: 1 - a };
+    return insure.worth > pts * mine ? insure : { worth: pts * mine, chance: mine };
+  }
+  // What he would be worth in a week he plays: his own projection, plus the part of the
+  // job ahead of him that falls to him when that man is out.
+  const job = pts + (hc ? (1 - a) * Math.max(0, hc.leadPts - pts) : 0);
+  return { worth: mine * job, chance: mine };
 }
 
 // ---------------------------------------------------------------- saying why
@@ -1365,6 +1626,13 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
   const live = rows.filter((r) => !drafted.has(r.p.id));
   if (!live.length) return null;
 
+  // THE NUMBER THIS WHOLE FUNCTION RANKS BY. `benchScore` is the board score asked the
+  // roster-aware question - how much of this man reaches YOUR lineup, and what job is he
+  // doing when he gets there - and it is the reason the plan no longer recommends a fourth
+  // tight end over a handcuff. See the note above benchWorth in this file. It falls back to
+  // `score` so the hand-built rows in the tests, which have no bench pricing, still work.
+  const val = (r) => (r.benchScore ?? r.score);
+
   // Once every starting slot is filled you are drafting a bench, where there is no slot to
   // reason about and the answer is simply the best man left. Modelled as one endless ANY
   // slot so the same rollout code covers it.
@@ -1392,7 +1660,7 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
   const eligible = (slot, used) => {
     if (!sorted.has(slot)) {
       const all = posFor(slot).flatMap((pos) => byPos.get(pos) || []);
-      sorted.set(slot, all.sort((a, b) => b.score - a.score));
+      sorted.set(slot, all.sort((a, b) => val(b) - val(a)));
     }
     const list = sorted.get(slot);
     return used.size ? list.filter((r) => !used.has(r.p.id)) : list;
@@ -1412,12 +1680,12 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
     for (const r of list) {
       const p = atPick <= clock.currentPick ? 1 : odds(r, atPick);
       if (!take && p >= 0.5) take = r;
-      value += r.score * p * allGone;
+      value += val(r) * p * allGone;
       allGone *= 1 - p;
       if (allGone < 0.001) break;
     }
     // whatever chance is left that they all went, priced at the worst man on the shelf
-    value += (list[list.length - 1]?.score ?? 0) * allGone;
+    value += (list.length ? val(list[list.length - 1]) : 0) * allGone;
     return { value, take: take || list[0] || null };
   };
 
@@ -1499,6 +1767,14 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
     const b = (byPos.get(pos) || [])[0];
     if (b && !cands.includes(b)) cands.push(b);
   }
+  // `must` names men who have to be priced whatever the shortlist thinks of them. Only one
+  // caller wants this: the cost view, which has to know what the plan made of the man you
+  // ACTUALLY took, and you are perfectly free to take somebody the shortlist never saw.
+  // Without it the panel could only report on picks it already approved of.
+  for (const id of opts.must || []) {
+    const r = live.find((x) => x.p.id === id);
+    if (r && !cands.includes(r)) cands.push(r);
+  }
   if (!cands.length) return null;
 
   let exact = true;
@@ -1523,9 +1799,28 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
       const pos = s.take?.p.pos;
       if (pos && fill[pos] == null) fill[pos] = s.value;
     }
-    return { row: r, now: r.score, later: out.value, total: r.score + out.value,
+    return { row: r, now: val(r), later: out.value, total: val(r) + out.value,
       steps: out.steps, fill };
   }).sort((a, b) => b.total - a.total);
+
+  // Once every slot is filled the rollout stops discriminating: with one endless ANY slot,
+  // every branch schedules from the same list and `later` comes out near-identical, so the
+  // whole decision collapses onto the candidate's own value and the question "will he still
+  // be here in thirty picks" disappears. Measured: the app started taking bench men 12+
+  // picks ahead of the market on 41% of its picks, against 31% before.
+  //
+  // So on the bench, among the men who are too close to call - the same STAR_BAND the app
+  // already uses to mean "the numbers are indifferent here" - take the one least likely to
+  // last. That is the app's own cost-of-waiting argument, applied in the one place the
+  // rollout cannot see it. It never overrules a real difference in value.
+  if (bench && plan.length > 1 && later.length) {
+    const band = plan.filter((c) => c.total >= plan[0].total - STAR_BAND);
+    if (band.length > 1) {
+      band.sort((a, b) => odds(a.row, later[0]) - odds(b.row, later[0]));
+      const first = plan.indexOf(band[0]);
+      if (first > 0) plan.unshift(...plan.splice(first, 1));
+    }
+  }
 
   // What the recommendation actually cost each alternative, over the whole draft. This is
   // the number the panel shows, because it is the number the decision used.
@@ -1555,20 +1850,153 @@ export function planDraft(rows, clock, drafted, league, have = {}, opts = {}) {
   for (const pos of wanted) {
     const b = (byPos.get(pos) || [])[0];
     if (!b || !later.length) continue;
-    drop[pos] = { now: b.score,
+    drop[pos] = { now: val(b),
       later: expect(eligible(pos, new Set()), later[later.length - 1]).value };
   }
   for (const c of cost) {
     // the best plan that does NOT open at this position is the one that has to wait for it
     const other = plan.find((x) => x.row.p.pos !== c.pos);
-    c.now = c.best.score;
-    c.wait = other?.fill?.[c.pos] ?? drop[c.pos]?.later ?? c.best.score;
+    c.now = val(c.best);
+    c.wait = other?.fill?.[c.pos] ?? drop[c.pos]?.later ?? val(c.best);
     c.gap = Math.max(0, c.now - c.wait);
     // where that plan actually covers it, so the panel can say "you still get one at 31"
     c.at = other?.steps.find((s) => s.take?.p.pos === c.pos)?.pick ?? null;
   }
 
   return { plan, top, cost, drop, slots, later, at, bench, exact };
+}
+
+// ---------------------------------------------------------------- what a pick cost
+//
+// This panel used to score every pick by distance from ADP, and that is how it came to
+// call the app's own recommendation a mistake. The board takes a man early precisely
+// BECAUSE it rates him above the market; the panel then read the same fact back as the
+// fault. One number, counted twice, once as the reason and once as the crime.
+//
+// Distance from ADP cannot tell the two apart, because it is not measuring anything about
+// your draft. Taking a man twenty picks before the room takes him costs you NOTHING if
+// nobody else you wanted was going to disappear in the meantime. It costs you a great deal
+// if somebody was. That difference is opportunity, and it is what this measures instead:
+//
+//   1. How far below the top of your own board you went. Zero if you took the top of it,
+//      whatever the market thought. This is points left on the table.
+//   2. Whether the man you took would probably have kept until your next pick, and whether
+//      somebody better would NOT have. That, and only that, earns the word reach: a pick
+//      spent on a man who was not going anywhere, while a man who was went to somebody else.
+//
+// Both readings are in the plan's own currency - the total roster the rollout expects each
+// opening move to leave you with - so the panel and the recommendation cannot disagree.
+// Follow the app's advice and the gap is zero by construction, which is the property the
+// old version could not have: it was grading against a different number entirely.
+//
+// ADP stays on screen. It is information about the room, and a disagreement with the room
+// is something to judge for yourself, not a verdict handed down.
+
+// "Probably". Not a new dial: `expect` above already draws the line at even odds when it
+// decides which man you should expect to still be there, and this is the same question
+// asked about one player, so it gets the same answer.
+export const PROBABLE = 0.5;
+
+const r1 = (n) => (n == null ? null : Math.round(n * 10) / 10);
+
+// A record of one pick, taken at the moment it was made, because that is the only moment
+// the alternatives exist. Ten seconds later half of them are off the board and the
+// question "who else could you have had" has no answer.
+//
+// `res` is a planDraft result that priced the man taken - pass his id in opts.must.
+export function pickShot(res, id, clock) {
+  if (!res?.plan?.length) return null;
+  const me = res.plan.find((c) => c.row.p.id === id);
+  if (!me) return null;
+  const now = clock?.currentPick ?? null;
+  const next = clock?.target ?? null;
+  const keepOf = (row) => (next ? availability(row.p.adp, next, now) : null);
+  const cut = (c) => ({ id: c.row.p.id, name: c.row.p.name, pos: c.row.p.pos,
+    rank: c.row.rank ?? null, score: r1(c.row.score), total: r1(c.total) });
+
+  // The best man you also wanted who probably would NOT have been there next time. Read
+  // off the plan, so "wanted" means the app wanted him too, not merely that he was famous.
+  let lost = null;
+  for (const c of res.plan) {
+    if (c.total <= me.total) continue;
+    const p = keepOf(c.row);
+    if (p == null || p >= PROBABLE) continue;
+    if (!lost || c.total > lost.total) lost = c;
+  }
+  const top = res.plan[0];
+  return {
+    at: now,
+    next,
+    me: cut(me),
+    adp: me.row.p.adp ?? null,
+    keep: r1((keepOf(me.row) ?? 0) * 100),
+    hasKeep: keepOf(me.row) != null,
+    // null means you took the top of your own board, and the gap is zero by construction
+    top: top.row.p.id === id ? null : cut(top),
+    lost: lost ? { ...cut(lost), keep: r1((keepOf(lost.row) ?? 0) * 100) } : null,
+    gap: r1(Math.max(0, top.total - me.total)),
+  };
+}
+
+// The verdict, in five cases and no jargon. Written to be read by someone who does not
+// know what ADP stands for and should not have to.
+//
+// The indifference band is STAR_BAND, which is the size the engine already uses to mean
+// "these two are too close to call" - on these very numbers, a few lines up in planDraft.
+// Nothing here is tuned to make a pick look good.
+export function pickCost(shot) {
+  if (!shot) {
+    return { kind: 'unknown', points: 0, head: 'Not recorded',
+      why: 'This pick was made before the app started keeping track of what else was on '
+        + 'the board, so there is nothing honest to say about it.' };
+  }
+  const { me, top, lost, next } = shot;
+  const gap = shot.gap || 0;
+  const pts = Math.round(gap);
+  const keep = Math.round(shot.keep ?? 0);
+
+  if (!top) {
+    return { kind: 'top', points: 0, head: 'Nothing better was there',
+      why: `He was the top of your board at that pick. You cannot do better than the best `
+        + `man you have, so this cost you nothing at all.` };
+  }
+  if (gap < STAR_BAND) {
+    return { kind: 'fine', points: 0, head: 'As good as anything left',
+      why: `Your board put him level with ${top.name} — ${pts} point${pts === 1 ? '' : 's'} `
+        + `apart out of a whole roster, which is a coin flip. Nothing was lost here.` };
+  }
+  if (shot.hasKeep && shot.keep >= PROBABLE * 100 && lost) {
+    const cost = Math.round(Math.max(0, lost.total - me.total));
+    return { kind: 'wasted', points: pts,
+      head: 'This one cost you a player',
+      why: `${me.name} would most likely still have been sitting there at your next pick `
+        + `(about ${keep} in 100). ${lost.name} would not (${Math.round(lost.keep)} in 100) — `
+        + `and your board rated ${lost.name} ${cost} point${cost === 1 ? '' : 's'} higher. `
+        + `Taking ${me.name} first got you a man you were going to get anyway and lost you `
+        + `one you were not.` };
+  }
+  if (shot.hasKeep && shot.keep < PROBABLE * 100) {
+    return { kind: 'paid', points: pts,
+      head: 'You paid to make sure of him',
+      why: `Your board had ${top.name} ${pts} point${pts === 1 ? '' : 's'} ahead, so this `
+        + `was ${pts} given up. But ${me.name} was about to go — only about ${keep} in 100 `
+        + `that he lasted to pick ${next} — so it was him now or not at all.` };
+  }
+  return { kind: 'left', points: pts,
+    head: `${pts} point${pts === 1 ? '' : 's'} left on the table`,
+    why: `${top.name} was the better man on your board and nobody you wanted was about to `
+      + `disappear, so there was no hurry. Not a disaster, and not a reach either — just `
+      + `${pts} you did not have to give up.` };
+}
+
+// What the room made of the same pick. Information, not a verdict - which is the whole
+// point of moving it out of the scoring. Deliberately says nothing about right or wrong.
+export function marketNote(shot) {
+  if (!shot?.adp || !shot.at) return '';
+  const g = Math.round(shot.at - shot.adp);
+  if (g >= 12) return `The rest of the world usually takes him ${g} picks earlier — he slid to you.`;
+  if (g <= -12) return `The rest of the world usually waits ${-g} more picks for him. You rated him higher than they do.`;
+  return 'About where everyone else takes him.';
 }
 
 // A plain-English read of what the current weights mean, for the ratings editor.

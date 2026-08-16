@@ -10,7 +10,22 @@
 // models is the ONE thing a draft room reliably does - take players roughly in ADP order,
 // with need and herd behaviour pulling on it - and it says so on screen.
 
-import { myPicks, roundsOf } from './engine.js?v=202608151624';
+// One line on purpose: the jsdom harness strips imports with a per-line regex, so a
+// wrapped import statement leaves a stray brace behind and the whole app fails to evaluate.
+import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608160744';
+
+// Everything the bench pricing needs, worked out once for a whole draft rather than once
+// per pick. See the long note above benchWorth in engine.js for what this is for.
+export function benchModel(players, league) {
+  const shares = flexShares(players, league);
+  return {
+    shares,
+    slots: startableSlots(league, shares),
+    a: availableShare(positionGames(players)),
+    dc: depthChart(players, league),
+    pts: new Map(players.map((p) => [p.id, projectedPoints(p, league)])),
+  };
+}
 
 // ---------------------------------------------------------------- randomness
 // Seeded, so a mock can be replayed. The seed is mixed with the pick number rather than
@@ -51,14 +66,27 @@ const FLEXY = ['RB', 'WR', 'TE'];
 // The most of one position anyone sensibly carries: his starting slots, plus the flex if
 // he is eligible for it, plus a little bench. Without a cap the noise eventually hands
 // somebody four kickers, which would be funny once and wrong every time after.
-export function capsOf(league) {
+//
+// The flex used to be added IN FULL to every flex-eligible position at once - so a league
+// with two flex spots allowed 8 backs AND 8 receivers AND 4 tight ends, as though you might
+// start two tight ends in your two flex slots. You cannot. That is where "four deep at
+// tight end" came from: the cap said four was sensible, and the room duly went and got
+// four. `shares` is flexShares() - who actually wins the flex in THIS league's scoring -
+// so each position now gets only the part of the flex it can really claim.
+export function capsOf(league, shares) {
   const s = league.starters || {};
   const flex = s.FLEX || 0;
   const bench = { QB: 1, RB: 4, WR: 4, TE: 1, K: 0, DEF: 0 };
   const out = {};
   for (const pos of Object.keys(s)) {
     if (pos === 'FLEX') continue;
-    out[pos] = (s[pos] || 0) + (FLEXY.includes(pos) ? flex : 0) + (bench[pos] ?? 2);
+    // Rounded UP on purpose. This is a backstop against nonsense, not the thing that
+    // decides rosters - if a position can claim any part of the flex at all it gets a whole
+    // slot's worth of rope here, and the bench pricing is left to make the actual call.
+    const mine = FLEXY.includes(pos)
+      ? flex * (shares ? (shares[pos] || 0) : 1)
+      : 0;
+    out[pos] = (s[pos] || 0) + Math.ceil(mine) + (bench[pos] ?? 2);
   }
   return out;
 }
@@ -86,6 +114,44 @@ export function needsOf(roster, league) {
 }
 
 const wants = (pos, need) => (need.short[pos] || 0) > 0 || (need.flex > 0 && FLEXY.includes(pos));
+
+// A room fills its named starting slots before it shops. That is a fact about how people
+// behave rather than a claim about value, so it stays as its own flat bonus - and it is
+// what keeps a defence waiting while a real slot stands open.
+//
+// The FLEX half of it used to be yes/no: any flex-eligible man got the whole bonus while a
+// flex spot was empty, which said an empty flex slot was as good a reason to take a third
+// tight end as a third receiver. It is not. The bonus is now weighted by how often this
+// position actually wins a flex spot in THIS league's scoring - 87% receiver, 13% back and
+// 0% tight end in PPR, all of it derived by flexShares rather than typed in.
+function needShare(pos, need, shares) {
+  if ((need.short[pos] || 0) > 0) return 1;
+  if (need.flex > 0 && FLEXY.includes(pos)) return shares ? (shares[pos] || 0) : 1;
+  return 0;
+}
+
+// How much of a man's projection actually reaches your lineup, in log space, for a pick
+// that is not filling a slot. Zero means "worth his face value"; negative means the bench
+// swallows him. See the long note above benchWorth in engine.js - this is the same one
+// question ("how often is he in your lineup, and what job is he doing?") asked of the
+// simulated room so that it drafts like people do.
+const BENCH_FLOOR = -6;                      // a 0.25% man is off the board, not -Infinity
+
+function benchLog(p, roster, have, b) {
+  if (!b) return 0;
+  const j = (have[p.pos] || 0) + 1;
+  const slots = b.slots[p.pos] ?? 1;
+  const face = b.pts.get(p.id) ?? 0;
+  // A man the projections give nothing has no ratio to take. Returning 0 here said "worth
+  // his face value" and let every unprojected deep tight end through the pricing untouched
+  // - 26 of the tight ends taken third or fourth on a roster came in by this door. He still
+  // has a place in your queue, so he still pays the queue's discount.
+  if (face <= 0) return Math.max(BENCH_FLOOR, Math.log(Math.max(lineupChance(j, slots, b.a), 1e-3)));
+  const hc = b.dc.get(p.id);
+  const ownLead = !!hc && roster.some((x) => x && x.id === hc.leadId);
+  const { worth } = benchWorth(face, j, slots, b.a, hc, ownLead);
+  return Math.max(BENCH_FLOOR, Math.log(Math.max(worth, 1e-3) / face));
+}
 
 // ---------------------------------------------------------------- the room
 // One number, from 0 (goes by the book) to 100 (reaches and panics).
@@ -171,7 +237,23 @@ export function aiPick(avail, roster, league, opts) {
   const streamedShort = ['K', 'DEF']
     .reduce((a, p) => a + (need.short[p] || 0), 0);
   const urgent = picksLeft > LATE_ROUNDS ? need.total - streamedShort : need.total;
-  const forced = urgent >= picksLeft;
+  // Two ways to be out of room, and only one of them was being checked. `urgent` ignores
+  // kicker and defence slots until the end, which is right for a league with a bench and
+  // wrong for one without: with nine starters and exactly nine picks, a team was never
+  // "forced", skipped its defence for eight rounds and finished unable to field a lineup.
+  // Holes >= picks is the honest test and it costs nothing to ask both.
+  const forced = urgent >= picksLeft || need.total >= picksLeft;
+
+  // A kicker and a defence go last, always. This is the same rule autoPick already applies
+  // to Zach's own picks, and the room should draft by the rule the app tells him to follow.
+  //
+  // It used to be left to emerge: skill players collected a flex bonus that kickers did
+  // not, and the size of that accident was the only thing keeping a defence out of round
+  // eight. So the moment the flex bonus was weighted honestly - 0 for a tight end in a PPR
+  // league, because tight ends win no flex spots - kickers and defences rose by default and
+  // went in round 9 of 15. Nothing about a kicker had changed. A rule this firm should be
+  // written down, not inferred from somebody else's arithmetic.
+  const holdStreamed = !forced && picksLeft > LATE_ROUNDS;
 
   const legal = [];                    // respects the caps, whatever else happens
   const pool = [];
@@ -179,6 +261,7 @@ export function aiPick(avail, roster, league, opts) {
     if ((have[p.pos] || 0) >= (caps[p.pos] ?? 99)) continue;
     if (legal.length < WINDOW) legal.push(p);
     if (forced && !wants(p.pos, need)) continue;
+    if (holdStreamed && ['K', 'DEF'].includes(p.pos)) continue;
     pool.push(p);
     if (pool.length >= WINDOW) break;
   }
@@ -202,7 +285,8 @@ export function aiPick(avail, roster, league, opts) {
     // which had already been fixed. Nobody wants a kicker in round ten. The nudge waits
     // until the picks are running out, which is what `forced` means.
     const streamed = ['K', 'DEF'].includes(p.pos);
-    if (wants(p.pos, need) && (forced || !streamed)) x += params.need;
+    const slotShare = needShare(p.pos, need, opts.bench?.shares);
+    if (slotShare > 0 && (forced || !streamed)) x += params.need * slotShare;
     if (p.pos === runPos) x += params.run;
     // How far ahead of his own market price this would be, in spreads. Punished by the
     // SQUARE, so a mild reach is ordinary and a wild one is effectively impossible - which
@@ -210,7 +294,19 @@ export function aiPick(avail, roster, league, opts) {
     // costs nothing; adpSurprise floors at zero.
     const z = opts.pickNo ? adpSurprise(p.adp, opts.pickNo) : 0;
     const tol = params.reach || 1.3;
-    return x / params.tau - (z * z) / (2 * tol * tol);
+    // The bench term sits OUTSIDE the temperature divide, unlike need and run. Those two
+    // are deliberately expressed as multiples of tau so the discipline slider cannot change
+    // their effect. This one is not a taste: it is how much of the man reaches your lineup,
+    // it is a ratio of points, and a ratio of points belongs in log space at face value. A
+    // wild room should still not draft a fourth tight end; it should just reach for the
+    // right men.
+    // Asked of EVERY skill-position man, not only of the ones with no slot to fill. Gating
+    // it on "he is not filling a slot" is what let the second tight end through in a league
+    // where tight ends have a fractional claim on the flex, and every tight end after him
+    // followed. A man who really is filling a slot scores lineupChance = 1 and this term is
+    // zero, so nothing is lost by asking.
+    const bench = streamed ? 0 : benchLog(p, roster, have, opts.bench);
+    return x / params.tau + bench - (z * z) / (2 * tol * tol);
   });
   const top = Math.max(...logw);
   const w = logw.map((v) => Math.exp(v - top));
@@ -293,7 +389,8 @@ export function simulate({ players, league, slot, disc = 40, seed = 1, log = [],
   const rounds = roundsOf(league);
   const total = teams * rounds;
   const params = roomParams(disc);
-  const caps = capsOf(league);
+  const bench = benchModel(players, league);
+  const caps = capsOf(league, bench.shares);
   // A mock in progress is saved and resumed, and the player pool is rebuilt underneath it
   // every time the data file is refreshed. So a saved log can name somebody who is no
   // longer in the pool. Rebuilding the rosters with a bare find() put `undefined` in a
@@ -328,6 +425,7 @@ export function simulate({ players, league, slot, disc = 40, seed = 1, log = [],
       pick = aiPick(avail, rosters[team], league, {
         params,
         caps,
+        bench,
         picksLeft: rounds - rosters[team].length,
         runPos: runPosOf(log),
         pickNo: n,
