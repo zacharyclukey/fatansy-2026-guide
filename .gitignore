@@ -37,3 +37,10 @@ __pycache__/
 
 # jsdom is symlinked in from a sandbox path just to run the tests
 test/node_modules
+
+# One-off probes written while chasing a specific bug. They are scratch paper: they hard-code
+# a seed or a roster, they are not run by smoke.mjs, and half of them stop working the moment
+# the thing they were probing is fixed. Leaving them untracked kept the commit dialog full of
+# files nobody meant to publish.
+test/_*.mjs
+test/tmp/

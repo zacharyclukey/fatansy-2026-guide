@@ -1807,9 +1807,11 @@ const fire = (el, type) => {
   await settle();
   const out = d.querySelector('#mockOut').textContent;
   ok('the report says which slot you drafted from', new RegExp(`slot ${SLOT} of ${T}`).test(out));
+  // The report rows are .costPick now, not .mockPick - the practice report and the My team
+  // tab were merged onto one what-it-cost table so the two cannot price a pick differently.
   ok('the report lists every one of your picks',
-    d.querySelectorAll('#mockOut .row.mockPick').length === R + 1,   // + the header row
-    `${d.querySelectorAll('#mockOut .row.mockPick').length}`);
+    d.querySelectorAll('#mockOut .row.costPick').length === R + 1,   // + the header row
+    `${d.querySelectorAll('#mockOut .row.costPick').length}`);
   ok('the report shows a lineup', d.querySelectorAll('#mockOut .row.lineup').length >= R);
   ok('the report explains each pick in words', /the room usually takes him|going rate|usual spot/.test(out));
   ok('the report is honest about what it is not',
