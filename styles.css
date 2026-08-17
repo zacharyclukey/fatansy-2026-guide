@@ -76,10 +76,16 @@ button {
 }
 button:hover { background: var(--panel); border-color: var(--ink3); }
 button.small { font-size: 13px; height: 28px; padding: 0 10px; }
-button[aria-pressed="true"] {
+/* Two attributes, one meaning: this button is currently on. aria-pressed is for a choice
+   that stays made (a position filter), aria-expanded for a panel that is open. They looked
+   different for a while - the filters went green and Compare, Save and Settings stayed
+   white - which made three of the four buttons in the top bar give no sign they were on. */
+button[aria-pressed="true"], button[aria-expanded="true"] {
   background: var(--field); color: var(--chalk); border-color: var(--field);
 }
-button[aria-pressed="true"]:hover { background: var(--fieldDeep); border-color: var(--fieldDeep); }
+button[aria-pressed="true"]:hover, button[aria-expanded="true"]:hover {
+  background: var(--fieldDeep); border-color: var(--fieldDeep);
+}
 
 input[type="range"] {
   -webkit-appearance: none; appearance: none;
@@ -585,7 +591,9 @@ span.nm:hover { text-decoration: none; }
 .teamNeed { margin: 9px 0 0; font-size: 13px; color: var(--ink); }
 .teamNeed.done { color: var(--ink2); }
 /* the toggle in the top bar remembers itself, so it has to look pressed */
-#teamBtn.on { background: var(--field); color: var(--chalk); border-color: var(--field); }
+/* "Your team" used to carry its own .on class for this. It does not need one: the button
+   already publishes aria-expanded for screen readers, and styling that instead means the
+   pressed look cannot drift away from the actual state - there is only one flag now. */
 .labKnobs { margin: 0 0 20px; max-width: 620px; }
 
 /* ---------------------------------------------------------------- pick type + stars */

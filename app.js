@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170654';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170735';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170654';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170654';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608170654';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170654';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170735';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170735';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608170735';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170735';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608170654';
+const BUILD = '202608170735';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -2685,10 +2685,7 @@ function renderChrome() {
     $('#durHint').textContent = `${a.blurb}${num}`;
   }
   const tb = $('#teamBtn');
-  if (tb) {
-    tb.setAttribute('aria-expanded', String(!!st.showTeam));
-    tb.classList.toggle('on', !!st.showTeam);
-  }
+  if (tb) tb.setAttribute('aria-expanded', String(!!st.showTeam));
   readouts();
 }
 
@@ -2951,7 +2948,6 @@ function wire() {
   $('#teamBtn').onclick = (e) => {
     st.showTeam = !st.showTeam;
     e.target.setAttribute('aria-expanded', String(!!st.showTeam));
-    e.target.classList.toggle('on', !!st.showTeam);
     save();
     renderTeamStrip();
   };

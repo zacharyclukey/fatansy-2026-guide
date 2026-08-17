@@ -187,6 +187,16 @@ const fire = (el, type) => {
   }
   ok('nothing that can be hidden has its display forced open', welded.length === 0,
     `${welded.join(', ')} — write it as :not([hidden])`);
+
+  // Every top-bar button says whether it is on through aria-expanded, and the stylesheet
+  // has to colour that state. Three of the four looked identical on and off for a while,
+  // which is how the Compare panel being welded open went unnoticed for so long.
+  ok('an open panel button is coloured, not left white',
+    /button\[aria-expanded="true"\][^{]*\{[^}]*background:/.test(css));
+  const bar = html.slice(html.indexOf('class="bar2"'), html.indexOf('id="kbd"'));
+  const bare = [...bar.matchAll(/<button[^>]*id="(\w+)"[^>]*>/g)]
+    .filter(([tag]) => !/aria-(expanded|pressed)=/.test(tag)).map((m) => m[1]);
+  ok('every top-bar button publishes its on/off state', bare.length === 0, bare.join(', '));
 }
 
 // ------------------------------------------------- 0b. nothing exported has gone missing
