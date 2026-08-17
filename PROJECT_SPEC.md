@@ -96,8 +96,8 @@ and produced walls of text. **New rule:**
 ## 3. Tab-by-tab backlog
 
 ### Draft Day — mostly good, leave alone
-Works. Don't add to it. Four settings only: Rating tilt, Need bonus, **Safe ↔ Upside**,
-**Rookie upside**.
+Works. Don't add to it. Settings only: Need bonus, Time missed, **How much the room
+counts**, **Rookie upside**. (Rating tilt and Safe ↔ Upside are gone — see §4 below.)
 
 - **Safe ↔ Upside (0–100)** splits a fixed 15-point rating budget between two components,
   Floor and Ceiling. Their weight cells on the Ratings Lab are formulas, greyed, not typed.
@@ -171,9 +171,15 @@ Learned the hard way in this build — do not re-derive these.
 3. **Never clamp VOR at replacement.** It put 142 of 259 players on exactly 0, which made
    their draft scores identical and gave all of them the same rank. Below replacement keeps
    an ordered band down to −25.
-4. **The rating is ADDED, not multiplied.** `VOR × (1 + tilt)` erases the rating when VOR is
-   0 and inverts it when VOR is negative.
-   Current: `DRAFT SCORE = (VOR + tilt × 40 × (rating − 50) / 50) × Position x + need`.
+4. **The rating does not enter the draft score at all.** It used to, via a `tilt`
+   multiplier; that measured zero lift over the projections in five seasons and
+   double-counted the projection percentile, which VOR already is. Anything that is in the
+   score is ADDED, not multiplied — multiplying erases a preference when VOR is 0 and
+   inverts it when VOR is negative.
+   Current: `pre = (VOR + fit) × Position x + need + rookie`, then
+   `DRAFT SCORE = pre + w × (pre of the room's pick at his ADP − pre)`, with `w` per player:
+   full for K/DEF, half for a man with no season, a tenth for everyone else, all scaled by
+   the **How much the room counts** control.
 5. **Components are percentiles WITHIN position.** So the rating alone cannot compare a QB to
    an RB — that is what VOR is for. Rated alone, Josh Allen is #1 overall.
 6. **Missing 2025 data must never be treated as zero.** Sleeper's stats feed is capped per

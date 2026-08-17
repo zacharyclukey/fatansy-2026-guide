@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608161940" />
+<link rel="stylesheet" href="styles.css?v=202608170610" />
 </head>
 <body>
 
@@ -106,6 +106,16 @@
         <span class="knobLabel"><span data-tip="durdial" tabindex="0">Time missed</span></span>
         <select id="durAnchor" aria-label="How much time you assume players miss"></select>
         <span class="hint" id="durHint"></span>
+      </label>
+      <!-- How much the room counts. This replaces four buried constants and one accidental
+           mechanism (the old `tilt` multiplier, which suppressed kickers by inflating
+           everybody else). It is on the screen because the thing it trades away - your
+           league's odd scoring rules disagreeing with everybody else's - is worth money,
+           and nobody should be spending it without being told. -->
+      <label class="knob">
+        <span class="knobLabel"><span data-tip="anchor" tabindex="0">How much the room counts</span> <em id="anchorOut">70%</em></span>
+        <input id="anchor" type="range" min="0" max="100" step="5" value="70" />
+        <span class="hint" id="anchorHint"></span>
       </label>
       <div class="checks">
         <label class="check">
@@ -319,6 +329,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608161940"></script>
+<script type="module" src="app.js?v=202608170610"></script>
 </body>
 </html>

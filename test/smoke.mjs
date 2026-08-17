@@ -22,6 +22,28 @@ const ok = (name, cond, detail = '') => {
 };
 const near = (a, b, tol = 0.5) => Math.abs(a - b) <= tol;
 
+// Modules are flattened into one scope: exports become plain declarations and the import
+// lines are dropped, because jsdom has no module loader here.
+//
+// The stripper has to span lines. It used to be /^import .*\n/gm, which removes the FIRST
+// line of an import and nothing else - so a wrapped `import {\n a,\n b\n} from 'x';` left
+// `a,` and `b` and a dangling `}` behind, and the whole suite died with
+// "SyntaxError: Unexpected token '}'" before a single assertion ran.
+//
+// That is worse than a bug, because it is silent and it points the wrong way: the failure
+// looks like the app is broken when it is the test harness that is. It also made a source
+// file's LINE BREAKS load-bearing - mock.js carried a comment ordering the next person to
+// keep a 200-character import on one line purely to appease this regex. Matching through
+// to the module string removes the trap instead of documenting it.
+const stripModule = (src) => src
+  .replace(/^export /gm, '')
+  // `import <anything, over as many lines as it likes> from 'mod';`
+  // The clause is matched with [^'"], which cannot cross into the next statement's string
+  // literal, so a runaway match can never swallow the code between two imports.
+  .replace(/^import\s[^'"]*?from\s*(['"])[^'"]*\1;?[^\S\n]*\n?/gm, '')
+  // `import 'mod';` - a side-effect import, no clause at all
+  .replace(/^import\s*(['"])[^'"]*\1;?[^\S\n]*\n?/gm, '');
+
 // ---------------------------------------------------------------- harness
 const USER = 'u1';
 const sleeperRoutes = {
@@ -65,10 +87,7 @@ async function boot({ store = {}, offline = false, rnd = null } = {}) {
     setItem: (k, v) => { store[k] = v; },
     removeItem: (k) => { delete store[k]; },
   } });
-  // Modules are flattened into one scope: exports become plain declarations and the import
-  // lines are dropped, because jsdom has no module loader here.
-  const rd = (f) => fs.readFileSync(`${DIR}/${f}`, 'utf8')
-    .replace(/^export /gm, '').replace(/^import .*\n/gm, '');
+  const rd = (f) => stripModule(fs.readFileSync(`${DIR}/${f}`, 'utf8'));
   window.eval([rd('strategies.js'), rd('tips.js'), rd('engine.js'), rd('mock.js'),
     rd('sleeper.js'), rd('app.js')].join('\n'));
   await new Promise((r) => setTimeout(r, 400));
@@ -87,6 +106,45 @@ const fire = (el, type) => {
   const w = el.ownerDocument ? el.ownerDocument.defaultView : el;   // works for window too
   el.dispatchEvent(new w.Event(type, { bubbles: true }));
 };
+
+// ------------------------------------------------- 0a. the harness can read the source
+// Everything below this line is worthless if the flattener mangles the modules on the way
+// in, and when it did, it failed in the least helpful way available: a SyntaxError at
+// eval time, with no test name attached, before any assertion ran. So the flattener is
+// itself tested, first, and the load-bearing case is a module whose import spans lines.
+{
+  const multi = `import {\n  alpha,\n  beta,\n} from './engine.js?v=1';\nexport const use = () => 1;\n`;
+  const stripped = stripModule(multi);
+  ok('a multi-line import leaves nothing behind',
+    !/import|alpha|beta|\}|from/.test(stripped), JSON.stringify(stripped));
+  ok('and what is left of it still boots',
+    (() => { try { (0, eval)(stripped); return true; } catch { return false; } })(),
+    JSON.stringify(stripped));
+
+  // the shapes that already worked have to keep working
+  ok('a single-line import is still stripped',
+    stripModule(`import { a, b } from './x.js';\nconst k = 1;\n`).trim() === 'const k = 1;');
+  ok('a default import is still stripped',
+    stripModule(`import x from './x.js';\nconst k = 1;\n`).trim() === 'const k = 1;');
+  ok('a side-effect import is still stripped',
+    stripModule(`import './x.js';\nconst k = 1;\n`).trim() === 'const k = 1;');
+  ok('export is still turned into a plain declaration',
+    stripModule('export const a = 1;\n').trim() === 'const a = 1;');
+
+  // The stripper must not be able to eat code. A clause matched greedily across a string
+  // literal would swallow whole functions and the suite would go green on nothing.
+  const between = stripModule(
+    `import { a } from './x.js';\nconst keep = "from './y.js'";\nimport { b } from './z.js';\nconst also = 2;\n`);
+  ok('the stripper cannot swallow the code between two imports',
+    between.includes('const keep') && between.includes('const also')
+      && !/^import/m.test(between), JSON.stringify(between));
+
+  // and the real thing: no module still carries an import after flattening
+  const left = ['strategies.js', 'tips.js', 'engine.js', 'mock.js', 'sleeper.js', 'app.js']
+    .filter((f) => /^import\b/m.test(stripModule(fs.readFileSync(`${DIR}/${f}`, 'utf8'))));
+  ok('no module reaches the sandbox with an import still in it', left.length === 0,
+    left.join(', '));
+}
 
 // ------------------------------------------------------- 0. the sticky-header trap
 // This bug has shipped twice: the column labels detach and float over row two. Both times
@@ -1192,8 +1250,15 @@ const fire = (el, type) => {
   // with tilt 0.9 and style 90 was still re-weighting components and inflating the rating,
   // with nothing on any screen that showed it or could put it back.
   ok('the deleted Safe/Upside slider is pinned to the default', after.style === 50, `${after.style}`);
-  ok('the deleted Trust-my-ratings slider is pinned', after.tilt === 0.5, `${after.tilt}`);
-  ok('the retuned rookie bonus is pinned', after.rookieMax === 4, `${after.rookieMax}`);
+  // Trust-my-ratings is not pinned any more, it is GONE. The multiplier it set no longer
+  // exists in the engine - the grade computes, draws its bars and does not vote - so
+  // leaving the key on the profile would put a dead setting in every exported file looking
+  // like it still meant something.
+  ok('the deleted Trust-my-ratings setting is dropped, not pinned',
+    !('tilt' in after), JSON.stringify(after.tilt));
+  ok('the retuned rookie bonus is pinned', after.rookieMax === 3, `${after.rookieMax}`);
+  ok('the anchor arrives on an old profile that never had one',
+    after.anchor > 0 && after.anchor <= 1, `${after.anchor}`);
   // the thing he will actually be reading on the night
   const kinds = [...d.querySelectorAll('.row.player .kind')].map((e) => e.textContent.trim());
   ok('an old profile still gets pick types on the board', kinds.length >= 3, kinds.slice(0, 6).join(' '));
@@ -1725,15 +1790,63 @@ const fire = (el, type) => {
     `${(flat * 100).toFixed(0)}% -> ${(onRun * 100).toFixed(0)}%`);
   ok('but only pulls, never forces', onRun < 0.95, `${(onRun * 100).toFixed(0)}%`);
 
-  // Kickers and defences going early is the giveaway of a broken room model. The bar is
-  // their own ADP rather than a round number, because this pool has the best defence going
-  // at 115 - a defence at 118 is the market, not a mistake.
-  // Two honest reasons a defence goes: it is at its ADP, or it is the last two rounds and
-  // everyone has a slot to fill. Anything else is a broken room.
-  const early = run.log.filter((x) => ['K', 'DEF'].includes(x.pos)
-    && x.n <= T * (R - 2) && x.adp && x.n < x.adp - 25);
+  // Kickers and defences going early is still the giveaway of a broken room model, but
+  // "early" cannot be measured for them the way it is measured for everyone else. The bar
+  // here was the wrong SHAPE, not merely set too tight, so widening it would have been
+  // hiding the fault rather than fixing it. Two things were wrong with it.
+  //
+  // ARITHMETIC. Every one of the 12 teams has to fill a kicker slot and a defence slot.
+  // That is 24 forced picks, and there are exactly 24 picks in the last two rounds. There
+  // is no room for a single team to spend a late pick on anything else, so the roster
+  // rules THEMSELVES push about half of these into round thirteen - measured, 11 of 24
+  // land in the last two rounds and the other 13 cannot. Exempting only the last two
+  // rounds asked the room for something the league does not allow.
+  //
+  // AXIS. The streamed positions are the only ones whose market price runs off the end of
+  // the board: kickers in this pool reach an ADP of 185 and defences 189, in a draft that
+  // stops at 180. A man whose ADP is past the final pick can never be taken "on time", so
+  // every pick of him scores as early by an amount with no ceiling. Measuring his distance
+  // from ADP is measuring the wrong thing.
+  //
+  // So panic is now tested as panic actually means: he took a kicker he did not have to
+  // take. A pick is honest if EITHER he is going near his market price, OR the team taking
+  // him is out of room - it has no more spare picks than mandatory slots left to fill. The
+  // one pick of slack is a judgement, not a measurement: at zero slack all 40 seeds trip,
+  // because a room that waits until the literal last possible pick is not a room. What the
+  // check still catches is the thing worth catching - a kicker in the middle rounds while
+  // the team has picks in hand - and the planted case below proves it does.
+  const MKT_SLACK = 12;          // the same distance mock.js already calls "a reach"
+  const panicsIn = (log) => {
+    const seats = {};
+    const out = [];
+    for (const x of log) {
+      const t = mk.pickTeam(x.n, T);
+      seats[t] = seats[t] || [];
+      if (['K', 'DEF'].includes(x.pos)) {
+        const spare = (R - seats[t].length) - mk.needsOf(seats[t], lg).total;
+        const atMarket = x.adp && x.n >= x.adp - MKT_SLACK;
+        if (!atMarket && spare > 1) out.push({ ...x, spare });
+      }
+      seats[t].push(x);
+    }
+    return out;
+  };
+  const early = panicsIn(run.log);
   ok('nobody panics for a kicker or a defence', early.length === 0,
-    early.map((x) => `${x.pos} at ${x.n}, adp ${x.adp}`).join(', '));
+    early.map((x) => `${x.pos} at ${x.n}, adp ${x.adp}, ${x.spare} spare picks`).join(', '));
+
+  // The control. A test that cannot fail is not a test, and the rewrite above widened what
+  // counts as honest, so it has to be shown that the widening did not swallow the fault it
+  // exists to find. A kicker dropped into the middle of a real draft, where the team still
+  // had six picks in hand, must still come back as a panic.
+  {
+    const anyK = pool.find((p) => p.pos === 'K' && p.adp);
+    const planted = run.log.map((x) => (x.n === 60
+      ? { ...x, pos: 'K', adp: anyK.adp, id: 'planted-kicker' } : x));
+    const caught = panicsIn(planted);
+    ok('and a kicker in the middle rounds would still be caught',
+      caught.length === 1 && caught[0].n === 60, `${caught.length} flagged`);
+  }
   const firstK = run.log.find((x) => x.pos === 'K');
   // Measured against the market, not against a round number, for the same reason the
   // check above is. This asked for no kicker before pick 132 while the best kicker in the
@@ -1872,7 +1985,14 @@ const fire = (el, type) => {
     d.querySelectorAll('#mockOut .row.costPick').length === R + 1,   // + the header row
     `${d.querySelectorAll('#mockOut .row.costPick').length}`);
   ok('the report shows a lineup', d.querySelectorAll('#mockOut .row.lineup').length >= R);
-  ok('the report explains each pick in words', /the room usually takes him|going rate|usual spot/.test(out));
+  // Every branch of vsAdp in mock.js produces one of these three phrases, so a report with
+  // fifteen picks in it can only miss all three if the picks arrived with no ADP to
+  // compare against - which is the failure worth catching. Printing a slice of the report
+  // matters because this used to fail with no detail at all and the draft behind it is a
+  // different one every run.
+  ok('the report explains each pick in words',
+    /the room usually takes him|going rate|usual spot/.test(out),
+    out.replace(/\s+/g, ' ').slice(0, 400));
   ok('the report is honest about what it is not',
     /not a prediction/i.test(d.querySelector('#v-mock').textContent));
 
@@ -3096,6 +3216,138 @@ const fire = (el, type) => {
     own.some((t) => /^covers your /.test(t)), own.slice(0, 6).join(' | '));
   ok('and the others still read as somebody else\'s man',
     own.some((t) => /^if /.test(t)), own.slice(0, 6).join(' | '));
+}
+
+// ------------------------------------------- 15. how much the room counts
+// The targeted ADP anchor. It exists because VOR is a pure projection statement and knows
+// nothing about what a draft looks like, and it is TARGETED rather than flat because there
+// are two kinds of disagreement with the market: the ones where we are right (this league
+// pays for first downs and the market does not) and the ones where we are wrong (kickers
+// and defences have an invented replacement level; a man with no season has an unchecked
+// projection). A flat weight doses both the same and sells the edge to fix the bugs.
+{
+  const e = await import(`${DIR}/engine.js`);
+  const d = JSON.parse(JSON.stringify(players));
+  d.leagues = [e.SAMPLE_LEAGUE];
+  const base = { ...e.DEFAULT_SETTINGS(d), league: 0, mine: [] };
+  const at = (a) => e.buildBoard(d, { ...base, anchor: a }).rows;
+  const KD = (r) => ['K', 'DEF'].includes(r.p.pos);
+  const dials = [0, 0.25, 0.5, 0.75, 1];
+  const boards = Object.fromEntries(dials.map((a) => [a, at(a)]));
+  const rankIn = (rows) => new Map(rows.map((r) => [r.p.id, r.rank]));
+
+  // 1. It converges on the market for the men it is meant to defer to. At full weight the
+  //    board should agree with ADP about kickers and defences almost exactly - that is
+  //    what "we have no honest replacement level for these, so copy the room" means, and
+  //    it is the cleanest available proof that the blend is on the right scale. The first
+  //    version of this got it wrong: it blended ADP into VOR and added the need bonus
+  //    afterwards, so a defence carrying a need penalty was measured against a scale that
+  //    knew nothing about need, and the anchor pushed him AWAY from the room while
+  //    claiming to defer to it.
+  const off = rankIn(boards[0]);
+  const err = (rows) => rows.reduce((a, r) => a + Math.abs(r.rank - r.adpRank), 0) / rows.length;
+  // Not zero even at full weight, and it should not be: a kicker is given the score of the
+  // man the room takes at his ADP, but the SKILL players around him are not anchored and
+  // do not move, so he lands next to where the room has him rather than exactly on it.
+  // Tested as a ratio for that reason - the claim is convergence, not identity.
+  const errFull = err(boards[1].filter(KD));
+  const errOff = err(boards[0].filter(KD));
+  ok('at full weight the board very nearly agrees with the room about kickers and defences',
+    errFull < errOff / 3, `mean ${errFull.toFixed(1)} places off ADP, from ${errOff.toFixed(1)}`);
+  ok('and with it off it does not', errOff > 25, `mean ${errOff.toFixed(1)} places off ADP`);
+
+  // 2. Monotone. Every step of the control must move kickers and defences closer to the
+  //    room than the step before - no reversals, no plateau. A control that helps at one
+  //    setting and hurts at the next is not a control, it is a coincidence, which is
+  //    exactly what the `tilt` multiplier it replaced turned out to be.
+  const errs = dials.map((a) => err(boards[a].filter(KD)));
+  ok('every step of the control moves them closer to the room',
+    errs.every((v, i) => i === 0 || v < errs[i - 1] + 0.01), errs.map((v) => v.toFixed(1)).join(' > '));
+
+  // 3. TARGETED, not flat. This is the whole design claim, so it is tested as a ratio and
+  //    not as two separate thresholds: at the same setting, kickers and defences must move
+  //    many times further than established skill players do. If someone quietly replaces
+  //    this with a flat blend, the ratio collapses to about 1 and this fails.
+  const move = (ids, a) => {
+    const now = rankIn(boards[a]);
+    return ids.reduce((x, id) => x + Math.abs(now.get(id) - off.get(id)), 0) / ids.length;
+  };
+  const kdIds = boards[0].filter(KD).map((r) => r.p.id);
+  // Ranked among themselves, so the measurement is not just "everyone shuffled up when the
+  // kickers slid past them", which is composition and not the anchor doing anything.
+  const knownRank = (rows) => {
+    const kn = rows.filter((r) => !KD(r) && !e.noSeason(r.p) && r.p.adp < 400);
+    return new Map(kn.map((r, i) => [r.p.id, i + 1]));
+  };
+  const k0 = knownRank(boards[0]);
+  const kn = [...k0.keys()];
+  const knownMove = (a) => {
+    const now = knownRank(boards[a]);
+    return kn.reduce((x, id) => x + Math.abs(now.get(id) - k0.get(id)), 0) / kn.length;
+  };
+  for (const a of [0.5, 1]) {
+    const ratio = move(kdIds, a) / Math.max(knownMove(a), 0.01);
+    ok(`at ${a * 100}% the room moves kickers and defences far more than settled players`,
+      ratio > 8, `${move(kdIds, a).toFixed(1)} places vs ${knownMove(a).toFixed(2)} — ×${ratio.toFixed(0)}`);
+  }
+
+  // 4. The top of the board does not move at a sensible setting. Anchoring is a repair to
+  //    the parts of the board nobody can price; it has no business rearranging round one.
+  const top12 = (a) => boards[a].slice(0, 12).map((r) => r.p.id);
+  for (const a of [0.5, 0.75]) {
+    const gone = top12(0).filter((id) => !top12(a).includes(id));
+    ok(`the top of the board is unchanged at ${a * 100}%`, gone.length === 0,
+      gone.map((id) => d.players.find((p) => p.id === id)?.name).join(', '));
+  }
+
+  // 5. Men with no season stop sitting above the room. Same failure as the kickers -
+  //    a projection nobody has checked - and it must be fixed by the same mechanism.
+  const nsGap = (a) => {
+    boards[a] ||= at(a);
+    const ns = boards[a].filter((r) => e.noSeason(r.p));
+    return ns.reduce((x, r) => x + (r.adpRank - r.rank), 0) / ns.length;
+  };
+  ok('men with no season are pulled back towards the room',
+    nsGap(1) < nsGap(0) - 10, `${nsGap(0).toFixed(1)} -> ${nsGap(1).toFixed(1)} places above ADP`);
+  ok('and at the shipped default they are within a handful of places of it',
+    Math.abs(nsGap(e.ANCHOR_DEFAULT)) < 5, `${nsGap(e.ANCHOR_DEFAULT).toFixed(1)}`);
+
+  // 6. The grade cannot reorder the board AT ALL. `tilt` is gone, so re-weighting the
+  //    components has to be inert on draft order - it may only change the grade shown on
+  //    the card. Slam every component weight to something absurd and the board must come
+  //    out in exactly the same order, player for player.
+  const wild = Object.fromEntries(Object.keys(base.comp).map((k, i) => [k, i % 2 ? 90 : 1]));
+  const bent = e.buildBoard(d, { ...base, comp: wild }).rows;
+  const straight = boards[e.ANCHOR_DEFAULT] || at(e.ANCHOR_DEFAULT);
+  const order = (rows) => rows.map((r) => r.p.id).join(',');
+  ok('re-weighting the grade cannot reorder the board', order(bent) === order(straight),
+    bent.slice(0, 400).find((r, i) => r.p.id !== straight[i].p.id)?.p.name || '');
+  ok('but it does change the grade on the card',
+    bent.filter((r) => r.rated).some((r) => Math.abs(r.rating - straight
+      .find((x) => x.p.id === r.p.id).rating) > 1));
+
+  // 7. The two costs have to reach the screen. The trade is the point of putting this on
+  //    a panel at all, and a control that hides what it spends is the thing being fixed.
+  const { d: dom } = await boot();
+  dom.querySelector('#settingsBtn').click();
+  await settle();
+  const hint = dom.querySelector('#anchorHint').textContent;
+  ok('the panel says the anchor costs you your scoring edge',
+    /first downs/.test(hint) && /less of that edge/.test(hint), hint.slice(0, 160));
+  ok('the panel does not quote one flat number for everybody',
+    /kickers and defences/.test(hint) && /everyone else/.test(hint), hint.slice(0, 160));
+  const slider = dom.querySelector('#anchor');
+  slider.value = '100';
+  slider.dispatchEvent(new dom.defaultView.Event('input', { bubbles: true }));
+  await settle();
+  ok('and it warns about steal and reach once the room is most of the board',
+    /steal/i.test(dom.querySelector('#anchorHint').textContent),
+    dom.querySelector('#anchorHint').textContent.slice(-160));
+  slider.value = '0';
+  slider.dispatchEvent(new dom.defaultView.Event('input', { bubbles: true }));
+  await settle();
+  ok('the warning goes away again when it is turned down',
+    !/steal/i.test(dom.querySelector('#anchorHint').textContent));
 }
 
 // ---------------------------------------------------------------- report

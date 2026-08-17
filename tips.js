@@ -42,8 +42,10 @@ export const TIPS = {
   // draft-day settings
   style: ['Safe starters, or players who could win the league.',
     'Moves weight between volume/role/reliability and Upside.'],
-  tilt: ['How much your ratings override plain value.',
-    '0 = pure value, 100 = equal footing, above that your ratings lead.'],
+  anchor: ['How much where everybody else is drafting counts.',
+    'Heaviest on kickers and defences, where the board has no honest replacement level; '
+    + 'half that on a man with no last season; barely anything on everyone else, so your '
+    + "league's own scoring still decides the players it can decide."],
   need: ['Nudges toward positions you still need.', 'Adds points to a position short of starters.'],
   rookie: ['Pay up for rookies.', 'Up to +10, scaled by how sure the draft-capital read is.'],
   hideGone: ['Clear drafted players off the board.', ''],

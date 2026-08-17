@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = (data) => ({
   league: 0,
   stars: [],          // players you rate above what the numbers say. Not league-specific.
   fades: [],          // and the ones you trust less than the numbers do.
-  tilt: 0.5,          // 0 = pure value, 1 = trust the rating
+  anchor: ANCHOR_DEFAULT,   // how much the room counts. See ANCHOR_CASES.
   // Your three preferences, each -100 (hard left) to +100 (hard right), 0 = no opinion.
   // They break ties between players you would be roughly equally happy with. They are
   // not a forecast and the app says so.
@@ -33,8 +33,20 @@ export const DEFAULT_SETTINGS = (data) => ({
   // rookie rating was invented nonsense and this was the only thing pricing a rookie at
   // all. Now that draft capital is 30% of his actual rating, +10 on top is the same fact
   // counted twice - it put a quarterback projected 84 points below replacement at pick 80.
-  // It stays as a taste knob, at a size a taste knob should be.
-  rookieMax: 4,
+  //
+  // Then 4, by taste. Now 3, by measurement: with the anchor in, this is the value that
+  // lands men with no prior season where the room actually takes them. Measured on both
+  // real leagues at the default anchor, as an average gap in places between board rank and
+  // ADP rank (+ = the board is keener than the room):
+  //     rookieMax 0   -4.3 / -4.6      removed entirely, the board is now too harsh
+  //     rookieMax 2   -0.6 / -0.4
+  //     rookieMax 3   +1.2 / +1.2      <- here
+  //     rookieMax 4   +2.8 / +3.1      the old value
+  // So it still earns its place, at a size that is now fitted to something rather than
+  // chosen. See ANCHOR_CASES for why the anchor does not simply absorb it: the anchor is
+  // per-player and only pulls a man toward where HE is drafted, which leaves an
+  // across-the-board level that this sets.
+  rookieMax: 3,
   styleBudget: 15,    // rating weight split between Floor and Ceiling
   posx: {},           // per-position thumb on the scale, defaults to 1
   comp: Object.fromEntries(data.components.map((c) => [c.key, c.weight])),
@@ -608,7 +620,117 @@ export const STREAMED = ['K', 'DEF'];
 // the man you are really choosing against is near the top of the position, not the last
 // one drafted. 0.5 puts him around 6th of 32 in a 12-team league, which collapses the
 // apparent value of drafting one early - correctly, because nobody should.
+//
+// KEPT, after the ADP anchor arrived and this was retested to see whether the anchor had
+// made it redundant. It has not. With it removed (depth 1) and the anchor at its default,
+// the top three kickers and defences come out 4 places behind the room in one league and
+// 17.7 places AHEAD of it in the other, and a defence climbs into the top 100. The anchor
+// pulls a man toward where HE is drafted; it cannot express "the whole position is
+// streamable", because that is a claim about the waiver wire and not about any player.
+//
+// It is also the one number here still set by judgement rather than fitted to anything.
+// 0.5 says a top-six defence is free on waivers in any given week. That is a strategy
+// claim, it is widely held, and nothing in this repo's data can test it - the data has no
+// waiver wire in it. Said plainly so nobody mistakes it for a measurement.
 export const STREAM_DEPTH = 0.5;
+
+// ---------------------------------------------------------------- the ADP anchor
+//
+// VOR is a pure projection statement. It is very good at "how many points above an
+// ordinary starter", and it knows NOTHING about what a draft looks like. Every place the
+// board has misbehaved has been the same failure wearing a different hat:
+//
+//   - kickers and defences, whose replacement level is a number WE INVENTED. Nobody holds
+//     a backup, so there is no honest "last man drafted" to measure against, and whatever
+//     we pick instead decides their whole value.
+//   - men with no prior season, whose VOR rests on a projection that has never been
+//     checked against anything they have actually done.
+//
+// Each was patched separately - STREAM_DEPTH, rookieMax, and, by accident, the old `tilt`
+// multiplier. Tilt did not suppress kickers because the grade understood kickers; kickers
+// got no tilt at all. It suppressed them by INFLATING everybody else, and it penalised
+// men with no season only because they happen to grade low. A coincidence doing the work
+// of a mechanism, invisible on screen, drifting on every data refresh. It is gone.
+//
+// The honest fix is to let the room have a vote, because the room has priced these men for
+// twenty years. But a FLAT blend is a blunt instrument, because there are two kinds of
+// disagreement with the market and they deserve opposite treatment:
+//
+//   - disagreements where WE are right. Zach's leagues pay for first downs and 40-yard
+//     catches; ADP is built on default scoring. That gap is the entire point of having a
+//     board, and it must survive.
+//   - disagreements where WE are wrong. An invented replacement level. An unvalidated
+//     rookie projection.
+//
+// A flat weight doses both the same and quietly sells the edge to fix the bugs. So the
+// weight is set by CONFIDENCE, per player, with the three cases written out here rather
+// than buried in four separate constants - four buried constants are what caused this.
+export const ANCHOR_CASES = {
+  // Heavy. There is no defensible replacement level here, so the market is simply better
+  // informed than we are.
+  stream: 1,
+  // Moderate. The projection is a real forecast, it is just an unchecked one.
+  noSeason: 0.5,
+  // Light. This is where the scoring quirks live and where the board has earned the right
+  // to disagree. Not zero: the market still knows about camp, holdouts and depth charts
+  // that no projection has caught up with.
+  known: 0.1,
+};
+// The control that scales all three, and the default is set by a rule rather than a taste.
+//
+// The yardstick is where the room actually drafts these men: the first defence goes 113th
+// and the first kicker 126th. Measured across all three real leagues plus the neutral
+// sample league, agreement with that yardstick improves at EVERY step of the dial, right
+// up to 1.0 - which is only to say that for kickers and defences our model is worth
+// nothing and copying the market is strictly better. Left alone, that argument takes the
+// dial to the top.
+//
+// What stops it is the second cost. Steal and reach are measured by comparing the board
+// WITH ADP, so the more ADP is inside the board the more that comparison talks to itself;
+// past about 30% of the board's weight, "steal" stops meaning anything. So: take the
+// highest dial whose board-wide effective weight stays at or under 25% - a clear margin
+// under 30%. That is 0.7 (23%); 0.8 would be 26%, over the line.
+//
+// At 0.7 the first defence lands 106th / 130th / 102nd against a market that takes one
+// 113th, and the first kicker 142nd / 145th / 152nd against 126th. With the anchor off
+// those were 92nd / 162nd / 95th and 177th / 191st / 202nd - a board that could not decide
+// whether a defence was a 9th-rounder or undraftable, depending on which league you opened.
+export const ANCHOR_DEFAULT = 0.7;
+// Where the steal/reach comparison stops being worth much, as a share of the whole board
+// rather than as a dial position - a dial of 0.7 only reaches 23% of the board because
+// most of the board is established skill players, who barely feel it. Warned about on
+// screen, using the real figure for the pool in front of you.
+export const STEAL_DILUTION = 0.3;
+// Taken from the MIX of the pool times the dial, rather than by averaging the weight
+// already on the rows. The mix - how much of this pool is kickers, rookies and settled
+// players - does not depend on the dial, so this answers for the setting being asked
+// about instead of for the board still on screen. The readout is written before the
+// rebuild finishes, so averaging the live rows was always one drag behind, and the warning
+// never appeared at the setting that earned it.
+export const anchorReach = (rows, st = {}) => (rows.length
+  ? (st.anchor ?? ANCHOR_DEFAULT)
+    * (rows.reduce((a, r) => a + ANCHOR_CASES[r.anchorCase ?? anchorCase(r.p)], 0) / rows.length)
+  : 0);
+
+// Which of the three cases a man falls into. One function, so the board, the tests and
+// the explanation all read the same rule.
+export function anchorCase(p) {
+  if (STREAMED.includes(p.pos)) return 'stream';
+  if (noSeason(p)) return 'noSeason';
+  return 'known';
+}
+// An extra nudge for rookies, ON TOP of a grade that already counts where he was drafted.
+// Deliberately small for that reason, and see the note on rookieMax in DEFAULT_SETTINGS.
+export function rookieBonus(p, st = {}) {
+  const c = p.m?.rookie_conf || '';
+  const conf = c.startsWith('HIGH') ? 1 : c.startsWith('MED') ? 0.6 : 0.3;
+  return (st.rookieMax ?? 0) * conf;
+}
+
+export function anchorWeight(p, st = {}) {
+  const dial = st.anchor ?? ANCHOR_DEFAULT;
+  return Math.max(0, Math.min(1, dial)) * ANCHOR_CASES[anchorCase(p)];
+}
 
 export function replacementLevels(players, league, ptsOf = projectedPoints) {
   const out = {};
@@ -870,6 +992,10 @@ export function buildBoard(data, st, cache) {
   //
   const mx = Math.max(...rows.map((r) => r.vor), 1);
   const mn = Math.min(...rows.map((r) => r.vor), -1);
+  for (const r of rows) {
+    r.vorPct = r.vor > 0 ? (r.vor / mx) * 100 : (Math.max(r.vor, mn) / Math.abs(mn)) * 25;
+  }
+
 
   // What you already have, so the board can nudge you toward what you still need.
   const have = queue;
@@ -905,7 +1031,6 @@ export function buildBoard(data, st, cache) {
   };
 
   for (const r of rows) {
-    r.vorPct = r.vor > 0 ? (r.vor / mx) * 100 : (Math.max(r.vor, mn) / Math.abs(mn)) * 25;
     // Kickers and defences have no stats we rate, so every component sits at a flat 50
     // and only the projection percentile moves. That is not a rating - it is "he is the
     // 3rd best defence" dressed up on the same 0-100 scale a receiver uses, which made
@@ -919,28 +1044,25 @@ export function buildBoard(data, st, cache) {
         : Object.entries(cw).reduce((a, [k, w]) => a + (r.scores[k] ?? 50) * w, 0) / cwTotal;
     r.need = needFor(r.p.pos);
     const posx = st.posx[r.p.pos] ?? 1;
-    // The rating is ADDED, not multiplied: multiplying erases it when VOR is 0 and
-    // inverts it when VOR is negative.
-    // tilt 0-1 behaves as before (up to +/-20 points of score). Above 1 the rating starts
-    // to genuinely outrank value, which is what "I trust my own ratings" has to mean if it
-    // is to mean anything - the board makes the trade-off explicit rather than capping it.
-    // Fit is capped at FIT_BAND points so it can only ever reorder players the value
-    // numbers were close to indifferent about. That cap is the honest part: nothing here
-    // beat the projections in five years of testing, so it does not get to outvote them.
-    // An unrated man gets pure value. Tilting him by a number built from absent data
-    // would be inventing an opinion and then acting on it.
-    const lean = r.rated
-      ? st.tilt * 40 * ((r.rating - 50) / 50) + FIT_BAND * ((r.fit - 50) / 50)
-      : 0;
-    let s = (r.vorPct + lean) * posx + r.need;
-    // An extra nudge for rookies, ON TOP of a rating that already counts where he was
-    // drafted. Deliberately small for that reason.
-    if (st.rookie && r.p.rookie) {
-      const c = r.p.m.rookie_conf || '';
-      const conf = c.startsWith('HIGH') ? 1 : c.startsWith('MED') ? 0.6 : 0.3;
-      s += st.rookieMax * conf;
-    }
-    r.score = s;
+    // The grade does NOT vote. It used to, through a `tilt` multiplier worth up to +/-20
+    // points of score, and that was wrong twice over. Measured across five seasons the
+    // grade showed ZERO lift over the projections on its own; and its one genuinely
+    // predictive ingredient - the projection percentile - is already the whole of VOR, so
+    // tilting double-counted the half that works and added the half that does not. The
+    // grade still computes, still draws its bars on the player card, and still answers
+    // "is he good for a tight end". It just does not get to move where he is drafted.
+    //
+    // Fit is ADDED, not multiplied: multiplying erases a preference when VOR is 0 and
+    // inverts it when VOR is negative. It is capped at FIT_BAND points so it can only ever
+    // reorder players the value numbers were close to indifferent about. That cap is the
+    // honest part - nothing here beat the projections in five years of testing, so it does
+    // not get to outvote them. An unrated man gets no Fit at all: leaning on a number
+    // built from absent data is inventing an opinion and then acting on it.
+    const lean = r.rated ? FIT_BAND * ((r.fit - 50) / 50) : 0;
+    // The score BEFORE the room gets a vote. Everything the board knows on its own ends
+    // here, and the anchor below is a shift applied to it.
+    r.preScore = (r.vorPct + lean) * posx + r.need
+      + (st.rookie && r.p.rookie ? rookieBonus(r.p, st) : 0);
 
     // The same score, asked the roster-aware question: how much of him reaches YOUR
     // lineup, and what job is he doing when he gets there. See the note above benchWorth.
@@ -967,8 +1089,42 @@ export function buildBoard(data, st, cache) {
     // while a lean is worth twenty, and the plan put a receiver with a lineup value of 66
     // ahead of one worth 84 purely on the ratings. Same size as the thing it is adjusting.
     const share = r.pts > 0 ? Math.max(0, Math.min(1, r.lineup / r.pts)) : 1;
-    r.benchScore = (bPct + lean * share) * posx + r.need
-      + (st.rookie && r.p.rookie ? s - ((r.vorPct + lean) * posx + r.need) : 0);
+    r.preBench = (bPct + lean * share) * posx + r.need
+      + (st.rookie && r.p.rookie ? rookieBonus(r.p, st) : 0);
+  }
+
+  // ---- the room's vote ------------------------------------------------------------
+  //
+  // Anchoring only means anything if both sides are measured on the SAME ruler, and the
+  // first cut of this got that wrong: it blended ADP into `vorPct` and then added the need
+  // bonus afterwards, so a defence carrying a -4 need penalty was compared against a scale
+  // that knew nothing about need. He came out 50 places below where the anchor was
+  // supposedly pulling him, and the control appeared to push kickers DOWN while claiming
+  // to defer to a room that drafts them higher.
+  //
+  // So the scale is the board's own finished pre-anchor score, and the map is by rank:
+  // the man the room takes 113th is worth whatever OUR 113th-best man is worth. A player
+  // the room agrees with then scores identically either way and does not move at all,
+  // which is the only thing "anchor" can honestly mean. It also sidesteps the shape
+  // problem - a raw ADP percentile is uniform while board scores are heaped up at the
+  // bottom, and blending those directly would rewrite the shape of the board rather than
+  // anybody's place on it.
+  const scale = rows.map((r) => r.preScore).sort((a, b) => b - a);
+  [...rows].sort((a, b) => (a.p.adp ?? 9e9) - (b.p.adp ?? 9e9))
+    .forEach((r, i) => { r.adpScore = scale[i]; });
+  for (const r of rows) {
+    r.anchorW = anchorWeight(r.p, st);
+    r.anchorCase = anchorCase(r.p);
+    // Kept as a SHIFT rather than folded into a blend, because the same correction has to
+    // reach two numbers: the board, where it is exactly (1-w)*ours + w*theirs, and the
+    // roster-aware bench score below, which runs on its own slope. Applying the same
+    // points of correction to both is what stops the recommendation panel disagreeing with
+    // the board it is reading - which is the bug this whole change exists to close. It is
+    // deliberately NOT scaled by playing time down there: it is not an opinion about how
+    // good he is per game, it is a correction to a value estimate we do not trust.
+    r.anchorAdj = r.anchorW * (r.adpScore - r.preScore);
+    r.score = r.preScore + r.anchorAdj;
+    r.benchScore = r.preBench + r.anchorAdj;
   }
 
   // A star or a fade is a preference, not an override. It moves a player past anyone
@@ -1548,7 +1704,7 @@ const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 export function activePrefs(r, st = {}, league = null) {
   const out = [];
   const leans = st.fit || {};
-  const tilt = st.tilt ?? 0.5;
+  const dial = st.anchor ?? ANCHOR_DEFAULT;
 
   // Availability is called out whether or not it is set, because "set to the middle" is
   // itself an assumption about him and the person should know it is being made.
@@ -1573,8 +1729,23 @@ export function activePrefs(r, st = {}, league = null) {
     out.push(`you leaned "${a.label}" towards ${v > 0 ? a.right : a.left}`);
   }
 
-  if (r.rated && tilt >= 0.75) out.push('you have the board leaning hard on your own grades');
-  else if (r.rated && tilt <= 0.25) out.push('you have the board leaning on value rather than your grades');
+  // How much the room counts, said in the terms that apply to HIM. A receiver barely feels
+  // it and a defence is mostly the room, and if the card did not say which, the same
+  // sentence would be misleading for one of them.
+  const w = anchorWeight(r.p, st);
+  if (w >= 0.5) {
+    out.push(`you have the room counting for ${Math.round(w * 100)}% of his score, and for `
+      + `a ${posWord(r.p.pos)} that is most of it — where the room takes him is better `
+      + 'evidence than anything the board can work out on its own');
+  } else if (w >= 0.15) {
+    out.push(`the room counts for ${Math.round(w * 100)}% of his score, because he has no `
+      + 'season behind him and the projection has never been checked against anything');
+  } else if (dial > 0 && w > 0) {
+    out.push(`the room counts for only ${Math.round(w * 100)}% of his score — this is where `
+      + 'your scoring rules are allowed to disagree with everybody else');
+  } else if (dial <= 0) {
+    out.push('you have turned the room off entirely, so this is your projections alone');
+  }
 
   const px = st.posx?.[r.p.pos];
   if (px && px !== 1) {

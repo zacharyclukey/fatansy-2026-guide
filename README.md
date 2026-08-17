@@ -165,10 +165,11 @@ that component off. It is measured by rebuilding the board, not estimated.
 At the default settings the numbers are small — most components move players 2-4 places
 and change almost nobody in the top 50. Two reasons, and only one of them was fixable:
 
-1. **Value over replacement dominates the draft score.** The rating is a tilt on top of
-   real projected points. Below `Trust my ratings = 100` it can only nudge. The slider now
-   goes to 200, where your ratings genuinely outrank the projections — measured at ±7.7
-   places and 5 players in and out of the top 50, roughly double what 100 does.
+1. **Value over replacement is the draft score, and the rating is not in it at all.** The
+   grade describes a player; it does not price him. There is no longer any setting that
+   lets it outvote the projections, because five seasons of testing found it did not beat
+   them. Re-weighting the components changes the bars on the card and cannot change the
+   order of the board by a single place — there is a test that asserts exactly that.
 2. **The components used to overlap, badly.** That part is fixed — see below.
 
 ### The duplication that was there
@@ -235,8 +236,23 @@ It self-corrects for PPR, half-PPR, TE premium or anything else a league invents
 **Floor** and **Ceiling** are gone as components; **Upside** is not typed directly — the Safe ↔ Upside slider on the board
 splits a fixed budget between them.
 
-`DRAFT SCORE = (value over replacement + tilt × rating) × position multiplier + need bonus
-+ rookie bonus`
+```
+pre-anchor = (value over replacement + fit lean) × position multiplier
+             + need bonus + rookie bonus
+DRAFT SCORE = pre-anchor + w × (what the room's pick at his ADP is worth − pre-anchor)
+```
 
-The rating is *added*, never multiplied: multiplying erases it when value is zero and
-inverts it when value is negative.
+The grade does **not** appear in that formula. It used to, through a `tilt` multiplier, and
+that was wrong twice over: measured over five seasons the grade added nothing to the
+projections, and the one part of it that does predict — the projection percentile — is
+already the whole of value over replacement. So the grade still computes and still draws
+its bars on the player card, and it cannot move where anybody is drafted.
+
+`w` is the **How much the room counts** control, scaled per player by how much the board
+deserves to be believed about him: full weight on kickers and defences (their replacement
+level is a number we invented, because nobody drafts a backup kicker), half on a man with
+no prior season (a projection nobody has checked), and a tenth on everybody else — which is
+where your league's odd scoring rules are left free to disagree with the rest of the world.
+
+Fit is *added*, never multiplied: multiplying erases it when value is zero and inverts it
+when value is negative.

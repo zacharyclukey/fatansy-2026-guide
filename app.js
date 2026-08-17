@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608161940';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170610';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608161940';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608161940';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608161940';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608161940';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170610';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170610';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608170610';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170610';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608161940';
+const BUILD = '202608170610';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -199,14 +199,18 @@ function load() {
   // Not a user setting - there is no control for it - so it always comes from the code.
   // Without this a profile saved before it was retuned keeps the old value for ever.
   //
-  // The same argument now applies to three more. Safe-vs-Upside (`style`, `styleBudget`)
-  // and Trust-my-ratings (`tilt`) were sliders on the old ratings page. That page is four
-  // preferences now and neither slider is anywhere on it - but the engine still reads
-  // both, so a profile saved back when they existed goes on shifting component weights and
-  // inflating the rating for ever, with nothing on any screen that says so or can undo it.
-  // A setting with no control is not a setting, it is a ghost. Pinning them to the code
-  // default is the only state a user can actually see and reason about.
-  for (const k of ['rookieMax', 'style', 'styleBudget', 'tilt']) st[k] = base[k];
+  // The same argument now applies to two more. Safe-vs-Upside (`style`, `styleBudget`) was
+  // a slider on the old ratings page. That page is four preferences now and the slider is
+  // nowhere on it - but the engine still read it, so a profile saved back when it existed
+  // went on shifting component weights for ever, with nothing on any screen that says so
+  // or can undo it. A setting with no control is not a setting, it is a ghost. Pinning
+  // them to the code default is the only state a user can actually see and reason about.
+  for (const k of ['rookieMax', 'style', 'styleBudget']) st[k] = base[k];
+  // `tilt` is not pinned, it is DELETED. It was the multiplier that let the 0-100 grade
+  // move the score, and it no longer exists anywhere in the engine - the grade computes
+  // and draws its bars and does not vote. Leaving the key on a saved profile would leave a
+  // dead setting sitting in exported files looking like it still meant something.
+  delete st.tilt;
   // The position-lean buttons are gone from the board - the reading tells you what the
   // evidence says and no longer offers a button to overrule it. That leaves `posx` with no
   // control anywhere, and a saved multiplier would go on quietly tilting whole positions
@@ -2635,6 +2639,7 @@ function renderChrome() {
   $('#filters').innerHTML = ['ALL', ...data.positions]
     .map((p) => `<button data-f="${p}" aria-pressed="${p === filter}">${p === 'ALL' ? 'All' : p}</button>`).join('');
   $('#need').value = st.need;
+  anchorReadout();
   st.cols ||= { bye: true };
   const groups = GROUPS.map(([k, label]) => `<label class="chip">
 <input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`);
@@ -2728,11 +2733,47 @@ function renderLean() {
 ${rec.blurb ? `<p class="leanWhy">${rec.blurb}</p>` : ''}`;
 }
 
+// The two costs of anchoring, on the screen next to the control that buys them. Both are
+// real, both are invisible if nobody writes them down, and the second one gets worse the
+// further the slider goes - so the warning is conditional and the plain line is not.
+function anchorReadout() {
+  const el = $('#anchor');
+  if (!el) return;
+  const dial = st.anchor ?? ANCHOR_DEFAULT;
+  const pct = Math.round(dial * 100);
+  el.value = pct;
+  $('#anchorOut').textContent = `${pct}%`;
+  const hint = $('#anchorHint');
+  if (!hint) return;
+  const stream = Math.round(dial * ANCHOR_CASES.stream * 100);
+  const known = Math.round(dial * ANCHOR_CASES.known * 100);
+  // Not one number, because it is not one number. Saying "70%" flat would be the blunt
+  // instrument this was built to avoid, and the whole point is that it lands differently
+  // on a defence than on a receiver.
+  let s = dial <= 0
+    ? 'Off. Your projections alone decide the board, including kickers and defences, where '
+    + 'the board has no honest replacement level to work from and gets them badly wrong.'
+    : `Where everybody else is drafting counts for ${stream}% on kickers and defences, `
+    + `about half that on a man with no last season, and ${known}% on everyone else. `
+    + 'The cost: your league pays for first downs and long catches and the rest of the '
+    + 'world does not, so the more the room counts, the less of that edge you keep.';
+  // The real figure for the pool in front of you, not the dial position. It is much lower
+  // than the dial, because most of the board is established players who barely feel this.
+  const reach = board ? anchorReach(board.rows, st) : 0;
+  if (reach > STEAL_DILUTION) {
+    s += ` Careful this high — the room is now ${Math.round(reach * 100)}% of your whole `
+      + 'board, and "steal" and "reach" are measured against where the room drafts, so '
+      + 'those two labels are largely comparing it with itself.';
+  }
+  hint.textContent = s;
+}
+
 function readouts() {
   // #styleOut2 and #tiltOut2 were written to here for weeks after the elements they name
   // were deleted from index.html along with the rest of the ratings editor. Guarded, so
   // they never threw - which is exactly why nobody noticed.
   $('#needOut').textContent = st.need;
+  anchorReadout();
   $('#priority').textContent = priorityOrder(data, st).slice(0, 3)
     .map((c) => c.label.toLowerCase()).join(' › ');
   renderStrategies();
@@ -2980,6 +3021,7 @@ function wire() {
     }
   });
   for (const [id, fn] of [['need', (v) => { st.need = +v; }],
+    ['anchor', (v) => { st.anchor = +v / 100; }],
   ]) {
     const el = $(`#${id}`);
     if (!el) continue;
@@ -3044,11 +3086,13 @@ function wire() {
   // Not one key overlapped except need and rookie, so "Export my preferences" saved a file
   // that did not contain a single one of the four sliders, and importing it silently reset
   // them all to neutral. Export now writes exactly what import reads, which is the only
-  // arrangement that cannot drift apart again.
+  // arrangement that cannot drift apart again. `anchor` is on the list for the same
+  // reason `need` is: it is a control on the Settings panel, so it is a preference, and a
+  // preferences file that quietly leaves one out is the bug described above happening again.
   $('#exportR').onclick = () => {
-    const { fit, fitExtra, fitOn, need, rookie, posx, stars, fades } = st;
+    const { fit, fitExtra, fitOn, need, anchor, rookie, posx, stars, fades } = st;
     const blob = new Blob([JSON.stringify({ kind: 'draft2026-ratings',
-      fit, fitExtra, fitOn, need, rookie, posx, stars, fades }, null, 2)],
+      fit, fitExtra, fitOn, need, anchor, rookie, posx, stars, fades }, null, 2)],
     { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -3062,7 +3106,8 @@ function wire() {
       const o = JSON.parse(t);
       Object.assign(st, { fit: o.fit || st.fit, fitExtra: o.fitExtra || {},
         fitOn: o.fitOn ?? st.fitOn,
-        need: o.need ?? st.need, rookie: o.rookie ?? st.rookie, posx: o.posx || st.posx,
+        need: o.need ?? st.need, anchor: o.anchor ?? st.anchor,
+        rookie: o.rookie ?? st.rookie, posx: o.posx || st.posx,
         // Your list of players travels with your preferences. It is the single most
         // laborious thing to rebuild by hand, and the whole reason two people in the same
         // house keep separate files.
