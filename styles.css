@@ -664,7 +664,10 @@ span.nm:hover { text-decoration: none; }
 /* The banner has one job: tell someone who has never done this what to do next. It sits
    where the eye already goes for the clock, and it uses the strongest colour on the page
    because while it is showing, nothing else on the board matters. */
-.mockBar {
+/* :not([hidden]) is load-bearing, not decoration. `display: flex` on a plain .mockBar
+   outranks the browser's own [hidden] rule, and the banner then sits on the board as an
+   empty green stripe whenever no practice draft is running. Same trap as .cmpPanel. */
+.mockBar:not([hidden]) {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   margin: 14px 22px 0; padding: 11px 14px;
   background: var(--fieldSoft); border: 1px solid var(--field);
@@ -821,7 +824,12 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
    Two columns and a verdict. The verdict is the widest thing on the panel on purpose:
    when the answer is "coin flip" that is the sentence somebody has to read, and burying
    it under a table of numbers would be the same as not saying it. */
-.cmpPanel { display: block; }
+/* This panel used to say `.cmpPanel { display: block }`, which is how it ended up welded
+   open. The `hidden` attribute is only `display: none` from the browser's own stylesheet,
+   and ANY class selector outranks that - so the rule quietly beat the attribute and the
+   Compare button toggled a value nothing was reading. A div is display:block already, so
+   there is nothing to restore here; the rule is simply gone. If a panel ever does need a
+   display mode of its own, it has to be written `:not([hidden])` or it will do this again. */
 .cmpPick {
   display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 10px 0 14px;
 }

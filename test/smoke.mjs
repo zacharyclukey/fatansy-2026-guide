@@ -154,6 +154,7 @@ const fire = (el, type) => {
 {
   const css = fs.readFileSync(`${DIR}/styles.css`, 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '');          // strip comments, they discuss overflow
+  const html = fs.readFileSync(`${DIR}/index.html`, 'utf8');
   const blocks = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)];
   const ancestors = /(^|,)\s*(main|body|html|section|\.board|#v-board main|#v-board \.board)\s*$/;
   const guilty = blocks.filter(([, sel, body]) => /overflow(-x|-y)?\s*:/.test(body)
@@ -161,6 +162,31 @@ const fire = (el, type) => {
   ok('nothing that contains the board sets overflow', guilty.length === 0,
     guilty.map(([, s]) => s.trim()).join(' / '));
   ok('the sticky header is still sticky', /\.row\.head\s*\{[^}]*position:\s*sticky/.test(css));
+
+  // ---- nothing may out-rank the hidden attribute -----------------------
+  // `hidden` is only `display: none` from the browser's own stylesheet, so ANY class or id
+  // selector that sets `display` beats it. Two panels shipped welded open this way and
+  // nobody noticed, because the button really did flip the attribute - it just changed a
+  // value no longer deciding anything. jsdom does no cascade, so it cannot catch this by
+  // clicking; it has to be read out of the stylesheet.
+  const hideable = new Set();
+  for (const [tag] of html.matchAll(/<[^>]*\bhidden\b[^>]*>/g)) {
+    const id = tag.match(/id="([^"]+)"/);
+    if (id) hideable.add(`#${id[1]}`);
+    const cl = tag.match(/class="([^"]+)"/);
+    if (cl) for (const c of cl[1].split(/\s+/)) hideable.add(`.${c}`);
+  }
+  const welded = [];
+  for (const [, sel, body] of blocks) {
+    if (!/(^|;)\s*display\s*:/.test(body)) continue;
+    for (const s of sel.split(',')) {
+      const t = s.trim();
+      if (/\[hidden\]/.test(t)) continue;          // written defensively, fine
+      if ([...hideable].some((k) => t === k || t.endsWith(` ${k}`))) welded.push(t);
+    }
+  }
+  ok('nothing that can be hidden has its display forced open', welded.length === 0,
+    `${welded.join(', ')} — write it as :not([hidden])`);
 }
 
 // ------------------------------------------------- 0b. nothing exported has gone missing
