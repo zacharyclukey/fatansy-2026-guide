@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170735';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170833';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170735';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170735';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608170735';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170735';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170833';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170833';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608170833';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170833';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608170735';
+const BUILD = '202608170833';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -866,6 +866,7 @@ function tickClock() {
   const bar = $('#clockBar');
   if (!bar) return;
   $('#clockNow').textContent = `Pick ${now}`;
+  renderSyncLive();
   if (!slot) {
     $('#clockNext').innerHTML = '<span class="hint">Add your draft slot to see whether players come back to you.</span>';
   } else if (clock?.onClock) {
@@ -2516,18 +2517,31 @@ async function doSync() {
       if (p.mine && !pk.mine.includes(p.playerId)) pk.mine.push(p.playerId);
     }
     st.clockAt ||= {};
+    // Whether anything actually moved. A poll that brings nothing new must do NOTHING:
+    // rescoring 250 players and rewriting every row on a timer, four times a minute,
+    // whether or not a pick was made, is both wasted work and actively disruptive - it
+    // fights your scroll position and your typing for no reason.
+    const moved = added > 0 || st.clockAt[st.league] !== upto;
     st.clockAt[st.league] = upto;
-    save();
-    rebuild();
+    if (moved) {
+      lastChange = Date.now();
+      save();
+      rebuild();
+    }
     st.lastSync = Date.now();
-    $('#syncClock').textContent = `last synced ${new Date().toLocaleTimeString()}`;
-    msg('#syncMsg', `${list.length} picks made, ${added} new, ${pk.mine.length} yours.`
+    renderSyncLive();
+    $('#syncClock').textContent = `synced ${new Date().toLocaleTimeString()} · `
+      + `every ${Math.round(syncEvery() / 1000)}s`;
+    msg('#syncMsg', `pick ${upto + 1} on the clock — ${list.length} gone, `
+      + `${pk.mine.length} yours.`
       + (skipped ? ` ${skipped} not in the player pool — deep bench, safe to ignore.` : '')
       + (lg.follow && !slot ? ' Set your draft slot on the Board tab so it knows which '
         + 'picks are yours.' : ''), 'good');
+    return moved;
   } catch (e) {
     msg('#syncMsg', e instanceof SleeperError ? e.message : `Sync failed: ${e.message}`, 'bad');
   }
+  return false;
 }
 
 // Follow a Sleeper mock draft by its link.
@@ -2602,17 +2616,79 @@ ${r.total && r.mine ? 'The live sync would work on this draft.'
   }
 }
 
+// How often to ask Sleeper.
+//
+// Sleeper has no push, so following a draft means polling, and the old fixed eight-second
+// interval was wrong in both directions at once. Too slow, because a room on autopick fires
+// four picks in two seconds and you sat up to eight seconds behind a board that had already
+// moved. Too expensive, because every single poll called rebuild() whether or not anything
+// had happened.
+//
+// Fixed by splitting the two concerns. Ask often while the room is moving; ease off when it
+// is not; and do no work at all on a poll that brings nothing new. That makes the fast case
+// cheaper than the old slow one - four polls a minute that each rescored the board, against
+// thirty that mostly parse a small JSON array and stop.
+const SYNC_FAST = 2000;          // a pick every two seconds is faster than anyone can read
+const SYNC_EASY = 6000;
+const SYNC_IDLE = 20000;
+const QUIET_EASY = 30000;        // nothing new for this long and the room is between picks
+const QUIET_IDLE = 180000;       // this long and it is paused, or waiting for a human
+let lastChange = 0;
+let auto = false;
+
+// Is it following, and how fresh is the board? On the board, where you actually are.
+function renderSyncLive() {
+  const el = $('#syncLive');
+  if (!el) return;
+  if (!auto) { el.className = 'syncLive'; el.textContent = ''; return; }
+  const ago = st.lastSync ? Math.round((Date.now() - st.lastSync) / 1000) : null;
+  el.className = 'syncLive on';
+  el.textContent = `following · ${ago == null ? 'asking…'
+    : ago < 3 ? 'up to date' : `${ago}s ago`}`;
+}
+
+function syncEvery() {
+  const quiet = Date.now() - lastChange;
+  if (quiet > QUIET_IDLE) return SYNC_IDLE;
+  if (quiet > QUIET_EASY) return SYNC_EASY;
+  return SYNC_FAST;
+}
+
+function scheduleSync() {
+  if (!auto) return;
+  timer = setTimeout(async () => {
+    timer = null;
+    // A hidden tab is throttled by the browser anyway, so polling one buys nothing and
+    // just spends somebody's battery. The visibility handler below catches straight up on
+    // the way back, so you never return to a stale board.
+    //
+    // Tested against visibilityState, NOT document.hidden. `hidden` is also true while a
+    // page is prerendering, which is not the same thing as being in a background tab - a
+    // prerendered page that never polls would come up blank and stay blank. (jsdom reports
+    // exactly that state, which is how this was caught.)
+    if (document.visibilityState !== 'hidden') await doSync();
+    scheduleSync();
+  }, syncEvery());
+  // one chain at a time: an await longer than the interval used to let setInterval stack
+  // overlapping requests, which is how the pick count could briefly go backwards
+}
+
 function toggleAuto() {
   const b = $('#syncAuto');
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
+  if (auto) {
+    auto = false;
+    if (timer) { clearTimeout(timer); timer = null; }
     b.textContent = 'Start auto-sync';
+    b.setAttribute('aria-pressed', 'false');
+    renderSyncLive();
     return msg('#syncMsg', 'Auto-sync stopped.');
   }
-  timer = setInterval(doSync, 8000);
+  auto = true;
+  lastChange = Date.now();          // start in the fast band, not the idle one
   b.textContent = 'Stop auto-sync';
-  doSync();
+  b.setAttribute('aria-pressed', 'true');
+  renderSyncLive();                 // say "following" before the first answer comes back
+  doSync().then(scheduleSync);
 }
 
 // ---------------------------------------------------------------- chrome
@@ -3073,6 +3149,13 @@ function wire() {
   $('#importL').onclick = doImport;
   $('#syncOnce').onclick = doSync;
   $('#syncAuto').onclick = toggleAuto;
+  // Coming back to the tab is the one moment you are certain to be behind, so catch up
+  // immediately rather than waiting out whatever interval the backoff had settled on.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' || !auto) return;
+    if (timer) { clearTimeout(timer); timer = null; }
+    doSync().then(scheduleSync);
+  });
   $('#followBtn').onclick = doFollow;
   $('#dryBtn').onclick = doDryRun;
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };

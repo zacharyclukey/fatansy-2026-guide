@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608170735" />
+<link rel="stylesheet" href="styles.css?v=202608170833" />
 </head>
 <body>
 
@@ -129,6 +129,11 @@
 
   <div class="clockBar" id="clockBar">
     <span class="clockNow" id="clockNow"></span>
+    <!-- Whether the board is actually following the draft, said on the board itself. The
+         auto-sync button and its "last synced" line live on the Setup tab, which is not
+         where you are during a draft - so the honest answer to "is this thing keeping up"
+         was two clicks away, and the only way to guess was to watch rows disappear. -->
+    <span class="syncLive" id="syncLive" aria-live="polite"></span>
     <span class="clockNext" id="clockNext"></span>
     <label class="clockSlot">Your draft slot
       <input id="slot" type="number" min="1" max="20" placeholder="—" />
@@ -289,7 +294,7 @@
       from your draft slot.</p>
     <div class="rowbtns">
       <button id="syncOnce">Sync picks now</button>
-      <button id="syncAuto">Start auto-sync</button>
+      <button id="syncAuto" aria-pressed="false">Start auto-sync</button>
       <span id="syncClock" class="hint"></span>
     </div>
     <p id="syncMsg" class="setupMsg" hidden></p>
@@ -329,6 +334,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608170735"></script>
+<script type="module" src="app.js?v=202608170833"></script>
 </body>
 </html>

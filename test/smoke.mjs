@@ -1529,7 +1529,9 @@ const fire = (el, type) => {
   d.querySelector('#syncOnce').click();
   await new Promise((r) => setTimeout(r, 300));
   const msg = d.querySelector('#syncMsg').textContent;
-  ok('sync reads picks', /4 picks made/.test(msg), msg);
+  // The message leads with the pick on the clock now, because that is the number you act on
+  ok('sync reads picks', /4 gone/.test(msg), msg);
+  ok('and says which pick is on the clock', /pick 20 on the clock/.test(msg), msg);
   ok('autodrafted picks count as yours', /2 yours/.test(msg), msg);
   ok('unknown players are reported not dropped', /not in the player pool/.test(msg), msg);
   d.querySelector('[data-v="board"]').click();
@@ -1638,7 +1640,7 @@ const fire = (el, type) => {
   d.querySelector('#syncOnce').click();
   await new Promise((r) => setTimeout(r, 300));
   const sm = d.querySelector('#syncMsg').textContent;
-  ok('mock picks read', /3 picks made/.test(sm), sm);
+  ok('mock picks read', /3 gone/.test(sm), sm);
   ok('your seat is what makes a pick yours', /1 yours/.test(sm), sm);
   d.querySelector('[data-v="board"]').click();
   await settle();
@@ -1699,6 +1701,59 @@ const fire = (el, type) => {
   const fm3 = d.querySelector('#followMsg').textContent;
   ok('the screen says the league could not be read, not that there was none',
     /would not let the board read/.test(fm3) && !/standalone mock/.test(fm3), fm3);
+
+  // ---- how fast it follows, and how little it does when nothing moved ----
+  // The whole point of the rewrite: a poll that brings nothing new must not rescore the
+  // board. Count the fetches and count the renders separately.
+  {
+    const w = d.defaultView;
+    let calls = 0;
+    const real = w.fetch;
+    w.fetch = (u) => { if (String(u).includes('/picks')) calls += 1; return real(u); };
+
+    d.querySelector('[data-v="setup"]').click();
+    d.querySelector('#syncAuto').click();
+    await new Promise((r) => setTimeout(r, 120));
+    ok('auto-sync says it is running',
+      d.querySelector('#syncAuto').getAttribute('aria-pressed') === 'true'
+      && /Stop/.test(d.querySelector('#syncAuto').textContent));
+    // and says so on the BOARD, which is where you are during a draft
+    d.querySelector('[data-v="board"]').click();
+    await settle();
+    ok('the board itself says it is following',
+      /following/.test(d.querySelector('#syncLive').textContent),
+      d.querySelector('#syncLive').textContent);
+    d.querySelector('[data-v="setup"]').click();
+    const afterStart = calls;
+    ok('starting asks straight away rather than waiting out the interval', afterStart >= 1,
+      `${afterStart}`);
+
+    // three picks are already in the route; polling again must add nothing
+    d.querySelector('[data-v="board"]').click();
+    await settle();
+    const before = d.querySelectorAll('.row.player').length;
+    d.querySelector('#syncOnce').click();
+    await new Promise((r) => setTimeout(r, 200));
+    ok('a poll with nothing new leaves the board alone',
+      d.querySelectorAll('.row.player').length === before);
+
+    // ~2s polling: within 5 seconds it must have asked more than twice, which the old
+    // fixed 8000ms interval could not have done
+    await new Promise((r) => setTimeout(r, 5000));
+    ok('it polls several times in five seconds, not once', calls - afterStart >= 2,
+      `${calls - afterStart} polls in 5s`);
+
+    d.querySelector('[data-v="setup"]').click();
+    d.querySelector('#syncAuto').click();
+    await new Promise((r) => setTimeout(r, 60));
+    const stopped = calls;
+    await new Promise((r) => setTimeout(r, 3000));
+    ok('stopping really stops it', calls === stopped, `${calls - stopped} more after stop`);
+    ok('the button goes back to offering a start',
+      d.querySelector('#syncAuto').getAttribute('aria-pressed') === 'false'
+      && /Start/.test(d.querySelector('#syncAuto').textContent));
+    w.fetch = real;
+  }
 
   // Re-importing your real leagues must not silently drop a mock you are mid-draft in.
   d.querySelector('[data-v="setup"]').click();
