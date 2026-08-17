@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170833';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170904';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170833';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170833';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608170833';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170833';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170904';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170904';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608170904';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170904';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608170833';
+const BUILD = '202608170904';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -2503,25 +2503,82 @@ async function doSync() {
     const known = new Set(data.players.map((p) => p.id));
     const pk = picks();
     let added = 0;
+    let claimed = 0;
     let skipped = 0;
     // The pick on the clock is Sleeper's pick_no, NOT how many players we managed to tick
     // off. Those two are the same number only if every man taken is on our board, and over
     // sixteen rounds he is not - a deep-bench tight end nobody projects gets skipped here
     // and the clock silently runs a pick or two behind for the rest of the draft. Which is
     // the one number the whole recommendation is built on.
+    // In the order they were made. Sleeper does not promise one, and the cost snapshots
+    // below reconstruct the board pick by pick, so the order is load-bearing.
+    list.sort((a, b) => (a.pick || 0) - (b.pick || 0));
+    st.clockAt ||= {};
+    // Read BEFORE anything else, because taking snapshots winds this value backwards as
+    // scratch. Comparing against it afterwards would be comparing against ourselves.
+    const wasAt = st.clockAt[st.league];
+
     let upto = 0;
+    const onBoard = [];                     // the picks we actually carry, in pick order
     for (const p of list) {
       if (p.pick > upto) upto = p.pick;
       if (!known.has(p.playerId)) { skipped += 1; continue; }
-      if (!pk.drafted.includes(p.playerId)) { pk.drafted.push(p.playerId); added += 1; }
-      if (p.mine && !pk.mine.includes(p.playerId)) pk.mine.push(p.playerId);
+      onBoard.push(p);
     }
-    st.clockAt ||= {};
-    // Whether anything actually moved. A poll that brings nothing new must do NOTHING:
-    // rescoring 250 players and rewriting every row on a timer, four times a minute,
-    // whether or not a pick was made, is both wasted work and actively disruptive - it
-    // fights your scroll position and your typing for no reason.
-    const moved = added > 0 || st.clockAt[st.league] !== upto;
+    for (const p of onBoard) {
+      if (!pk.drafted.includes(p.playerId)) { pk.drafted.push(p.playerId); added += 1; }
+      if (p.mine && !pk.mine.includes(p.playerId)) { pk.mine.push(p.playerId); claimed += 1; }
+    }
+
+    // "What it cost" is a snapshot of the board as it stood BEFORE a pick: who else was
+    // there, and who you could still have had instead. That snapshot was only ever taken by
+    // the manual Mine button, so every pick arriving through the sync read "Not recorded" -
+    // and following a live draft is precisely the case where you are NOT pressing that
+    // button. The report was blank in the one situation it exists for.
+    //
+    // It cannot be taken after the fact from the finished board, so it is reconstructed:
+    // for each pick of ours with no snapshot, the drafted and mine lists are wound back to
+    // exactly who had gone before that pick number, the board is re-scored in that state,
+    // and the snapshot is taken there. Which also means joining a draft late still gets you
+    // costs for the picks you made before you attached.
+    //
+    // Bounded by your own picks - sixteen in a full draft - and each one is stamped once.
+    const key = `${lg.draft_id}:`;
+    const todo = onBoard.filter((p) => p.mine && !shotFor(p.playerId)
+      && !stampTried.has(key + p.playerId));
+    if (todo.length) {
+      const finalDrafted = [...pk.drafted];
+      const finalMine = [...pk.mine];
+      for (const p of todo) {
+        stampTried.add(key + p.playerId);
+        pk.drafted = onBoard.filter((x) => x.pick < p.pick).map((x) => x.playerId);
+        pk.mine = onBoard.filter((x) => x.pick < p.pick && x.mine).map((x) => x.playerId);
+        st.clockAt[st.league] = Math.max(0, (p.pick || 1) - 1);
+        rescore();
+        tickClock();
+        stampShot(p.playerId);
+      }
+      pk.drafted = finalDrafted;
+      pk.mine = finalMine;
+    }
+    // Did anything actually move? A poll that brings nothing new must do NOTHING - the old
+    // code rescored 250 players and rewrote every row on a timer whether or not a pick had
+    // been made, which is both wasted work and actively disruptive, because it fights your
+    // scroll position and anything you are typing.
+    //
+    // "Nothing new" has to mean nothing, so all three ways the draft can move are counted:
+    //
+    //   added    a player came off the board                -> the pool changed
+    //   claimed  a player was recognised as YOURS           -> your roster and needs changed
+    //   upto     the pick number advanced                   -> everyone's odds of lasting
+    //            (this one fires even when the man taken is not on our board at all, and it
+    //            has to: waiting eight more picks changes the recommendation even if every
+    //            one of them was spent on a player we do not carry)
+    //
+    // Any of the three and the board is rebuilt in full, exactly as before - same rescore,
+    // same recommendation, same cost of waiting. The only thing that got faster is the case
+    // where the answer would have been identical.
+    const moved = added > 0 || claimed > 0 || wasAt !== upto;
     st.clockAt[st.league] = upto;
     if (moved) {
       lastChange = Date.now();
@@ -2635,6 +2692,11 @@ const QUIET_EASY = 30000;        // nothing new for this long and the room is be
 const QUIET_IDLE = 180000;       // this long and it is paused, or waiting for a human
 let lastChange = 0;
 let auto = false;
+// Picks we have already tried to take a cost snapshot for. A pick the planner cannot place
+// - too deep in the pool to have been one of the candidates it considered - yields no
+// snapshot, and without this it would be retried, at one full rescore a time, on every
+// single poll for the rest of the draft.
+const stampTried = new Set();
 
 // Is it following, and how fresh is the board? On the board, where you actually are.
 function renderSyncLive() {

@@ -1711,6 +1711,22 @@ const fire = (el, type) => {
     const real = w.fetch;
     w.fetch = (u) => { if (String(u).includes('/picks')) calls += 1; return real(u); };
 
+    // Whatever ran above has left a DIFFERENT mock selected, so re-follow the one this
+    // block is about and set the seat again. Depending on a neighbour's leftover state is
+    // how this block first failed, reading "Pick 1" with no draft slot.
+    d.querySelector('[data-v="setup"]').click();
+    d.querySelector('#followUrl').value = 'https://sleeper.app/draft/nfl/1394053712187506688';
+    d.querySelector('#followBtn').click();
+    await new Promise((r) => setTimeout(r, 400));
+    d.querySelector('[data-v="board"]').click();
+    await settle();
+    const seat = d.querySelector('#slot');
+    seat.value = '4';
+    fire(seat, 'input');
+    await settle();
+    ok('the block starts on the draft it means to test',
+      d.querySelector('#slot').value === '4');
+
     d.querySelector('[data-v="setup"]').click();
     d.querySelector('#syncAuto').click();
     await new Promise((r) => setTimeout(r, 120));
@@ -1736,6 +1752,69 @@ const fire = (el, type) => {
     await new Promise((r) => setTimeout(r, 200));
     ok('a poll with nothing new leaves the board alone',
       d.querySelectorAll('.row.player').length === before);
+
+    // ---- but it MUST still recalculate whenever anything moved -----------
+    // Skipping work when nothing changed is only safe if "nothing changed" is airtight.
+    // Three separate things can move, and each one has to force a full rebuild.
+    const advice = () => d.querySelector('#advice').textContent.replace(/\s+/g, ' ').trim();
+    const route = '/draft/1394053712187506688/picks';
+    const seen = new Set(sleeperRoutes[route].map((p) => p.player_id));
+
+    // 1. a player comes off the board. Drafted men are not hidden by default, so the row
+    //    count does not move - the row picks up .drafted instead.
+    const goneCount = () => d.querySelectorAll('.row.player.drafted').length;
+    const was = advice();
+    const wasGone = goneCount();
+    const next = players.players.find((p) => !seen.has(p.id));
+    sleeperRoutes[route] = [...sleeperRoutes[route],
+      { player_id: next.id, picked_by: '', roster_id: null, draft_slot: 8, pick_no: 8, round: 1 }];
+    d.querySelector('#syncOnce').click();
+    await new Promise((r) => setTimeout(r, 250));
+    ok('a new pick is ticked off the board', goneCount() === wasGone + 1,
+      `${wasGone} -> ${goneCount()}`);
+    ok('and the recommendation is recalculated', advice() !== was, advice().slice(0, 80));
+
+    // 2. the pick number advances on players we do not even carry. Waiting longer changes
+    //    who lasts, so the advice must move even though our pool is untouched.
+    const poolNow = goneCount();
+    const mid = advice();
+    sleeperRoutes[route] = [...sleeperRoutes[route],
+      ...[9, 10, 11, 12, 13, 14, 15, 16].map((n) => ({
+        player_id: `9999${n}`, picked_by: '', roster_id: null, draft_slot: n, pick_no: n, round: 1 }))];
+    d.querySelector('#syncOnce').click();
+    await new Promise((r) => setTimeout(r, 250));
+    ok('picks on players we do not carry still move the clock',
+      /Pick 17\b/.test(d.querySelector('#clockNow').textContent),
+      d.querySelector('#clockNow').textContent);
+    ok('and none of them came off our board', goneCount() === poolNow,
+      `${poolNow} -> ${goneCount()}`);
+    ok('but the recommendation is recalculated anyway', advice() !== mid, advice().slice(0, 80));
+
+    // 3. a player already on the drafted list is newly recognised as YOURS. This one used
+    //    to slip through: pk.mine grew but nothing counted it, so your own roster and your
+    //    need bonus went stale until some unrelated pick happened to force a rebuild.
+    const claimable = sleeperRoutes[route].find((p) => p.draft_slot === 8);
+    const mineBefore = d.querySelectorAll('.row.mine').length;
+    claimable.draft_slot = 4;                        // slot 4 is ours in this block
+    d.querySelector('#syncOnce').click();
+    await new Promise((r) => setTimeout(r, 250));
+    ok('a pick reclassified as yours rebuilds the board',
+      d.querySelectorAll('.row.mine').length === mineBefore + 1,
+      `${mineBefore} -> ${d.querySelectorAll('.row.mine').length}`);
+
+    // 4. And the pick has to arrive with a COST attached. "What it cost" is a snapshot of
+    //    the board before the pick, and it was only ever taken by the manual Mine button -
+    //    so following a live draft, which is the one time you are not pressing that button,
+    //    filled the report with "Not recorded" on every row.
+    d.querySelector('[data-v="roster"]').click();
+    await settle();
+    const rows = [...d.querySelectorAll('#costPicks .row.costPick:not(.head)')];
+    const blank = rows.filter((r) => /Not recorded/.test(r.textContent));
+    ok('synced picks appear in what it cost at all', rows.length > 0, `${rows.length} rows`);
+    ok('and none of them reads "Not recorded"', blank.length === 0,
+      `${blank.length} of ${rows.length} unrecorded`);
+    d.querySelector('[data-v="board"]').click();
+    await settle();
 
     // ~2s polling: within 5 seconds it must have asked more than twice, which the old
     // fixed 8000ms interval could not have done
