@@ -10,8 +10,14 @@ export const TIPS = {
   reach: ['Taking him now means passing men your board rates higher.', ''],
   Rating: ['How good he is FOR HIS POSITION, 0-100.',
     'Your weighted components. Cannot compare a QB to an RB.'],
-  Score: ['Who to actually draft. Take the highest, 0 to 100.',
-    'The VOR column, rescaled so the best man on the board is 100 and the last is 0.'],
+  Score: ['A grade for who to actually draft, 0 to 100. Take the highest.',
+    'Mostly VOR — points above a replacement starter — plus your preferences, your stars '
+    + 'and fades, and how the room is drafting. Open a player to see every adjustment and '
+    + 'its size.'],
+
+  star: ['Your own view of him. Click to cycle.',
+    `Liked adds ${5}, faded takes ${5} away, and the change shows in his score. It only `
+    + 'ever moves him past men he was level with.'],
 
   // The distinction people get wrong, including Zach: replacement is not average. The
   // average running back is the 51st of 102, most of whom nobody would ever start. The
@@ -103,9 +109,6 @@ export const TIPS = {
   Type: ['What kind of pick he is AT THIS PICK. It changes as the draft moves.',
     'Steal = fallen past his range. Reach = too early. Priced right is always Safe or '
     + 'Swing, never a dash. A dash means his range is still a long way off - check Worth.'],
-  star: ['Your own view of him. Click to cycle.',
-    'Liked lifts him above anyone within 5 points, faded drops him below. Never further.'],
-
   handcuff: ['He takes over the job if the man ahead of him cannot play.',
     'Worth the points that job is above a waiver-wire replacement, for as long as you have '
     + 'assumed that man is out. Set that under Time missed.'],

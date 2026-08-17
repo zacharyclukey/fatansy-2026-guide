@@ -675,6 +675,40 @@ const fire = (el, type) => {
     scoreCells.every((s) => /^\d+\.\d{2}$/.test(s) && +s >= 0 && +s <= 100),
     scoreCells.slice(0, 5).join(', '));
   ok('the best man on the board scores 100', scoreCells[0] === '100.00', scoreCells[0]);
+  // ---- a star must change the NUMBER, not just the order ----------------
+  // The board used to reorder itself when you starred somebody while every number on screen
+  // stayed identical. Two players swapping places with the same score is unlearnable, and
+  // it is the thing that confused the person this app is half built for.
+  {
+    const row = [...d.querySelectorAll('.row.player')][20];
+    const cell = () => row.querySelector('.num.sc').textContent.trim();
+    const before = cell();
+    row.querySelector('.starBtn').click();
+    await settle();
+    const after = [...d.querySelectorAll('.row.player')]
+      .find((x) => x.dataset.id === row.dataset.id)?.querySelector('.num.sc').textContent.trim();
+    ok('starring a player changes his score, not just his place',
+      after !== before && +after > +before, `${before} -> ${after}`);
+    // and the card shows the receipt
+    const el = [...d.querySelectorAll('.row.player')].find((x) => x.dataset.id === row.dataset.id);
+    el.querySelector('.nm').click();
+    await settle();
+    const card = d.querySelector('.detail');
+    ok('the card names what moved his score', /You rate him/.test(card?.textContent || ''),
+      (card?.querySelector('.dBoosts')?.textContent || '').slice(0, 120));
+    ok('and shows the size of it', /\+5\.00/.test(card?.querySelector('.dBoosts')?.textContent || ''),
+      (card?.querySelector('.dBoosts')?.textContent || '').slice(0, 120));
+    el.querySelector('.nm').click();
+    await settle();
+    // put it back so later blocks see the board they expect
+    [...d.querySelectorAll('.row.player')].find((x) => x.dataset.id === row.dataset.id)
+      ?.querySelector('.starBtn').click();
+    await settle();
+    [...d.querySelectorAll('.row.player')].find((x) => x.dataset.id === row.dataset.id)
+      ?.querySelector('.starBtn').click();
+    await settle();
+  }
+
   // Two decimals exist to separate men a whole number would tie. If the column still ties
   // a lot of the board, it is not doing the job it was widened for.
   const dupes = scoreCells.length - new Set(scoreCells).size;

@@ -818,6 +818,18 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
 .dCall .kind.soft { background: var(--panel2); color: var(--ink3); }
 .dSub { margin: 0; font-size: 13px; color: var(--ink2); line-height: 1.5; }
 .dNote { margin: 7px 0 0; font-size: 12px; color: var(--ink3); line-height: 1.5; }
+/* The receipt for a score: every adjustment by name and size. Signed and coloured, because
+   the sign is the first thing anybody wants and reading it off a minus glyph is slower. */
+.dBoosts { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+.boost {
+  display: inline-flex; align-items: baseline; gap: 6px; cursor: help;
+  font-size: 12px; color: var(--ink2);
+  background: var(--panel2); border-radius: 999px; padding: 3px 10px;
+}
+.boost b { font-family: var(--num); font-weight: 700; }
+.boost.up b { color: var(--good); }
+.boost.dn b { color: var(--bad); }
+.dBoosts .hint { flex-basis: 100%; margin-top: 4px; max-width: 80ch; }
 .dSec .tags { margin: 0; }
 .dSec .tag { font-size: 12px; padding: 4px 9px; }
 

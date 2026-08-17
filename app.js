@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171427';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171440';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171427';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171427';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171427';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171427';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171440';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171440';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171440';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171440';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171427';
+const BUILD = '202608171440';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -1459,6 +1459,20 @@ function detail(r) {
   const sec = (title, body, cls = '') => (body
     ? `<section class="dSec ${cls}"><h4>${title}</h4>${body}</section>` : '');
 
+  // ---- what moved his score, and by how much ----
+  // The board used to reorder itself when you starred somebody while every number on screen
+  // stayed identical, which is impossible to learn from. Now the star goes into the score
+  // like everything else, and this is the receipt: every adjustment by name, with its size,
+  // hoverable for what it means. If two men swap places, one of these chips says why.
+  const boosts = (r.boosts || []).slice().sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  const boostBar = boosts.length ? `<p class="dBoosts">${boosts.map((b) => {
+    const t = TIPS[b.key];
+    const title = t ? tip(t) : tip([b.label, 'Moves the score by this many points.']);
+    return `<span class="boost ${b.amount >= 0 ? 'up' : 'dn'}" title="${title}">`
+      + `${esc(b.label)} <b>${b.amount >= 0 ? '+' : '−'}${Math.abs(b.amount).toFixed(2)}</b></span>`;
+  }).join('')}<span class="hint">These are already in the score above — they are why he sits
+where he sits rather than where plain value would put him. Hover any of them.</span></p>` : '';
+
 
   return `<div class="detail">
 <div class="dHead">${head}</div>
@@ -1466,9 +1480,9 @@ ${chips ? `<p class="dChips">${chips}</p>` : ''}
 <p class="dCmp"><button data-cmp="${r.p.id}" class="chipBtn">Compare him with someone</button>
 <span class="hint">Put him side by side with one other player.</span></p>
 
-${sec(`Why he is #${r.rank} on your board`, e ? `<p class="dSub">${esc(e.rank)}</p>
+${sec(`Why he is #${r.rank} on your board`, `${e ? `<p class="dSub">${esc(e.rank)}</p>
 ${e.prefLine ? `<p class="dNote">${esc(e.prefLine)}</p>` : ''}
-<p class="dNote">${esc(e.caveat)}</p>` : '')}
+<p class="dNote">${esc(e.caveat)}</p>` : ''}${boostBar}`)}
 
 ${sec('Is he worth this pick?', `
 <p class="dCall">${r.kind

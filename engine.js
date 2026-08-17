@@ -1086,10 +1086,18 @@ export function buildBoard(data, st, cache) {
   const usable = FIT_AXES.filter((a) => !a.needsPenalties || hasPenalties(league));
   const live = usable.map((a) => a.key).filter((k) => (leans[k] || 0) !== 0);
   for (const r of rows) {
+    r.fitParts = {};
     if (!live.length || st.fitOn === false) { r.fit = 50; continue; }
     const sum = live.reduce(
       (acc, k) => acc + ((leans[k] / 100) * ((r.traits?.[k] ?? 50) - 50)), 0);
     r.fit = Math.max(0, Math.min(100, 50 + sum / live.length));
+    // Each slider's own share of the result, kept so the card can show WHICH preference
+    // moved him and by how much. Without this, Fit is a single number that says a player
+    // was nudged and refuses to say by what - which is the thing that made the board feel
+    // like it was reordering itself for reasons nobody could see.
+    for (const k of live) {
+      r.fitParts[k] = ((leans[k] / 100) * ((r.traits?.[k] ?? 50) - 50)) / live.length;
+    }
   }
 
   // VOR on a 0-100 scale above replacement. Below replacement it keeps an ORDERED band
@@ -1234,15 +1242,42 @@ export function buildBoard(data, st, cache) {
 
   // A star or a fade is a preference, not an override. It moves a player past anyone
   // within STAR_BAND points of him and no further, so it only ever decides calls the
-  // numbers were close to indifferent about. Nobody's score changes.
+  // numbers were close to indifferent about.
+  //
+  // It now goes INTO the score rather than into a private sort key beside it. The old way
+  // kept the number honest in a narrow sense - a star is your opinion, not a projection -
+  // and in exchange the board silently reordered itself while every number on screen stayed
+  // put. That is worse. A person watching two players swap places with identical scores has
+  // no way to learn what the app is doing, and Zach's fiancee hit exactly that. If a
+  // preference is strong enough to change the order it is strong enough to be shown, and
+  // the cap is what keeps it honest, not the hiding.
   const starred = new Set(st.stars || []);
   const faded = new Set(st.fades || []);
   for (const r of rows) {
     r.star = starred.has(r.p.id);
     r.fade = faded.has(r.p.id);
-    r.sortKey = r.score + (r.star ? STAR_BAND : 0) - (r.fade ? STAR_BAND : 0);
+    const view = (r.star ? STAR_BAND : 0) - (r.fade ? STAR_BAND : 0);
+    r.score += view;
+    r.benchScore += view;
+    // Everything that moved him off the raw value number, by name, so the card can show
+    // its working. Only entries big enough to be worth a person's attention.
+    r.boosts = [];
+    const add = (key, label, amount) => {
+      if (Math.abs(amount) >= 0.05) r.boosts.push({ key, label, amount });
+    };
+    add('star', r.star ? 'You rate him' : 'You do not trust him', view);
+    // Same arithmetic the score used: each axis's share of Fit, scaled onto FIT_BAND.
+    for (const [k, v] of Object.entries(r.fitParts || {})) {
+      const axis = FIT_AXES.find((a) => a.key === k);
+      add(k, axis?.label || k, r.rated ? FIT_BAND * (v / 50) * (st.posx?.[r.p.pos] ?? 1) : 0);
+    }
+    add('need', 'A position you still need', r.need || 0);
+    add('rookie', 'Rookie', (st.rookie && r.p.rookie ? rookieBonus(r.p, st) : 0));
+    add('anchor', 'Where the room drafts him', r.anchorAdj || 0);
+    add('handcuff', 'Cover for a starter', r.hcGain > 0
+      ? Math.min(HANDCUFF_BAND, r.hcGain) : 0);
   }
-  rows.sort((a, b) => b.sortKey - a.sortKey);
+  rows.sort((a, b) => b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
 
   // The same score, on a scale nobody has to interpret.
