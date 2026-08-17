@@ -65,6 +65,10 @@ export const TIPS = {
   need: ['Nudges toward positions you still need.', 'Adds points to a position short of starters.'],
   rookie: ['Pay up for rookies.', 'Up to +10, scaled by how sure the draft-capital read is.'],
   hideGone: ['Clear drafted players off the board.', ''],
+  noQb2: ['Never suggest a backup quarterback.',
+    'A rule about how YOU draft, not a claim that the maths is wrong — it keeps his score '
+    + 'and his rank honest and simply takes him out of every recommendation. Saved on this '
+    + 'computer only, so two people sharing a board can set it differently.'],
 
   // components
   volume: ['How much work he gets.', 'The most predictive thing in fantasy.'],

@@ -675,6 +675,45 @@ const fire = (el, type) => {
     scoreCells.every((s) => /^\d+\.\d{2}$/.test(s) && +s >= 0 && +s <= 100),
     scoreCells.slice(0, 5).join(', '));
   ok('the best man on the board scores 100', scoreCells[0] === '100.00', scoreCells[0]);
+  // ---- filtering to a position asks a question, so answer it ------------
+  {
+    d.querySelector('#slot').value = '4';
+    fire(d.querySelector('#slot'), 'input');
+    await settle();
+    ok('no position answer while showing everything', !d.querySelector('.posWhy'));
+    d.querySelector('[data-f="QB"]').click();
+    await settle();
+    const pw = d.querySelector('.posWhy');
+    ok('filtering to a position names the best one there', !!pw, 'no .posWhy rendered');
+    ok('and says how his score compares', /score \d+\.\d{2}/.test(pw?.textContent || ''),
+      (pw?.textContent || '').slice(0, 140));
+    ok('and either backs him or names who it would take instead',
+      /also the pick|The panel above says/.test(pw?.textContent || ''),
+      (pw?.textContent || '').slice(0, 200));
+    d.querySelector('[data-f="ALL"]').click();
+    await settle();
+    ok('and it goes away again', !d.querySelector('.posWhy'));
+  }
+
+  // ---- a rule you set for yourself, kept out of the score ---------------
+  {
+    const qbScore = () => {
+      d.querySelector('[data-f="QB"]').click();
+      const cells = [...d.querySelectorAll('.row.player .num.sc')].map((x) => x.textContent);
+      d.querySelector('[data-f="ALL"]').click();
+      return cells[1];                       // the second quarterback on the board
+    };
+    const before = qbScore();
+    const cb = d.querySelector('#noQb2');
+    cb.checked = true; fire(cb, 'change');
+    await settle();
+    ok('the second-QB rule is saveable at all', !!cb);
+    ok('and it does NOT quietly rewrite his score', qbScore() === before,
+      `${before} -> ${qbScore()}`);
+    cb.checked = false; fire(cb, 'change');
+    await settle();
+  }
+
   // ---- a star must change the NUMBER, not just the order ----------------
   // The board used to reorder itself when you starred somebody while every number on screen
   // stayed identical. Two players swapping places with the same score is unlearnable, and

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608171440" />
+<link rel="stylesheet" href="styles.css?v=202608171500" />
 </head>
 <body>
 
@@ -121,6 +121,15 @@
         <label class="check">
           <input id="hideGone" type="checkbox" />
           <span data-tip="hideGone" tabindex="0">Hide drafted<span class="hint">Clear players already off the board</span></span>
+        </label>
+        <!-- A rule, not a rating. The bench maths already prices a backup quarterback
+             correctly and still occasionally likes one; this is for the drafter who has
+             simply decided he will never take one and does not want to re-argue it every
+             time. It is a setting rather than a change to the model because it is a
+             preference about how YOU draft, and the model is not wrong. -->
+        <label class="check">
+          <input id="noQb2" type="checkbox" />
+          <span data-tip="noQb2" tabindex="0">Never a second quarterback<span class="hint">Keep backup QBs out of every recommendation</span></span>
         </label>
       </div>
     </div>
@@ -364,6 +373,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608171440"></script>
+<script type="module" src="app.js?v=202608171500"></script>
 </body>
 </html>

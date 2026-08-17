@@ -509,6 +509,26 @@ span.nm:hover { text-decoration: none; }
 .costPill.hot b { color: var(--field); }
 .advCost .hint { display: inline; margin-left: 4px; }
 
+/* The answer to "fine, but who is the best QB here" - shown only while a position filter
+   is on. Set apart from the recommendation above it, because it is a different question
+   and must not read like a second, competing instruction. */
+.posWhy {
+  margin: 12px 0 0; padding: 10px 12px; font-size: 14px;
+  border-top: 1px solid var(--line); color: var(--ink);
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.posWhy .posTag {
+  font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  background: var(--panel2); color: var(--ink2); border-radius: 4px; padding: 3px 8px;
+}
+.posWhy b { font-weight: 600; }
+.posWhy .hint { flex-basis: 100%; margin: 2px 0 0; }
+.posSay {
+  flex-basis: 100%; font-size: 13px; color: var(--ink2); line-height: 1.55; margin-top: 6px;
+}
+.posSay.alt { color: var(--ink3); }
+.posSay.alt b { color: var(--ink2); }
+
 .addStat { margin-bottom: 18px; }
 .addLine { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .addLine select { max-width: 420px; flex: 1; }

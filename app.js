@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171440';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171500';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171440';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171440';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171440';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171440';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171500';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171500';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171500';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171500';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171440';
+const BUILD = '202608171500';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -491,7 +491,7 @@ function recommendation(drafted, have) {
   // The caps go in so the panel cannot name a man the app itself would refuse to draft -
   // a third quarterback, a fifth tight end. One recommendation, one set of rules.
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league, board.shares) });
+    { candidates: 10, horizon: PLAN_HORIZON, caps: myCaps() });
   if (!res?.plan?.length) return null;
 
   const top = { pos: res.top.row.p.pos, best: res.top.row, total: res.top.total };
@@ -589,6 +589,21 @@ function planWhy(res, top) {
 }
 
 // The recommendation panel: what to do with THIS pick, and why.
+// Roster caps, plus any rule you have set for yourself.
+//
+// It goes through caps rather than through the score for a reason: a cap is a statement
+// about what you will DRAFT, and the score is a statement about what a player is worth.
+// Suppressing a backup quarterback's score to keep him out of the plan would be lying in
+// the column to get an answer in the panel, and it would leak everywhere - his Type, his
+// Worth window, the compare panel, the grade. Capping the position says the true thing
+// once, in the one place that decides picks.
+function myCaps(league) {
+  const lg = league || board?.league || data.leagues[st.league];
+  const caps = capsOf(lg, board?.shares);
+  if (st.noQb2 && caps.QB > 1) caps.QB = 1;
+  return caps;
+}
+
 function renderAdvice() {
   const box = $('#advice');
   if (!box) return;
@@ -643,7 +658,38 @@ ${cliff ? `<span class="cliffTag">last of ${top.pos} tier ${top.best.tier}</span
     : ''}${path ? `<span class="advPath">plan: ${top.pos} now, ${path}</span>` : ''}</p>
 <div class="advCost">${pills.map((x) => `<span class="costPill${x.pos === top.pos ? ' hot' : ''}">
 <b>${x.pos}</b>${x.loss < 0.5 ? 'best' : `−${x.loss.toFixed(0)}`}</span>`).join('')}
-<span class="hint">points your whole roster loses if you start with that position instead</span></div>`;
+<span class="hint">points your whole roster loses if you start with that position instead</span></div>
+${posAdviceHTML(res, top, drafted)}`;
+}
+
+// Filtering to a position is a question: "fine, but who is the best QB here?" The board
+// answered it by reordering rows and saying nothing, which leaves you to guess whether the
+// man at the top of a filtered list is someone the app would actually take.
+//
+// So when a filter is on, this answers both halves out loud - the best man at that position
+// AND what it costs to take him instead of the recommendation. The cost sentence is not
+// written here: it is pickShot + pickCost, the same pair that grades your picks afterwards,
+// so the app cannot talk you into a pick it would mark down later.
+function posAdviceHTML(res, top, drafted) {
+  if (filter === 'ALL' || !res?.plan?.length) return '';
+  const best = board.rows.find((r) => r.p.pos === filter && !drafted.has(r.p.id));
+  if (!best) return `<p class="posWhy"><b>No ${filter} left on the board.</b></p>`;
+  const same = best.p.id === top.best.p.id;
+  const shot = pickShot(res, best.p.id, clock, { skipStreamed: false });
+  const v = shot ? pickCost(shot) : null;
+  const lasts = shot?.hasKeep ? Math.round(shot.keep) : null;
+  return `<p class="posWhy"><span class="posTag">${filter}</span>
+<b>${esc(best.p.name)}</b> <span class="tm">${best.p.team || ''}</span>
+<span class="hint">score ${best.score100.toFixed(2)} · ${filter}${best.posRank} on your board${
+  lasts != null ? ` · ${lasts} in 100 he lasts to pick ${clock.target}` : ''}</span>
+<span class="posSay">${same
+    ? `He is also the pick — nothing on the board beats him right now.`
+    : `${esc(v?.why || `Your board rates ${top.best.p.name} higher right now.`)}`}</span>
+${same ? '' : `<span class="posSay alt">The panel above says <b>${esc(top.best.p.name)}</b>
+instead${v && v.kind === 'wasted'
+    ? ' — and taking this one first is the case it is built to avoid.'
+    : v && v.points ? `, which is worth about ${v.points} point${v.points === 1 ? '' : 's'} more to your finished roster.`
+      : '.'}</span>`}</p>`;
 }
 
 // ---------------------------------------------------------------- practice draft
@@ -737,7 +783,7 @@ function stampShot(id) {
     if (p) have[p.pos] = (have[p.pos] || 0) + 1;
   }
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON, must: [id], caps: capsOf(board.league, board.shares) });
+    { candidates: 10, horizon: PLAN_HORIZON, must: [id], caps: myCaps() });
   // The same rule autoPick follows, worked out the same way: until your remaining picks are
   // down to the slots you still have to fill, a kicker and a defence are not on the table.
   // The cost view must not hold a pick against a man the app would have refused to take.
@@ -791,7 +837,7 @@ function autoDraft(all) {
   const m = mock();
   if (!m || m.done) return;
   const lg = data.leagues[st.league];
-  const caps = capsOf(lg, board?.shares);
+  const caps = myCaps(lg);
   const rounds = roundsOf(lg);
   let guard = 0;
   do {
@@ -3137,6 +3183,7 @@ function renderChrome() {
   $('#slot').value = st.slots?.[st.league] ?? data.leagues[st.league]?.slot ?? '';
   if ($('#rookie')) $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
+  if ($('#noQb2')) $('#noQb2').checked = !!st.noQb2;
   const dur = $('#durAnchor');
   if (dur) {
     const now = st.durAnchor || DUR_DEFAULT;
@@ -3191,7 +3238,7 @@ function renderLean() {
   // "receivers are the scarce thing, so backs can wait" immediately below "Take RB".
   // Same field the pills and the reason sentence use now.
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league, board.shares) });
+    { candidates: 10, horizon: PLAN_HORIZON, caps: myCaps() });
   if (!res) { box.innerHTML = ''; return; }
   const s = suggestLean(res.cost.map((c) => ({ pos: c.pos, cost: c.gap })));
   const on = activeLean(st) || 'custom';
@@ -3560,6 +3607,9 @@ function wire() {
   $('#followBtn').onclick = doFollow;
   $('#dryBtn').onclick = doDryRun;
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };
+  if ($('#noQb2')) {
+    $('#noQb2').onchange = (e) => { st.noQb2 = e.target.checked; save(); rebuild(); };
+  }
   // Changing the assumption changes what every bench player is worth, so this rebuilds the
   // board rather than just repainting it.
   const durSel = $('#durAnchor');
@@ -3650,6 +3700,10 @@ function wire() {
       renderChrome();
       document.querySelectorAll('[data-f]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.f === filter)));
       renderBoard();
+      // The panel answers "who is the best one of these" now, so it has to hear about the
+      // filter. Without this the position answer only appeared after some unrelated event
+      // happened to redraw the advice.
+      renderAdvice();
     } else if (b.dataset.cmp) { compareWith(b.dataset.cmp); }
     else if (b.dataset.open) { open = open === b.dataset.open ? null : b.dataset.open; renderBoard(); }
     else if (b.dataset.star) {
