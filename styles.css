@@ -803,8 +803,10 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
 /* ---------------------------------------------------------------- player card
    Read top to bottom in five seconds: the numbers, the standing facts, the call,
    whether he lasts, then the slower detail. Every block says what it is. */
+/* Seven numbers now rather than four, so they wrap into a grid instead of a single line
+   that would run off the side on a laptop. */
 .dHead {
-  display: flex; flex-wrap: wrap; gap: 8px 26px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px 20px;
   padding: 2px 0 12px; margin-bottom: 12px; border-bottom: 1px solid var(--line);
 }
 .dNum { display: flex; flex-direction: column; line-height: 1.15; }
@@ -850,6 +852,10 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
 .boost.up b { color: var(--good); }
 .boost.dn b { color: var(--bad); }
 .dBoosts .hint { flex-basis: 100%; margin-top: 4px; max-width: 80ch; }
+/* Sections are snapshots now - a line of data or one sentence each - so they sit closer
+   together than they did when every one carried a paragraph of explanation. */
+.detail .dSec { margin-bottom: 12px; }
+.detail .dSec .dSub, .detail .dSec .dNote { margin-top: 2px; }
 .dSec .tags { margin: 0; }
 .dSec .tag { font-size: 12px; padding: 4px 9px; }
 

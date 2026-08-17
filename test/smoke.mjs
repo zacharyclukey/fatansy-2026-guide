@@ -834,12 +834,20 @@ const fire = (el, type) => {
       `${firstRB.p.name} is RB${firstRB.posRank} at overall #${firstRB.rank}`);
   }
 
+  // The card is a snapshot, so anything that is really a number lives in the header rather
+  // than at the end of a sentence somewhere below. Worth and ADP moved up here for exactly
+  // that reason - they were the tail of a paragraph in the middle of the card.
   ok('the card leads with the numbers', (() => {
     const nums = [...d.querySelectorAll('.detail .dNum i')].map((x) => x.textContent);
-    return nums.some((x) => /on your board/.test(x))
-      && nums.some((x) => /projected points/.test(x))
-      && nums.some((x) => /above a replacement/.test(x));
-  })());
+    return ['score', 'your board', 'projected', 'over replacement', 'worth at', 'room takes him']
+      .every((want) => nums.some((x) => x.includes(want)));
+  })(), [...d.querySelectorAll('.detail .dNum i')].map((x) => x.textContent).join(' | '));
+
+  // One list of preferences, not two. The fitTags chips said the same things as the score
+  // adjustments, in words, with no numbers - so the same fact appeared twice on one card.
+  ok('preferences are listed once, with their sizes',
+    d.querySelectorAll('.detail .dBoosts').length <= 1
+    && !/How he matches what you said you like/.test(d.querySelector('.detail').textContent));
   ok('every section says what it is',
     [...d.querySelectorAll('.detail .dSec')].every((s2) => s2.querySelector('h4')?.textContent.trim()));
   // The wait line answers a question. It used to say "Take him now", which reads as an

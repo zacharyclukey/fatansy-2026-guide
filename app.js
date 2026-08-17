@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171500';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171513';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171500';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171500';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171500';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171500';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171513';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171513';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171513';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171513';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171500';
+const BUILD = '202608171513';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -1480,11 +1480,19 @@ function detail(r) {
   // They used to be the last line of a paragraph at the bottom of the card. Where he sits,
   // what he is projected for and how far that is above a replacement is the whole case for
   // taking him, so it goes at the top and it is read at a glance rather than parsed.
+  const window = r.openEnded ? `${r.worthFrom}+`
+    : r.worthFrom === r.worthTo ? `${r.worthFrom}`
+      : `${r.worthFrom}–${r.worthTo}`;
+  // Everything that was a sentence somewhere below and is really just a number. Worth and
+  // ADP in particular were buried at the end of a paragraph in the middle of the card.
   const head = [
-    [`#${r.rank}`, 'on your board'],
-    [r.pts.toFixed(0), 'projected points'],
-    [`${r.vor >= 0 ? '+' : ''}${r.vor.toFixed(0)}`, `above a replacement ${r.p.pos}`],
-    [`${r.p.pos}${r.posRank}`, `${r.p.pos} on your board`],
+    [r.score100.toFixed(2), 'score'],
+    [`#${r.rank}`, 'your board'],
+    [`${r.p.pos}${r.posRank}`, `your ${r.p.pos}`],
+    [r.pts.toFixed(0), 'projected'],
+    [`${r.vor >= 0 ? '+' : ''}${r.vor.toFixed(0)}`, 'over replacement'],
+    [window, 'worth at'],
+    [r.adpRank ? `${r.adpRank}` : '—', 'room takes him'],
   ].filter(Boolean).map(([n, l]) => `<span class="dNum"><b>${n}</b><i>${l}</i></span>`).join('');
 
   // ---- chips: the standing facts, condensed ----
@@ -1498,10 +1506,6 @@ function detail(r) {
     r.p.bye ? `<span class="chip">Bye ${r.p.bye}</span>` : '',
   ].filter(Boolean).join('');
 
-  const window = r.openEnded ? `${r.worthFrom} onwards`
-    : r.worthFrom === r.worthTo ? `pick ${r.worthFrom}`
-      : `picks ${r.worthFrom}–${r.worthTo}`;
-
   const sec = (title, body, cls = '') => (body
     ? `<section class="dSec ${cls}"><h4>${title}</h4>${body}</section>` : '');
 
@@ -1510,64 +1514,49 @@ function detail(r) {
   // stayed identical, which is impossible to learn from. Now the star goes into the score
   // like everything else, and this is the receipt: every adjustment by name, with its size,
   // hoverable for what it means. If two men swap places, one of these chips says why.
+  // This IS the preference section. There used to be a second one below - the fitTags
+  // chips - saying the same things again in words with no numbers attached. Two lists of
+  // the same facts is worse than either alone, so the wordy one is gone and the tags'
+  // explanations moved into these tooltips.
+  const tagWhy = {};
+  for (const t of r.tags || []) if (t.axis) tagWhy[t.axis] = `${t.tag} — ${t.why}`;
   const boosts = (r.boosts || []).slice().sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
   const boostBar = boosts.length ? `<p class="dBoosts">${boosts.map((b) => {
     const t = TIPS[b.key];
-    const title = t ? tip(t) : tip([b.label, 'Moves the score by this many points.']);
+    const title = tagWhy[b.key] ? esc(tagWhy[b.key])
+      : t ? tip(t) : tip([b.label, 'Moves the score by this many points.']);
     return `<span class="boost ${b.amount >= 0 ? 'up' : 'dn'}" title="${title}">`
       + `${esc(b.label)} <b>${b.amount >= 0 ? '+' : '−'}${Math.abs(b.amount).toFixed(2)}</b></span>`;
-  }).join('')}<span class="hint">These are already in the score above — they are why he sits
-where he sits rather than where plain value would put him. Hover any of them.</span></p>` : '';
+  }).join('')}</p>` : '<p class="dNote">Nothing moved him off plain value.</p>';
 
-
+  // Snapshots, not paragraphs. Every section below is a line of data or one sentence; the
+  // explanations that used to sit under each of them are in the tooltips, where they are
+  // available on demand instead of being read four times a draft.
   return `<div class="detail">
 <div class="dHead">${head}</div>
 ${chips ? `<p class="dChips">${chips}</p>` : ''}
-<p class="dCmp"><button data-cmp="${r.p.id}" class="chipBtn">Compare him with someone</button>
-<span class="hint">Put him side by side with one other player.</span></p>
 
-${sec(`Why he is #${r.rank} on your board`, `${e ? `<p class="dSub">${esc(e.rank)}</p>
-${e.prefLine ? `<p class="dNote">${esc(e.prefLine)}</p>` : ''}
-<p class="dNote">${esc(e.caveat)}</p>` : ''}${boostBar}`)}
-
-${sec('Is he worth this pick?', `
-<p class="dCall">${r.kind
+${sec('The call', `<p class="dCall">${r.kind
     ? `<em class="kind ${r.kind}">${KINDS[r.kind][0]}</em>`
     : '<em class="kind soft">Not yet</em>'} ${esc(e ? e.why
-      : (r.kind ? KINDS[r.kind][1] : 'His range is still a long way off.'))}</p>
-${e && e.cost ? `<p class="dSub">${esc(e.cost)}</p>` : ''}
-${e ? `<p class="dSub">${esc(e.change)}</p>` : ''}
-<p class="dSub">Worth <b>${window}</b>. The room takes him around <b>pick ${r.adpRank}</b>.
-${why ? ` ${why}` : ''}</p>`)}
+      : (r.kind ? KINDS[r.kind][1] : 'His range is still a long way off.'))}</p>`)}
 
-${sec('Will he still be there next time you pick?', wait
-    ? `<p class="dSub">${wait}</p>` : '')}
+${sec('Comes back to you?', wait ? `<p class="dSub">${wait}</p>` : '')}
 
-${sec('If you took him, how often would he be in your lineup?', benchLine(r))}
+${sec('In your lineup', benchLine(r))}
 
-${sec('How he matches what you said you like', r.tags?.length
-    ? `<p class="tags">${r.tags.map((t) => `<span class="tag${
-      t.match === true ? ' want' : t.match === false ? ' against' : ''}" title="${t.why}">${t.tag}${
-      t.detail ? ` <em>${t.detail}</em>` : ''}</span>`).join('')}</p>
-<p class="dNote">Your preferences, not a forecast. They move him a few places at most.</p>`
-    : '<p class="dNote">Nothing stands out either way against your preferences.</p>')}
+${sec('What moved his score', boostBar)}
 
-${sec(r.rated ? `How he rates among ${r.p.pos}s` : 'Rating', r.rated
+${sec(r.rated ? `Graded against other ${r.p.pos}s` : 'Rating', r.rated
     ? `<div class="bars">${bars}</div>
-<p class="dNote"><b>${riskOf(r)}.</b> ${verdict(r)}</p>
-<p class="dNote">These bars are a 0–100 grade against other ${r.p.pos}s and nothing else.
-They are not what orders the board — ${r.p.pos}${r.posRank} above is his rank by draft
-score, which also counts how scarce the position is and what a replacement would give you.</p>`
-    : `<p class="dNote">No grade — there are no ${r.p.pos} stats worth rating, so his place `
-      + `on the board is pure value.${STREAMED.includes(r.p.pos)
-        ? ` Everyone streams this position off waivers, so “replacement” means a good one `
-        + `you could pick up in-season — which is why the board takes ${r.p.pos}s later than `
-        + 'the room does.' : ''}</p>`)}
+<p class="dNote"><b>${riskOf(r)}.</b> A grade for his position only — the board is ordered by
+score, not by this.</p>`
+    : `<p class="dNote">No grade — no ${r.p.pos} stats worth rating, so his place is pure value.</p>`)}
 
 ${sec('Last season', `${statCards(r)}
-<p class="dNote">${facts.length ? facts.join(' · ')
-    : 'No 2025 data — his place on the board comes from the projection.'}
-Describes last season; it is not what predicts this one.</p>`)}
+${facts.length ? `<p class="dNote">${facts.join(' · ')}</p>` : ''}`)}
+
+<p class="dCmp"><button data-cmp="${r.p.id}" class="chipBtn">Compare him with someone</button></p>
 </div>`;
 }
 
