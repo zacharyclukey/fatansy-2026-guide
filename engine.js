@@ -1260,10 +1260,14 @@ export function buildBoard(data, st, cache) {
   //
   // The raw number has NOT gone anywhere: it is the VOR column, in projected points, which
   // is the unit every explanation on this site speaks in.
+  // Kept unrounded. Whole numbers put dozens of players on the identical mark and made the
+  // board look like it could not separate them when it could - the column was hiding an
+  // order it already had. Two decimals is what the display prints; the value stays full
+  // precision so nothing downstream inherits a rounding.
   const lo = Math.min(...rows.map((r) => r.score));
   const hi = Math.max(...rows.map((r) => r.score));
   const span = hi - lo || 1;
-  for (const r of rows) r.score100 = Math.round(((r.score - lo) / span) * 100);
+  for (const r of rows) r.score100 = ((r.score - lo) / span) * 100;
 
   const penTop = penCeiling(data.players, league, st);
   for (const r of rows) r.tags = fitTags(r, st, league, pg, penTop, repl);

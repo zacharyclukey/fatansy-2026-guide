@@ -671,10 +671,15 @@ const fire = (el, type) => {
     .map((x) => x.textContent.trim()).filter(Boolean);
   ok('no score on the board is negative', scoreCells.every((s) => !s.startsWith('-')),
     scoreCells.filter((s) => s.startsWith('-')).slice(0, 3).join(', '));
-  ok('and every score is a whole number from 0 to 100',
-    scoreCells.every((s) => /^\d+$/.test(s) && +s >= 0 && +s <= 100),
+  ok('and every score is a number from 0 to 100',
+    scoreCells.every((s) => /^\d+\.\d{2}$/.test(s) && +s >= 0 && +s <= 100),
     scoreCells.slice(0, 5).join(', '));
-  ok('the best man on the board scores 100', scoreCells[0] === '100', scoreCells[0]);
+  ok('the best man on the board scores 100', scoreCells[0] === '100.00', scoreCells[0]);
+  // Two decimals exist to separate men a whole number would tie. If the column still ties
+  // a lot of the board, it is not doing the job it was widened for.
+  const dupes = scoreCells.length - new Set(scoreCells).size;
+  ok('two decimals actually separate the board', dupes <= scoreCells.length * 0.1,
+    `${dupes} of ${scoreCells.length} share a score with someone else`);
   // VOR keeps its sign - being below a startable man is real information, and it is the
   // column that says so rather than the one people read first.
   const vorCells = [...d.querySelectorAll('.row.player .num.vr')]
