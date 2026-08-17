@@ -455,10 +455,26 @@ const fire = (el, type) => {
     const BANNED = ['red zone', 'red-zone', 'target', 'carries', 'carry', 'catch rate',
       'catch%', 'snap', 'touches per', 'touch a game', 'yards per', 'reception', 'drops',
       'workload', 'elite', 'explosive', 'workhorse', 'breakout', 'efficiency',
-      'last year he', 'last season he'];
+      'last year he', 'last season he',
+      // Added with the rewrite. The first group is more of the same fiction - phrases a
+      // fluent sentence generator reaches for when it wants to sound like it knows
+      // something about the player that the score does not contain.
+      'burst', 'separation', 'air yards', 'yac', 'goal line', 'goal-line', 'third down',
+      'two-minute', 'volume', 'usage', 'touch share', 'target share', 'opportunity',
+      'sleeper pick', 'upside play', 'league winner', 'bounce back', 'bounce-back',
+      'due for', 'regression candidate', 'buy low', 'sell high',
+      // The second group is about the SCHEDULE and the team around him. Neither is in the
+      // score at all: strength of schedule was never built, and "changing team is
+      // associated with decline" was measured to be confounded and kept descriptive. A
+      // sentence claiming either would be inventing a mechanism the board does not use.
+      'easy schedule', 'tough schedule', 'strength of schedule', 'soft matchup',
+      'new offence', 'new offense', 'offensive line', 'coaching change',
+      // And the third is certainty. Nothing here forecasts, so nothing may promise.
+      'guaranteed', 'certain to', 'will finish', 'lock for'];
     const dirty = [];
     for (const [r, e] of all) {
-      const text = [e.rank, e.why, e.change, e.cost, e.prefLine, e.caveat].join(' ').toLowerCase();
+      const text = [e.rank, e.why, e.change, e.cost, e.prefLine, e.caveat,
+        e.tipLabel, e.tipWorth, e.tipRank].join(' ').toLowerCase();
       for (const w of BANNED) if (text.includes(w)) dirty.push(`${r.p.name}: "${w}"`);
     }
     ok('no explanation leans on a stat that is not in the score', dirty.length === 0,
@@ -470,6 +486,58 @@ const fire = (el, type) => {
     ok('waiting advice is hedged rather than exact',
       all.filter(([, e]) => /\bpicks?\b/.test(e.change))
         .every(([, e]) => /roughly|around|about/i.test(e.change)));
+
+    // ---- a tooltip has to be readable AS a tooltip -----------------------
+    // This was 412 characters on an open-ended row, which is a paragraph hanging off the
+    // cursor: nobody reads it, so the explanation may as well not have been written. The
+    // cap is a judgement about reading, not a measurement, which is why it is generous.
+    const TIP_MAX = 200;
+    const longTips = all.filter(([, e]) => e.tipLabel.length > TIP_MAX);
+    ok('the hover text is short enough to be read on hover', longTips.length === 0,
+      longTips.slice(0, 2).map(([r, e]) => `${r.p.name} ${e.tipLabel.length} chars`).join(', '));
+    ok('and the Worth hover is short too',
+      all.every(([, e]) => e.tipWorth.length <= TIP_MAX));
+    // short is not the same as truncated - a tip cut off mid-clause is worse than a long one
+    ok('no hover text is a sentence chopped in half',
+      all.every(([, e]) => /[.!?]$/.test(e.tipLabel.trim())),
+      all.filter(([, e]) => !/[.!?]$/.test(e.tipLabel.trim())).slice(0, 2)
+        .map(([r, e]) => `${r.p.name}: ${e.tipLabel.slice(-40)}`).join(' | '));
+
+    // ---- the sentence must agree with the column beside it ---------------
+    // The advice used to say "wait roughly 1 pick and he is fair value" next to a Worth
+    // column reading 28-28 at pick 24, because it counted to where he stops being LABELLED
+    // a reach rather than to where the board wants him. Both are true; only one matches
+    // the number the person is looking at.
+    const disagree = all.filter(([r, e]) => {
+      if (r.kind !== 'reach' || r.openEnded) return false;
+      const said = /until about pick (\d+)/.exec(e.change);
+      return !said || Number(said[1]) !== r.worthFrom;
+    });
+    ok('the pick a Reach is told to wait for is the one in the Worth column',
+      disagree.length === 0,
+      disagree.slice(0, 2).map(([r, e]) => `${r.p.name} worth ${r.worthFrom} vs "${e.change}"`).join(' | '));
+    const notYet = all.filter(([r]) => !r.kind && !r.openEnded);
+    ok('and so is the pick a Not-yet row is told to wait for',
+      notYet.every(([r, e]) => e.change.includes(`pick ${r.worthFrom}`)),
+      notYet.filter(([r, e]) => !e.change.includes(`pick ${r.worthFrom}`)).slice(0, 2)
+        .map(([r, e]) => `${r.p.name} worth ${r.worthFrom}: ${e.change}`).join(' | '));
+    // an open-ended row is the one that used to get the width caveat INSTEAD of the advice
+    const open = all.filter(([r]) => r.openEnded);
+    ok('there are open-ended rows to check', open.length > 0, `${open.length}`);
+    ok('an open-ended row still gets told when he comes into range',
+      open.filter(([r]) => !r.kind).every(([, e]) => /comes into range/.test(e.change)));
+    ok('and it never prints the width cap as if it were a count of players',
+      open.every(([, e]) => !/About 45 |about 45 /.test(e.rank)));
+
+    // ---- the thin-position line must not argue with its own number -------
+    // It used to say "the thinner his position, the more the same projection is worth" on
+    // every row, including a man one point clear of an ordinary replacement - a sentence
+    // arguing the opposite of the number printed two words earlier.
+    const level = all.filter(([r]) => r.rated && !r.lastOfTier && r.vor >= 0 && Math.abs(r.vor) <= 10);
+    ok('there are level-with-replacement players to check', level.length > 0, `${level.length}`);
+    ok('a man level with a replacement is told his position is deep, not thin',
+      level.every(([, e]) => /deep/.test(e.rank) && !/is thin/.test(e.rank)),
+      level.filter(([, e]) => !/deep/.test(e.rank)).slice(0, 1).map(([r]) => r.p.name).join(''));
 
     // a Reach has to say what it costs, in names
     const reaches = all.filter(([r]) => r.kind === 'reach');
@@ -501,6 +569,33 @@ const fire = (el, type) => {
       /asked for availability/i.test(ke.prefLine), ke.prefLine);
     ok('and the explanation still admits preferences only break ties',
       /break ties/i.test(ke.prefLine));
+
+    // ---- before anybody has picked, there is no clock --------------------
+    // pickType falls back to judging a man against where the room takes him, and the words
+    // have to fall back with it. They did not: opening the app the night before produced
+    // "the draft is already at 21", which is simply false, and false in the way that makes
+    // a person stop believing the rest of the screen. This is the state the app is in every
+    // time it is opened before draft night, so it is the state most likely to be seen.
+    {
+      const pre = m.buildBoard(data, { ...st, atPick: 0 });
+      const pctx = { st, league: pre.league, repl: pre.repl, rows: pre.rows, drafted: new Set() };
+      const cold = pre.rows.map((r) => [r, m.explain(r, 0, pctx)]);
+      ok('with no clock running, nothing claims the draft has started',
+        cold.every(([, e]) => !/draft is (already )?at|this is pick \d/i.test(
+          [e.why, e.change, e.tipLabel].join(' '))),
+        cold.filter(([, e]) => /draft is (already )?at|this is pick \d/i.test(e.why))
+          .slice(0, 2).map(([r, e]) => `${r.p.name}: ${e.why}`).join(' | '));
+      // it has to say what it IS measuring against instead, or the number is unexplained
+      ok('with no clock, it says the pick number is the going rate',
+        cold.filter(([r]) => r.kind === 'steal' || r.kind === 'reach')
+          .every(([, e]) => /the room/i.test(e.why)),
+        cold.filter(([r]) => r.kind === 'reach').slice(0, 1).map(([, e]) => e.why).join(''));
+      // and the sentence still has to read like a sentence
+      ok('the no-clock sentence is not a fragment bolted into a clause',
+        cold.every(([, e]) => !/: [A-Z][a-z]+ room takes|which sits inside.*which sits/.test(e.why)));
+      ok('every row still explains itself with no clock',
+        cold.length === pre.rows.length && cold.every(([, e]) => e.why && e.change && e.rank));
+    }
   }
 
   // the snake clock

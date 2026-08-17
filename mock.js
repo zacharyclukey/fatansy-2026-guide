@@ -10,9 +10,11 @@
 // models is the ONE thing a draft room reliably does - take players roughly in ADP order,
 // with need and herd behaviour pulling on it - and it says so on screen.
 
-// One line on purpose: the jsdom harness strips imports with a per-line regex, so a
-// wrapped import statement leaves a stray brace behind and the whole app fails to evaluate.
-import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608170610';
+// This used to carry an order to keep the import on one line, because the jsdom harness
+// stripped imports with a per-line regex and a wrapped statement left a stray brace behind
+// that killed the whole suite. The harness now matches through to the module string, so a
+// source file's line breaks are no longer load-bearing and this can wrap like anything else.
+import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608170621';
 
 // Everything the bench pricing needs, worked out once for a whole draft rather than once
 // per pick. See the long note above benchWorth in engine.js for what this is for.

@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170610';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170621';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170610';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170610';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608170610';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170610';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170621';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170621';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608170621';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170621';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608170610';
+const BUILD = '202608170621';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -83,11 +83,13 @@ const FIXED = [
   // Not a grade. The span of picks where taking him costs you nothing, because everyone
   // inside it is a player you would be equally happy with.
   // Plain information, no colour. The judgement is in Type, which knows the clock.
-  // Hovering it explains the rank rather than the range, because "why is he this high"
-  // is the question people actually have when they look at this part of the row.
+  // Hovering it explains the RANGE, which is what the cell prints. It used to hover the
+  // rank explanation - a sentence about projected points, attached to two pick numbers it
+  // never mentioned - so the answer under the cursor was to a question nobody had asked
+  // there. "Why is he this high" is still one hover away, on the Score column.
   ['Worth', (r) => {
     const e = expl(r);
-    return `<em class="win"${e ? ` title="${tip(e.tipRank)}"` : ''}>${r.openEnded ? `${r.worthFrom}+`
+    return `<em class="win"${e ? ` title="${tip(e.tipWorth)}"` : ''}>${r.openEnded ? `${r.worthFrom}+`
       : r.worthFrom === r.worthTo ? r.worthFrom
         : `${r.worthFrom}–${r.worthTo}`}</em>`;
   }, 66, 'wd'],
@@ -2641,7 +2643,18 @@ function renderChrome() {
   $('#need').value = st.need;
   anchorReadout();
   st.cols ||= { bye: true };
-  const groups = GROUPS.map(([k, label]) => `<label class="chip">
+  // The 2025 columns stay exactly where they are and keep their full width - they are how
+  // a person recognises a player, and hiding them would make the board a list of strangers.
+  // The only thing added is a note saying which way round they work: they describe last
+  // season, they do not predict this one, and nothing in the score is built on them.
+  const GROUP_NOTE = {
+    pg: 'Describes last season. It is not part of his score and does not predict 2026 — '
+      + 'it is here so you can recognise the player.',
+    tot: 'Describes last season. It is not part of his score and does not predict 2026 — '
+      + 'it is here so you can recognise the player.',
+  };
+  const groups = GROUPS.map(([k, label]) => `<label class="chip"${
+    GROUP_NOTE[k] ? ` title="${esc(GROUP_NOTE[k])}"` : ''}>
 <input type="checkbox" data-col="${k}"${st.cols[k] ? ' checked' : ''} />${label}</label>`);
   // only offered when you have picked one position, because that is when it means anything
   if (POS_COLS[filter]) {

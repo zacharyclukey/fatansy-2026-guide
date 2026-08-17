@@ -1759,6 +1759,12 @@ export function activePrefs(r, st = {}, league = null) {
 // Why he sits at this rank. Projection first, because it is the whole case; then the gap
 // to an ordinary man at his position, because that gap IS what "the position is thin"
 // means; then the tier edge, if he is standing on one.
+// A gap this small means the next man at his position is level with him for practical
+// purposes - ten points is about half a point a game across a season. It is a guess at
+// where "the same player" begins and nothing was fitted to it, so the sentence it drives
+// says "barely" and "about the same", never a threshold.
+const LEVEL_GAP = 10;
+
 export function explainRank(r, ctx = {}) {
   const pos = posWord(r.p.pos);
   const pts = Math.round(r.pts);
@@ -1779,81 +1785,172 @@ export function explainRank(r, ctx = {}) {
       + `short of an ordinary ${pos} you could still get later, which is why he sits `
       + 'this low.';
 
-  const thin = r.lastOfTier
-    ? ` He is the last ${pos} at this level: after him the next one is a real step down, `
-      + 'so the position is thin right here.'
-    : ` That gap is where the position comes into it — the thinner his position, the `
-      + 'further the next man is behind him and the more the same projection is worth.';
+  // The old version of this always claimed the position was thin, including for a man
+  // whose gap was one point - a sentence that argued against the number printed beside it.
+  // Thin and deep are both worth saying; the wrong one is not.
+  let thin;
+  if (r.lastOfTier) {
+    thin = ` He is the last ${pos} at this level: after him the next one is a real step `
+      + 'down, so the position is thin right here.';
+  } else if (r.vor >= 0 && gap <= LEVEL_GAP) {
+    thin = ` That gap is small, which is the useful part: the next ${pos} is barely behind `
+      + 'him, so the position is deep here and waiting costs you very little.';
+  } else if (r.vor >= 0) {
+    thin = ` That gap is what "the position is thin" means — the further the next ${pos} `
+      + 'is behind him, the more the same projection is worth to you.';
+  } else {
+    thin = ` A ${pos} you could get later is projected to score more, so the position is `
+      + 'deep enough that this one is not worth a pick yet.';
+  }
 
-  const equals = r.equals >= 4
-    ? ` About ${r.equals} other players are close enough on your board that you would be `
-      + 'roughly as happy with any of them.'
-    : '';
+  // r.equals is capped at the window width, so on an open-ended row the number IS the cap
+  // and printing it would dress a readability limit up as a count of players.
+  let equals = '';
+  if (r.openEnded) {
+    equals = ' Dozens of players below him are close enough on your board that you would '
+      + 'be roughly as happy with any of them, which is why his range has no real end.';
+  } else if (r.equals >= 4) {
+    equals = ` About ${r.equals} other players are close enough on your board that you `
+      + 'would be roughly as happy with any of them.';
+  }
 
   return lead + thin + equals;
 }
 
 // Why the label says what it says. One or two sentences, and it always names the label it
 // is explaining so the sentence can be read on its own.
-export function explainLabel(r, atPick, ctx = {}) {
+// Before anyone has picked there is no clock, and pickType falls back to judging a man
+// against where the room takes him. The words have to fall back with it. Saying "the draft
+// is already at 21" to somebody who has opened the app the night before is simply untrue,
+// and it is the kind of untrue that makes a person distrust everything else on the screen.
+// So: when the clock is running, talk about the pick on the clock; when it is not, say out
+// loud that this is the going rate rather than a live pick.
+function clockWords(r, atPick) {
+  const started = !!atPick;
   const at = atPick || r.adpRank;
+  return {
+    at,
+    started,
+    // "the draft is at pick 24" vs "the room usually takes him around pick 21"
+    now: started ? `the draft is at pick ${at}` : `the room usually takes him around pick ${at}`,
+    // A sentence subject, not a fragment to be dropped in mid-clause. Bolting "where the
+    // room takes him, around pick 2" onto "X sits inside the range" produced a sentence
+    // that did not parse, which is exactly the sort of thing that makes a person stop
+    // reading the explanations at all.
+    // lower case: every use of this follows "Safe: " or "Swing: ".
+    sits: started
+      ? `pick ${at} sits`
+      : `the room takes him around pick ${at}, which sits`,
+  };
+}
+
+export function explainLabel(r, atPick, ctx = {}) {
+  const { now, sits, started } = clockWords(r, atPick);
   const pos = posWord(r.p.pos);
   const from = r.worthFrom;
   const to = r.worthTo;
 
+  // "Fair value" was the one bit of jargon left in here and it was never defined. The
+  // column beside it is headed Worth, so the words now match the column: worth taking.
   if (r.kind === 'steal') {
-    return `Steal: your board stops calling him fair value at around pick ${to}, and the `
-      + `draft is already at ${at}. He has fallen past his price — nothing about him has `
-      + 'changed, only what it costs to have him.';
+    return `Steal: your board stops calling him worth taking at around pick ${to}, and `
+      + `${now}. He has fallen past his price — nothing about him has changed, only what `
+      + 'it costs to have him.';
   }
   if (r.kind === 'reach') {
-    return `Reach: your board does not have him at fair value until about pick ${from}, `
-      + `and this is pick ${at}. Taking him now costs you men your own board rates higher.`;
+    return `Reach: your board does not have him worth taking until about pick ${from}, `
+      + `and ${now}. Taking him this early costs you men your own board rates higher.`;
   }
   if (r.kind === 'safe') {
     if (!r.rated) {
-      return `Safe: pick ${at} sits inside the range where your board calls him fair `
-        + `value. There is nothing measured about a ${pos} to say more than that, and an `
-        + 'unmeasured player is given the steady label rather than the exciting one.';
+      return `Safe: ${sits} inside the range where your board has him worth taking. There `
+        + `is nothing measured about a ${pos} to say more than that, and a player with `
+        + 'nothing measured is given the steady label rather than the exciting one.';
     }
-    return `Safe: pick ${at} sits inside the range where your board calls him fair value, `
-      + `and the projection expects his points to arrive more evenly week to week than `
-      + `they do for most ${pos}s.`;
+    return `Safe: ${sits} inside the range where your board has him worth taking, and the `
+      + 'projection expects his points to arrive more evenly week to week than they do '
+      + `for most ${pos}s.`;
   }
   if (r.kind === 'swing') {
-    return `Swing: pick ${at} sits inside the range where your board calls him fair `
-      + `value, but more of his projected points come in lumps than for most ${pos}s — `
-      + 'and lumps are where the big weeks and the empty ones both come from.';
+    return `Swing: ${sits} inside the range where your board has him worth taking, but `
+      + `more of his projected points come in lumps than for most ${pos}s — and lumps are `
+      + 'where the big weeks and the empty ones both come from.';
   }
-  return `Not yet: your board does not have him at fair value until about pick ${from}, `
-    + 'which is more than a couple of dozen picks off. That is too far away to be worth '
-    + 'calling a reach, so it says nothing rather than guess.';
+  return `Not yet: your board does not have him worth taking until about pick ${from}, and `
+    + `${started ? `${now}` : `the room is not close either — it takes him around pick ${
+      r.adpRank}`}. That is too far off to call it a reach, so the board says nothing `
+    + 'rather than guess.';
 }
 
 // What would move it. Almost always "wait", and the number of picks is worth printing
 // because "wait a bit" is not advice.
 export function explainChange(r, atPick) {
-  const at = atPick || r.adpRank;
-  const toSteal = (r.worthTo + SLACK) - at;
-  const toFair = (r.worthFrom - SLACK + 1) - at;
+  const { at } = clockWords(r, atPick);
+  const stealAt = r.worthTo + SLACK;
+  const wait = (n) => plural(Math.max(1, n), 'pick', 'picks');
+
+  // Every pick number quoted here is now an edge of the window the Worth column prints, so
+  // the sentence and the column agree. They used to differ by the slack: the advice said
+  // "wait 1 pick and he is fair value" beside a column reading 28-28 at pick 24, because
+  // it was counting to the point where he stops being LABELLED a reach rather than to the
+  // point where the board wants him. Both are real, but only one matches the column, and
+  // a sentence that argues with the number next to it is worse than no sentence.
+  const noSteal = ' His worth-taking range runs on past dozens of players, so he never '
+    + 'turns into a Steal however far he falls — that width is a limit set to keep the '
+    + 'board readable, not a fact about him.';
 
   if (r.kind === 'steal') return 'He stays a Steal for as long as nobody takes him.';
-  if (r.openEnded) {
-    return 'His fair-value range runs on past dozens of players, so he never turns into a '
-      + 'Steal however far he falls. That cap is a readability limit, not a fact about him '
-      + '— a range that wide stops meaning anything.';
-  }
+
   if (r.kind === 'reach') {
-    const a = Math.max(1, toFair);
-    const b = Math.max(a + 1, toSteal);
-    return `Wait roughly ${plural(a, 'pick', 'picks')} and he is fair value; roughly `
-      + `${plural(b, 'pick', 'picks')} and he becomes a Steal.`;
+    const a = `Wait roughly ${wait(r.worthFrom - at)} — until about pick ${r.worthFrom} — `
+      + 'and your board has him worth taking.';
+    return r.openEnded ? a + noSteal
+      : `${a} If he lasts to around pick ${stealAt}, he is a Steal.`;
   }
   if (r.kind === 'safe' || r.kind === 'swing') {
-    return `If he is still sitting there in roughly ${plural(Math.max(1, toSteal), 'pick', 'picks')}`
-      + ', the same man becomes a Steal.';
+    if (r.openEnded) return `He is worth taking now.${noSteal}`;
+    return `If he is still sitting there at around pick ${stealAt} — roughly `
+      + `${wait(stealAt - at)} from now — the same man becomes a Steal.`;
   }
-  return `He comes into range at around pick ${Math.max(1, r.worthFrom - SLACK + 1)}.`;
+  // The open-ended branch used to return INSTEAD of this, so the one row that most needed
+  // "wait until pick N" was the only row that never got it.
+  return `He comes into range at around pick ${r.worthFrom}, roughly `
+    + `${wait(r.worthFrom - at)} away.${r.openEnded ? noSteal : ''}`;
+}
+
+// The tooltip version. A hover is read in a second or it is not read at all, and the card
+// sentences above run to 400 characters, which is a paragraph. This is not a truncation of
+// them - a half-sentence cut off mid-clause is worse than a short one - it is the same
+// call written short: what the label says, and the one thing that would change it.
+export function explainShort(r, atPick) {
+  const { at, started } = clockWords(r, atPick);
+  const pos = posWord(r.p.pos);
+  // Matches exactly what the Worth column prints, including its single-number case.
+  const range = r.openEnded ? `${r.worthFrom}+`
+    : r.worthFrom === r.worthTo ? `just pick ${r.worthFrom}`
+      : `${r.worthFrom}–${r.worthTo}`;
+  const nowShort = started ? `the draft is at ${at}` : `the room takes him around ${at}`;
+
+  if (r.kind === 'steal') {
+    return `Steal — your board had him worth taking only to about pick ${r.worthTo}, and `
+      + `${nowShort}. He has fallen past his price.`;
+  }
+  if (r.kind === 'reach') {
+    return `Reach — not worth taking until about pick ${r.worthFrom}, and ${nowShort}. `
+      + `Wait roughly ${plural(Math.max(1, r.worthFrom - at), 'pick', 'picks')} and he `
+      + 'is worth taking.';
+  }
+  if (r.kind === 'safe') {
+    return `Safe — worth taking now (his range is ${range}). ${r.rated
+      ? `Steadier week to week than most ${pos}s.`
+      : `Nothing measured about a ${pos}, so he gets the steady label, not the exciting one.`}`;
+  }
+  if (r.kind === 'swing') {
+    return `Swing — worth taking now (his range is ${range}), but more of his points come `
+      + 'in lumps than most.';
+  }
+  return `Not yet — he comes into range at around pick ${r.worthFrom}, too far off to call `
+    + 'it a reach.';
 }
 
 // A Reach has a price and it is not abstract: it is the men you walk past. Naming the
@@ -1901,9 +1998,28 @@ export function explain(r, atPick, ctx = {}) {
         + 'places at most, never past the projection.'
       : '',
     caveat: EXPLAIN_CAVEAT,
-    // short enough for a tooltip: the call, then the way out of it
-    tipLabel: `${why} ${change}`.trim(),
-    tipRank: rank,
+    // Short enough for a tooltip to actually be read. This used to be `why` and `change`
+    // glued together, which ran to 412 characters on an open-ended row - nobody reads a
+    // paragraph on hover, so the honest fix is a shorter sentence rather than a smaller
+    // font. The full versions are still on the card, one click away.
+    tipLabel: explainShort(r, atPick),
+    tipRank: `${explainRank(r, ctx).split('. ')[0]}.`,
+    // The Worth column prints a range of picks and used to hover the RANK explanation,
+    // which talked about points and never mentioned the two numbers under the cursor.
+    // This one explains the thing it is attached to.
+    // A one-pick window is common at the top of the board and "anywhere between picks 1
+    // and 1" is not a sentence. It also means something worth saying plainly: nobody is
+    // close to him, so there is no waiting.
+    tipWorth: r.openEnded
+      ? `Worth taking from about pick ${r.worthFrom} onwards. Dozens below him are close `
+        + 'enough to be a coin flip, so the range has no real end and is cut off to keep '
+        + 'the board readable.'
+      : r.worthFrom === r.worthTo
+        ? `Worth taking right at pick ${r.worthFrom}. Nobody else on your board is close `
+          + 'enough to him to be a coin flip, so the window is a single pick wide.'
+        : `Worth taking anywhere between picks ${r.worthFrom} and ${r.worthTo} — across `
+          + 'that run your board rates the players closely enough to be a coin flip, so '
+          + 'there is no hurry inside it.',
   };
 }
 
