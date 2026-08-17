@@ -660,9 +660,28 @@ const fire = (el, type) => {
   d.querySelector('[data-v="board"]').click();
   await settle();
   ok('rows render', d.querySelectorAll('.row.player').length === 100);
-  ok('the four fixed columns are always shown',
-    [...d.querySelectorAll('#colHeads span')].slice(0, 4).map((x) => x.textContent).join(',')
-      === 'Type,Worth,ADP,Score');
+  ok('the five fixed columns are always shown',
+    [...d.querySelectorAll('#colHeads span')].slice(0, 5).map((x) => x.textContent).join(',')
+      === 'Type,Worth,ADP,VOR,Score');
+
+  // Score is 0-100 now, because "minus 44" is a true statement that stops a person reading.
+  // VOR carries the raw points, which is the unit every explanation on the site quotes, so
+  // nothing was lost - it was separated.
+  const scoreCells = [...d.querySelectorAll('.row.player .num.sc')]
+    .map((x) => x.textContent.trim()).filter(Boolean);
+  ok('no score on the board is negative', scoreCells.every((s) => !s.startsWith('-')),
+    scoreCells.filter((s) => s.startsWith('-')).slice(0, 3).join(', '));
+  ok('and every score is a whole number from 0 to 100',
+    scoreCells.every((s) => /^\d+$/.test(s) && +s >= 0 && +s <= 100),
+    scoreCells.slice(0, 5).join(', '));
+  ok('the best man on the board scores 100', scoreCells[0] === '100', scoreCells[0]);
+  // VOR keeps its sign - being below a startable man is real information, and it is the
+  // column that says so rather than the one people read first.
+  const vorCells = [...d.querySelectorAll('.row.player .num.vr')]
+    .map((x) => x.textContent.trim()).filter(Boolean);
+  ok('VOR is signed points, not a 0-100 score',
+    vorCells.some((s) => s.startsWith('-')) && vorCells.some((s) => s.startsWith('+')),
+    vorCells.slice(0, 4).join(', '));
 
   // Worth is a pick RANGE, not a grade. A 0-100 number here would mean the value window
   // silently reverted to the rating it replaced.
@@ -679,8 +698,8 @@ const fire = (el, type) => {
   await settle();
   const tpl = d.querySelector('#board').style.getPropertyValue('--cols');
   ok('columns grow rightwards', tpl.includes('minmax(190px, 1fr)'));
-  // 4 fixed + bye 2 + per-game 3 + totals 3 + projection 3 + back 1 + red zone 2
-  ok('all groups on', d.querySelectorAll('#colHeads span').length === 18,
+  // 5 fixed + bye 2 + per-game 3 + totals 3 + projection 3 + back 1 + red zone 2
+  ok('all groups on', d.querySelectorAll('#colHeads span').length === 19,
     `${d.querySelectorAll('#colHeads span').length} columns`);
 
   // the expensive one: dragging a slider must not rebuild the list

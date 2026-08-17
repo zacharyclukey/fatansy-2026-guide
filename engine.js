@@ -1245,6 +1245,26 @@ export function buildBoard(data, st, cache) {
   rows.sort((a, b) => b.sortKey - a.sortKey);
   rows.forEach((r, i) => { r.rank = i + 1; });
 
+  // The same score, on a scale nobody has to interpret.
+  //
+  // `score` is points above a replacement starter, so it goes negative for most of the
+  // board - correctly, and unreadably. "Minus 44" is a true statement that stops a person
+  // reading any further, and it stopped one. So the column shows a straight linear rescale
+  // of the very same number onto 0-100.
+  //
+  // Linear, and nothing else, on purpose. It preserves the order AND the ratios between
+  // gaps, so "twice as far apart" survives - which a percentile or a rank would destroy,
+  // and destroying it would break every sentence elsewhere that quotes a points gap.
+  // Anchored to the whole in-league pool rather than to whatever is on screen, so filtering
+  // to running backs does not silently rescore them.
+  //
+  // The raw number has NOT gone anywhere: it is the VOR column, in projected points, which
+  // is the unit every explanation on this site speaks in.
+  const lo = Math.min(...rows.map((r) => r.score));
+  const hi = Math.max(...rows.map((r) => r.score));
+  const span = hi - lo || 1;
+  for (const r of rows) r.score100 = Math.round(((r.score - lo) / span) * 100);
+
   const penTop = penCeiling(data.players, league, st);
   for (const r of rows) r.tags = fitTags(r, st, league, pg, penTop, repl);
 

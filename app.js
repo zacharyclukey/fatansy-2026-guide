@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171325';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171358';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171325';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171325';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171325';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171325';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171358';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171358';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171358';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171358';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171325';
+const BUILD = '202608171358';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -94,9 +94,15 @@ const FIXED = [
         : `${r.worthFrom}–${r.worthTo}`}</em>`;
   }, 66, 'wd'],
   ['ADP', (r) => (r.p.adp ? r.p.adp.toFixed(1) : '—'), 52, ''],
+  // Points above a replacement starter, in projected points. Always on the board now,
+  // because it is the unit every explanation on this site quotes - "your board had him 20
+  // points higher" means twenty of THESE. With Score on 0-100 there would otherwise be no
+  // column anywhere in the same currency as the prose.
+  ['VOR', (r) => `<em title="${tip(TIPS.VOR)}">${r.vor >= 0 ? '+' : ''}${r.vor.toFixed(0)}</em>`,
+    54, 'vr'],
   ['Score', (r) => {
     const e = expl(r);
-    return `<em${e ? ` title="${tip(e.tipRank)}"` : ''}>${r.score.toFixed(1)}</em>`;
+    return `<em${e ? ` title="${tip(e.tipRank)}"` : ''}>${r.score100}</em>`;
   }, 58, 'sc'],
 ];
 // The stats worth seeing differ by position - a receiver's carries tell you nothing. This
@@ -628,7 +634,7 @@ function renderAdvice() {
   box.innerHTML = `<div class="advHead">
 <span class="advTag">${when} ${top.pos}</span>
 <b>${top.best.p.name}</b> <span class="tm">${top.best.p.team || ''}</span>
-<span class="hint">score ${top.best.score.toFixed(1)}${top.shortfall ? ` · you still need ${top.shortfall}` : ''}${near ? ' · your pick, and close enough to take' : ''}</span>
+<span class="hint">score ${top.best.score100}${top.shortfall ? ` · you still need ${top.shortfall}` : ''}${near ? ' · your pick, and close enough to take' : ''}</span>
 ${cliff ? `<span class="cliffTag">last of ${top.pos} tier ${top.best.tier}</span>` : ''}
 </div>
 <p class="advWhy">${planWhy(res, top)}${first && first.take

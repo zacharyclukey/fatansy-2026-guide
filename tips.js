@@ -10,8 +10,18 @@ export const TIPS = {
   reach: ['Taking him now means passing men your board rates higher.', ''],
   Rating: ['How good he is FOR HIS POSITION, 0-100.',
     'Your weighted components. Cannot compare a QB to an RB.'],
-  Score: ['Who to actually draft. Take the highest.',
-    'Points above a replacement starter, nudged by your preferences.'],
+  Score: ['Who to actually draft. Take the highest, 0 to 100.',
+    'The VOR column, rescaled so the best man on the board is 100 and the last is 0.'],
+
+  // The distinction people get wrong, including Zach: replacement is not average. The
+  // average running back is the 51st of 102, most of whom nobody would ever start. The
+  // replacement back is the LAST one you would actually put in your lineup - around the
+  // 30th once flex is counted. On this board the gap between those two readings is 83
+  // points at running back and 139 at quarterback, so it is not a quibble.
+  VOR: ['How many points he beats a replacement starter by.',
+    'Replacement is the last man you would actually START at his position — not the '
+    + 'average one, who is far worse. That is why quarterbacks look small here: the 12th '
+    + 'quarterback is already very good.'],
 
   Fit: ['How well he matches what you said you like.',
     'Only breaks ties. It can never move a player more than a few spots.'],
