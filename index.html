@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608170904" />
+<link rel="stylesheet" href="styles.css?v=202608171230" />
 </head>
 <body>
 
@@ -225,6 +225,36 @@
 
     <div id="mockOut"></div>
 
+    <!-- Ten drafts from one seat. A single practice draft tells you what the board did
+         once; it cannot tell you whether the board MEANT it. The question this is built to
+         answer is whether we keep spending a pick on a man who was not going anywhere,
+         while somebody who was goes to another team - so the headline is a count of exactly
+         that, and the spreadsheet underneath is the raw rows behind it. -->
+    <h2 class="h2">Run it ten times from the same seat</h2>
+    <p class="lede">The app drafts for itself, start to finish, as many times as you ask,
+      always from the seat you name. Then it counts how often each pick went the same way.
+      A name that comes up every single time is a real conviction; one that comes up three
+      times in ten is the board telling you it cannot separate several men — which is
+      useful to know before you are on the clock.</p>
+    <p class="lede">Nothing here touches your real board. It is put back exactly as you
+      left it when the run finishes.</p>
+    <div class="rowbtns">
+      <label class="cmpSel">Your draft slot
+        <input id="batchSlot" type="number" min="1" max="20" placeholder="1" />
+      </label>
+      <label class="cmpSel">How many drafts
+        <select id="batchN" aria-label="How many drafts to run">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="25">25</option>
+        </select>
+      </label>
+      <button id="batchRun" class="primary">Run them</button>
+      <button id="batchCsv" hidden>Save the picks as a spreadsheet</button>
+    </div>
+    <p id="batchMsg" class="setupMsg" hidden></p>
+    <div id="batchOut"></div>
+
     <div class="mockHonest">
       <h2 class="h2">What the pretend teams are doing</h2>
       <p>Each one takes a player near the top of the published rankings, leaning a little
@@ -334,6 +364,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608170904"></script>
+<script type="module" src="app.js?v=202608171230"></script>
 </body>
 </html>

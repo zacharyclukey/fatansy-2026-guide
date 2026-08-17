@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608170904';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171230';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608170904';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608170904';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608170904';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608170904';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171230';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171230';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171230';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171230';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608170904';
+const BUILD = '202608171230';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -809,6 +809,202 @@ function autoDraft(all) {
   advanceMock();
   save();
   rebuild();
+}
+
+// ---------------------------------------------------------------- ten drafts at once
+// One draft tells you what the board did. Ten from the same seat tell you whether it MEANT
+// it - and that is a different question, the one that decides whether these ratings are
+// worth following on the night.
+//
+// The question it exists to answer, in Zach's words: how often do we take one of these men
+// while somebody who was NOT coming back goes to another team? The board already has an
+// honest answer for a single pick - pickCost's `wasted` verdict, which fires only when the
+// man taken would most likely still have been sitting there next turn AND a better one
+// would not. This just runs that verdict N times and counts.
+//
+// It deliberately reuses seedRun + autoDraft rather than reimplementing the pick loop. A
+// second copy of "what would the app do here" would eventually disagree with the first, and
+// then a batch of ten would be measuring something the app does not actually do.
+function seedRun(slot, seed) {
+  st.slots ||= {};
+  st.slots[st.league] = slot;
+  st.picks[st.league] = { drafted: [], mine: [] };
+  if (st.shots) st.shots[st.league] = {};
+  if (st.clockAt) delete st.clockAt[st.league];
+  st.mock = { league: st.league, slot, disc: +($('#disc')?.value ?? 40),
+    seed, log: [], done: false };
+  advanceMock();
+}
+
+// One row per pick of yours, carrying the same verdict the report on a single draft shows.
+function harvestRun(run) {
+  const m = st.mock;
+  const lg = data.leagues[st.league];
+  const T = teamsOf(lg);
+  return m.log.filter((x) => x.team === m.slot).map((x) => {
+    const p = byId(x.id);
+    const shot = shotFor(x.id);
+    const v = pickCost(shot);
+    return {
+      run,
+      pick: x.n,
+      round: roundOf(x.n, T),
+      name: p?.name || x.id,
+      pos: p?.pos || x.pos,
+      team: p?.team || '',
+      adp: p?.adp ?? null,
+      ourRank: shot?.me?.rank ?? null,
+      score: shot?.me?.score ?? null,
+      // the number his whole question turns on: chance he was still there next turn
+      lasts: shot?.hasKeep ? Math.round(shot.keep) : null,
+      verdict: v.kind,
+      gave: v.points || 0,
+      lost: v.kind === 'wasted' ? (shot?.lost?.name || '') : '',
+    };
+  });
+}
+
+let batchRows = [];
+
+// pickCost's five verdicts, short enough for a table cell. Same words, same meanings.
+const VERDICT_WORD = {
+  top: 'Best there', fine: 'Level with the best', paid: 'Paid to be sure',
+  left: 'Left points behind', wasted: 'Cost you a player', unknown: 'Not recorded',
+};
+
+async function runBatch(slot, n) {
+  const lg = data.leagues[st.league];
+  // Everything about to be trampled. A batch must leave your real board exactly as it was -
+  // on draft night this button is two inches from a board with fifteen picks on it.
+  const keep = {
+    mock: st.mock,
+    picks: picks(),
+    shots: st.shots?.[st.league] || {},
+    clockAt: st.clockAt?.[st.league],
+    slot: st.slots?.[st.league],
+  };
+  batchRows = [];
+  try {
+    for (let i = 1; i <= n; i += 1) {
+      $('#batchOut').innerHTML = `<p class="facts">Running draft ${i} of ${n} from slot `
+        + `${slot}…</p>`;
+      // A fixed seed per run, derived from the run number, so pressing Run twice on the
+      // same slot gives the same answer. A batch you cannot reproduce is not evidence.
+      seedRun(slot, 1000 + i * 7919);
+      autoDraft(true);
+      batchRows.push(...harvestRun(i));
+      // Hand the frame back so the progress line above actually paints and the tab does
+      // not appear frozen for the second and a half this takes.
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  } finally {
+    st.mock = keep.mock;
+    st.picks[st.league] = keep.picks;
+    if (st.shots) st.shots[st.league] = keep.shots;
+    st.clockAt ||= {};
+    if (keep.clockAt == null) delete st.clockAt[st.league];
+    else st.clockAt[st.league] = keep.clockAt;
+    st.slots[st.league] = keep.slot;
+    lastCols = '';
+    save();
+    rebuild();
+  }
+  return { rows: batchRows, n, slot, league: lg.name };
+}
+
+function batchHTML(res) {
+  const { rows, n } = res;
+  if (!rows.length) return '<p class="empty">Nothing came back from those drafts.</p>';
+  const byRound = new Map();
+  for (const r of rows) {
+    if (!byRound.has(r.round)) byRound.set(r.round, []);
+    byRound.get(r.round).push(r);
+  }
+  const pct = (k, tot) => `${Math.round((k / tot) * 100)}%`;
+
+  // The headline: how often a pick of yours went to a man who was not going anywhere while
+  // one who WAS went elsewhere. This is the whole reason the batch exists.
+  const wasted = rows.filter((r) => r.verdict === 'wasted');
+  const lostTally = {};
+  for (const r of wasted) if (r.lost) lostTally[r.lost] = (lostTally[r.lost] || 0) + 1;
+  const lostTop = Object.entries(lostTally).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const gave = rows.reduce((a, r) => a + (r.gave || 0), 0) / n;
+
+  const head = `<div class="cmpVerdict ${wasted.length ? '' : 'clear'}">
+<b>${wasted.length
+    ? `${wasted.length} pick${wasted.length === 1 ? '' : 's'} across ${n} drafts went to a `
+      + 'man who was not going anywhere'
+    : `Across ${n} drafts, no pick was spent on a man who would have come back to you`}</b>
+<span class="hint">${wasted.length
+    ? `That is ${(wasted.length / n).toFixed(1)} per draft. Each one means you took somebody `
+      + 'your board said would still be sitting there next turn, and somebody it rated '
+      + 'higher went to another team meanwhile.'
+    : 'Every pick was either the best man there or one who was about to go.'}
+Average given up per draft: ${gave.toFixed(0)} points.</span>
+${lostTop.length ? `<span class="hint">Who you lost, most often: ${lostTop
+    .map(([nm, c]) => `<b>${nm}</b> ×${c}`).join(', ')}.</span>` : ''}</div>`;
+
+  const table = `<div class="board costPicks">
+<div class="row head costPick"><span>Round</span><span>Who you took</span>
+<span>How often</span><span>Would have lasted</span><span>Verdict</span></div>
+${[...byRound.keys()].sort((a, b) => a - b).map((rd) => {
+    const list = byRound.get(rd);
+    const tally = {};
+    for (const r of list) {
+      tally[r.name] ||= { r, k: 0 };
+      tally[r.name].k += 1;
+    }
+    const order = Object.entries(tally).sort((a, b) => b[1].k - a[1].k);
+    return order.map(([nm, { r, k }], idx) => `<div class="row costPick">
+<span class="num">${idx === 0 ? rd : ''}</span>
+<span class="who">${posTag(r.pos)}<span class="nm">${nm}
+<span class="tm">${r.team}${r.adp ? ` · ADP ${r.adp.toFixed(0)}` : ''}</span></span></span>
+<span class="num">${k}/${list.length}${k === list.length ? '' : ` · ${pct(k, list.length)}`}</span>
+<span class="num">${r.lasts == null ? '—' : `${r.lasts} in 100`}</span>
+<span class="cost ${COST_TONE[r.verdict]}"><b>${VERDICT_WORD[r.verdict] || r.verdict}</b></span>
+<span class="costWhy">${r.lost ? `lost ${r.lost}` : ''}</span></div>`).join('');
+  }).join('')}</div>
+<p class="hint"><b>How often</b> is out of ${n} drafts from the same seat, so a name showing
+${n}/${n} means the board never wavered and one showing 3/${n} means it is a coin flip between
+several men. <b>Would have lasted</b> is the chance that man was still there at your next
+pick — a high number next to a bad verdict is the pattern worth hunting: you did not have to
+take him yet.</p>`;
+
+  return head + table;
+}
+
+function batchCsv(res) {
+  const head = ['draft', 'pick', 'round', 'player', 'pos', 'team', 'adp', 'our_rank',
+    'our_score', 'chance_he_lasted_to_next_pick', 'verdict', 'points_given_up',
+    'player_lost_instead'];
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [head.join(','), ...res.rows.map((r) => [r.run, r.pick, r.round, r.name, r.pos,
+    r.team, r.adp?.toFixed(1) ?? '', r.ourRank ?? '', r.score?.toFixed(1) ?? '',
+    r.lasts ?? '', r.verdict, r.gave, r.lost].map(esc).join(','))].join('\n');
+}
+
+let lastBatch = null;
+
+async function doBatch() {
+  const lg = data.leagues[st.league];
+  const slot = Math.max(1, Math.min(teamsOf(lg), +($('#batchSlot')?.value) || 1));
+  const n = +($('#batchN')?.value) || 10;
+  const btn = $('#batchRun');
+  btn.disabled = true;
+  msg('#batchMsg', '');
+  try {
+    lastBatch = await runBatch(slot, n);
+    $('#batchOut').innerHTML = batchHTML(lastBatch);
+    $('#batchCsv').hidden = false;
+  } catch (e) {
+    console.error('batch failed', e);
+    $('#batchOut').innerHTML = '';
+    msg('#batchMsg', `Could not finish those drafts: ${e.message}`, 'bad');
+  }
+  btn.disabled = false;
 }
 
 // Start one and play the whole thing through in one press. The fastest way to ask "what
@@ -2199,6 +2395,12 @@ function renderMock() {
     const s = m ? m.slot : (st.slots?.[st.league] ?? 1);
     $('#mockSlotOut').textContent = `${s} of ${teamsOf(lg)}`;
   }
+  if ($('#batchSlot')) {
+    $('#batchSlot').max = teamsOf(lg);
+    // Defaults to your real seat, because "is the board consistent from where I actually
+    // pick" is the only version of the question worth asking first.
+    if (!$('#batchSlot').value) $('#batchSlot').value = st.slots?.[st.league] ?? 1;
+  }
   if ($('#mockStart')) $('#mockStart').textContent = m ? 'Start a fresh one' : 'Start a practice draft';
   if ($('#mockAll')) $('#mockAll').textContent = m ? 'Draft a fresh one for me' : 'Draft it all for me';
   if ($('#mockEnd')) $('#mockEnd').hidden = !m;
@@ -3192,6 +3394,14 @@ function wire() {
   // ---- practice draft
   if ($('#mockStart')) $('#mockStart').onclick = startMock;
   if ($('#mockAll')) $('#mockAll').onclick = simulateAll;
+  if ($('#batchRun')) $('#batchRun').onclick = doBatch;
+  if ($('#batchCsv')) {
+    $('#batchCsv').onclick = () => {
+      if (!lastBatch) return;
+      saveFile(`drafts-slot${lastBatch.slot}-x${lastBatch.n}-`
+        + `${stampFor(lastBatch.league)}-${today()}.csv`, 'text/csv', batchCsv(lastBatch));
+    };
+  }
   if ($('#mockEnd')) $('#mockEnd').onclick = () => { endMock(false); renderMock(); };
   if ($('#disc')) {
     $('#disc').oninput = (e) => {

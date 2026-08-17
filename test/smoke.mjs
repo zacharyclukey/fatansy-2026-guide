@@ -2277,6 +2277,57 @@ const fire = (el, type) => {
   ok('the Gone button comes back afterwards', d.querySelectorAll('[data-d]').length > 0);
   ok('a whole draft raised no errors', errs.length === 0, errs.join('; '));
 
+  // ---- ten drafts at once ----------------------------------------------
+  // The batch has one hard requirement beyond being correct: it must hand your real board
+  // back untouched. On draft night the button sits inches from a board with fifteen picks
+  // on it, and it runs by trampling the very state that board is drawn from.
+  {
+    d.querySelector('[data-v="board"]').click();
+    await settle();
+    const rowsToTick = [...d.querySelectorAll('.row.player [data-m]')].slice(0, 3);
+    for (const b of rowsToTick) b.click();
+    await settle();
+    const mineBefore = [...peek().picks[0].mine];
+    ok('three picks on the real board before the batch', mineBefore.length === 3);
+
+    d.querySelector('[data-v="mock"]').click();
+    await settle();
+    d.querySelector('#batchSlot').value = '4';
+    d.querySelector('#batchN').value = '5';
+    d.querySelector('#batchRun').click();
+    // 5 drafts x 15 rounds of rescoring; generous, and it yields between runs
+    await new Promise((r) => setTimeout(r, 30000));
+
+    const out = d.querySelector('#batchOut').textContent;
+    ok('the batch reports back', /drafts/.test(out) && !/Running draft/.test(out),
+      out.slice(0, 120));
+    ok('it counts how often each pick went the same way', /\/5/.test(out), out.slice(0, 160));
+    ok('it answers the question it exists for — who you lost by waiting badly',
+      /not going anywhere|no pick was spent/.test(out), out.slice(0, 200));
+    ok('every round of the draft is reported',
+      d.querySelectorAll('#batchOut .row.costPick:not(.head)').length >= R,
+      `${d.querySelectorAll('#batchOut .row.costPick:not(.head)').length} rows for ${R} rounds`);
+
+    // the whole point: your board is exactly as you left it
+    const after = peek();
+    ok('the batch puts your real picks back', JSON.stringify(after.picks[0].mine)
+      === JSON.stringify(mineBefore),
+      `${after.picks[0].mine.length} vs ${mineBefore.length}`);
+    ok('and does not leave a practice draft running', !after.mock);
+    d.querySelector('[data-v="board"]').click();
+    await settle();
+    ok('the real board still shows your picks',
+      d.querySelectorAll('.row.mine').length === 3,
+      `${d.querySelectorAll('.row.mine').length}`);
+
+    // and the rows behind it can be exported for someone else to read
+    d.querySelector('[data-v="mock"]').click();
+    await settle();
+    ok('the spreadsheet is offered once there is something in it',
+      d.querySelector('#batchCsv').hidden === false);
+    ok('running a batch raised no errors', errs.length === 0, errs.join('; '));
+  }
+
   // ---- and it will not quietly wipe a real draft you are tracking -------
   d.querySelector('[data-v="board"]').click();
   await settle();
