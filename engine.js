@@ -757,6 +757,63 @@ export function replacementLevels(players, league, ptsOf = projectedPoints) {
   return out;
 }
 
+// What you could add for FREE at each position, in projected points.
+//
+// Replacement level above answers "who would I have to start instead" on draft day. For a
+// man who is already past your starting slots that is the wrong counterfactual, and Zach
+// named the right one: if you do not roster a second tight end, you do not field an empty
+// tight end slot in week 8 - you add one off waivers. So what a bench body is really worth
+// is what he beats a free add by, and that differs enormously by position.
+//
+// The trap here would be a hand-tuned depth per position, which is the kind of constant
+// this project has deleted twice. It is not needed, because ADP already measures the thing:
+// it says exactly how deep the room drafts each position. In a 12-team league the market
+// takes about fourteen quarterbacks and fourteen tight ends - barely more than the twelve
+// that start, because everybody already knows they are replaceable - and sixty-odd backs
+// and seventy-odd receivers. So the best UNDRAFTED man is nearly as good as a startable
+// tight end and nothing like a startable back. That is the whole of Zach's argument, and
+// it falls out of the market rather than out of an opinion.
+//
+// It is deliberately optimistic about the wire: the best man nobody drafted is gone by
+// week two in a real league. An optimistic waiver level makes every bench player look
+// WORSE, so the bias runs against the change this was written for rather than flattering
+// it - which is the direction to be wrong in.
+export function waiverLevels(players, league, ptsOf = projectedPoints) {
+  const spots = (league.teams || 12) * roundsOf(league);
+  const shares = flexShares(players, league);
+  const slots = startableSlots(league, shares);
+  const out = {};
+  for (const pos of Object.keys(league.starters || {})) {
+    if (pos === 'FLEX') continue;
+    const here = players.filter((p) => p.pos === pos && inLeague(p, league));
+    const list = here.map((p) => ptsOf(p, league)).sort((a, b) => b - a);
+    if (!list.length) { out[pos] = 0; continue; }
+    // How many the room actually drafts. Positions with no ADP in the file at all (some
+    // files carry none for defences) fall back to "everyone starts one and nobody keeps a
+    // spare", which is the same claim STREAM_DEPTH already makes about them out loud.
+    const taken = here.filter((p) => p.adp && p.adp <= spots).length;
+    const floorN = Math.ceil((slots[pos] ?? 1) * (league.teams || 12));
+    const n = Math.min(list.length - 1, Math.max(floorN, taken));
+    // smoothed across three ranks, so one odd projection cannot set the baseline
+    const win = list.slice(n, Math.min(list.length, n + 3));
+    out[pos] = win.length ? win.reduce((a, b) => a + b, 0) / win.length : list[list.length - 1];
+  }
+  return out;
+}
+
+// Only the POSITIVE half of the surplus is discounted by how often he actually reaches your
+// lineup, and this asymmetry is load-bearing rather than tidy. Discounting both halves was
+// tried: it multiplies a NEGATIVE surplus by a fraction, so a receiver 28 points below the
+// bar who plays 61% of weeks scored -17 where playing every week would have scored -28.
+// Being less available made him better, and the plan took a tight end at five bench picks
+// in a row. Above the bar the surplus is an option and scales with the chance of exercising
+// it; below the bar it is a plain statement of how far short of a free add he is, which
+// availability cannot improve.
+export function benchOverWaiver(pts, waiver, chance) {
+  const surplus = pts - (waiver || 0);
+  return surplus >= 0 ? chance * surplus : surplus;
+}
+
 export const SAMPLE_LEAGUE = {
   name: 'Standard 12-team PPR',
   teams: 12,
@@ -856,16 +913,29 @@ export function buildBoard(data, st, cache) {
   // individual starter (how long his backup's job is open). Same dial, two populations.
   const anchor = st.durAnchor || DUR_DEFAULT;
   const avail = poolAvailable(inLeaguePlayers, pg, anchor);
+  // What a free add is worth at each position - the bar every bench body is measured
+  // against. See waiverLevels.
+  const waiver = waiverLevels(inLeaguePlayers, league);
   const byId = new Map(inLeaguePlayers.map((p) => [p.id, p]));
   const chart = new Map();
   for (const [id, hc] of depthChart(inLeaguePlayers, league)) {
+    // Deliberately still the STARTER bar, not the waiver bar, and this was tried the other
+    // way and reverted. Pricing the job over a free add lowers the bar (QB 296 -> 246) and
+    // therefore RAISES what insuring a quarterback appears to buy, which put backup
+    // quarterbacks into the top five handcuffs - the exact inversion the handcuff pricing
+    // was written to prevent.
+    //
+    // The reason it inverts is a separate weakness worth naming: jobGain credits the heir
+    // with hc.leadPts, the LEAD man's points, as though a backup inherits an elite starter's
+    // production rather than his snaps. The high bar was quietly cancelling that error out.
+    // Fixing the bar without fixing the credit just exposes it, so both stay as they were
+    // until the credit itself is dealt with. The waiver bar below is about bench bodies,
+    // which is what was actually asked for.
     chart.set(id, handcuffValue(hc, repl, pg, byId.get(hc.leadId), anchor));
   }
   const mineIds = new Set(st.mineIds || []);
   const queue = {};                     // how many of each position you already own
   for (const q of st.mine || []) queue[q] = (queue[q] || 0) + 1;
-  // The one bar every bench candidate is measured against - see benchVor below.
-  const benchBar = Math.max(...Object.keys(FLEX_FILL).map((q) => repl[q] || 0), 1);
 
   const rows = inLeaguePlayers
     .map((p) => {
@@ -894,14 +964,39 @@ export function buildBoard(data, st, cache) {
       // -17 while playing every week would have scored -28. Being less available made him
       // better. It handed the plan a tight end at five bench picks in a row.
       //
-      // Bench slots are fungible - any position can sit in any one of them - so every bench
-      // candidate is competing for the same slot against the same alternative, and the
-      // honest comparison between them is simply how many points each puts in your lineup.
-      // One shared bar does that, and taking it from the flex-eligible positions (whose
-      // replacement levels sit within three points of each other here: RB 125, WR 128,
-      // TE 127) keeps it continuous with the men who are filling a real slot.
+      // The fourth answer, and the one Zach asked for: once your slots at his position are
+      // full, the alternative to rostering him is not an empty slot, it is a FREE ADD at his
+      // own position. So the bar is the waiver level there.
+      //
+      // This supersedes the one-shared-bar reading above rather than contradicting it. That
+      // reading was right that bench slots are fungible and every candidate competes for the
+      // same slot - but the thing that makes them comparable in it is how much each beats
+      // the free alternative to himself, and those alternatives are wildly unequal. A second
+      // tight end is competing with a tight end who is nearly as good and costs nothing; a
+      // fourth back is competing with a free back who is far worse. One shared bar took the
+      // flex positions' replacement levels, which sit within three points of each other
+      // (RB 125, WR 128, TE 127), and so said the two situations were identical. They are
+      // not, and the difference is the whole reason late tight ends kept winning picks.
+      // Kickers and defences are held over a free add ALWAYS, empty slot or not, because
+      // that is the one case where the alternative never stops being the wire - you only
+      // ever start one and a usable one is free every week. Everyone else gets the free-add
+      // bar only once their slots are full.
+      //
+      // Their bar is the HARSHER of the two, and that is not belt-and-braces. The ADP waiver
+      // level is "the best man nobody drafted", around the 14th defence, which is the right
+      // reading for a position you hold one of all season. It is the wrong reading for one
+      // you rotate weekly: if a top-six defence is free in any given week then the thing you
+      // are really choosing against is the sixth, not the fourteenth. STREAM_DEPTH says that
+      // and the ADP count cannot, so taking the max keeps it. Swapping to the softer bar
+      // would make kickers and defences look BETTER, which is how this exact bug shipped
+      // once before.
+      const streamed = STREAMED.includes(p.pos);
       const fillsSlot = (queue[p.pos] || 0) < (slots[p.pos] ?? 1);
-      const plainVor = fillsSlot ? lineup - (repl[p.pos] || 0) : lineup - benchBar;
+      const freeAdd = streamed
+        ? Math.max(repl[p.pos] || 0, waiver[p.pos] || 0)
+        : (waiver[p.pos] || 0);
+      const plainVor = (fillsSlot && !streamed) ? lineup - (repl[p.pos] || 0)
+        : benchOverWaiver(pts, freeAdd, bw.chance);
       // And the one case that shared bar cannot price. A handcuff's gross worth is small
       // because he is projected low by definition, so subtracting a starting back's
       // replacement level from it buries him beneath men who will never reach your lineup -
@@ -1178,7 +1273,12 @@ export function buildBoard(data, st, cache) {
   // screen has to be able to show three ways - full season, what his position usually
   // plays, what HE has played - and recomputing it outside here would be a second copy of
   // the same sum drifting away from this one.
-  return { rows, repl, league, weights: cw, games: pg };
+  // `shares` and `waiver` travel with the board because everything downstream that reasons
+  // about roster shape needs them and nothing downstream can cheaply recompute them.
+  // capsOf(league) without shares hands a whole flex slot's worth of rope to EVERY
+  // flex-eligible position, so tight ends came out capped at three in a one-tight-end
+  // league instead of two - which is most of why the room kept stacking them.
+  return { rows, repl, league, weights: cw, games: pg, shares, waiver };
 }
 
 // ---------------------------------------------------------------- draft clock
@@ -1587,12 +1687,15 @@ export function depthChart(players, league, ptsOf = projectedPoints) {
 // running back replacement is 169 of Gibbs's 331, so half of him cannot be replaced at all.
 // THAT asymmetry is why backs are the position where handcuffing pays, and it falls out of
 // the league's own replacement levels rather than being asserted about positions.
-export function handcuffValue(hc, repl, games, leadPlayer, anchor = DUR_DEFAULT) {
+// `bar` is what you could get for nothing at that position - the waiver level, not the
+// draft-day replacement level. When your starter goes down mid-season you do not have to
+// start the last draftable man at his position, you add whoever is free.
+export function handcuffValue(hc, bar, games, leadPlayer, anchor = DUR_DEFAULT) {
   if (!hc) return null;
   const leadGames = leadPlayer ? expectedGames(leadPlayer, games, anchor) : FULL_GAMES;
   const share = Math.max(0, Math.min(1, 1 - leadGames / FULL_GAMES));
   // What the job is worth over the man you would otherwise have had to start.
-  const jobGain = Math.max(0, hc.leadPts - (repl?.[hc.pos] || 0));
+  const jobGain = Math.max(0, hc.leadPts - (bar?.[hc.pos] || 0));
   return { ...hc, leadGames, share, jobGain,
     weeks: Math.round(share * FULL_GAMES),
     gain: share * jobGain };

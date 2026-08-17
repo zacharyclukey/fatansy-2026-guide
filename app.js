@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171230';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171312';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171230';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171230';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171230';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171230';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171312';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171312';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171312';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171312';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171230';
+const BUILD = '202608171312';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -484,7 +484,7 @@ function recommendation(drafted, have) {
   // The caps go in so the panel cannot name a man the app itself would refuse to draft -
   // a third quarterback, a fifth tight end. One recommendation, one set of rules.
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league) });
+    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league, board.shares) });
   if (!res?.plan?.length) return null;
 
   const top = { pos: res.top.row.p.pos, best: res.top.row, total: res.top.total };
@@ -730,7 +730,7 @@ function stampShot(id) {
     if (p) have[p.pos] = (have[p.pos] || 0) + 1;
   }
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON, must: [id], caps: capsOf(board.league) });
+    { candidates: 10, horizon: PLAN_HORIZON, must: [id], caps: capsOf(board.league, board.shares) });
   // The same rule autoPick follows, worked out the same way: until your remaining picks are
   // down to the slots you still have to fill, a kicker and a defence are not on the table.
   // The cost view must not hold a pick against a man the app would have refused to take.
@@ -784,7 +784,7 @@ function autoDraft(all) {
   const m = mock();
   if (!m || m.done) return;
   const lg = data.leagues[st.league];
-  const caps = capsOf(lg);
+  const caps = capsOf(lg, board?.shares);
   const rounds = roundsOf(lg);
   let guard = 0;
   do {
@@ -2220,16 +2220,42 @@ function gradeReach(mine) {
   };
 }
 
-// 3. Can you field a lineup? An empty starting slot scores zero every week, which is the
-// only thing on this page that is not a matter of degree.
-function gradeSlots(roster, lg) {
-  const need = needsOf(roster, lg);
-  const slots = Object.entries(lg.starters || {})
-    .reduce((a, [, v]) => a + (v || 0), 0) || 1;
+// 3. Is your bench worth anything?
+//
+// This replaced "can you field a lineup", which scored 100 on every completed draft and then
+// lectured you about it. Of course the slots are full - the draft filled them. It was only
+// ever information DURING a draft, and the roster strip on the board does that job now.
+//
+// The question that actually has an answer after the fact is the one Zach put: a bench body
+// is only worth what he beats a free add by, and how often he reaches your lineup at all. A
+// second tight end in a one-tight-end league scores on both counts badly - he plays 18% of
+// weeks and the tight end you could pick up for nothing is nearly as good. A fourth back
+// plays a third of weeks and the free back is 118 points worse. Same bench slot, wildly
+// different asset, and this is the number that says so.
+//
+// An unfilled starting slot has not stopped mattering - it is caught harder than before,
+// because an empty slot means a starter's worth of nothing rather than a bench body's.
+function gradeBench(cards, lg) {
+  const need = needsOf(roster0(cards), lg);
+  const bench = cards.filter((c) => c.role === 'Bench');
+  if (!bench.length && !need.total) return null;
+  // benchVor is already "points over a free add at his position, times his chance of
+  // reaching your lineup" - the board's own number, not a second opinion.
+  const worth = bench.map((c) => Math.max(0, c.r.benchVor || 0));
+  const dead = worth.filter((w) => w < 1).length;
+  const total = worth.reduce((a, b) => a + b, 0);
+  const best = [...bench].sort((a, b) => (b.r.benchVor || 0) - (a.r.benchVor || 0))[0];
+  // Full marks is every bench man beating a free add by something that matters. The scale
+  // is deliberately generous - a bench is allowed a flier - and an empty starting slot costs
+  // a flat 25 because it is a different order of mistake.
+  const per = bench.length ? total / bench.length : 0;
+  const score = clamp100(100 * Math.min(1, per / 12) - 25 * need.total);
   const short = Object.entries(need.short).filter(([, v]) => v > 0).map(([p, v]) => `${v} ${p}`);
   if (need.flex > 0) short.push(`${need.flex} flex`);
-  return { score: clamp100(100 * (1 - need.total / slots)), empty: need.total, short, slots };
+  return { score, dead, total: Math.round(total), per: Math.round(per), best, short,
+    empty: need.total, size: bench.length };
 }
+const roster0 = (cards) => cards.map((c) => c.r.p);
 
 // 4. Bye weeks among the men who actually start. A clash on the bench is not a problem.
 function gradeByes(cards) {
@@ -2271,7 +2297,7 @@ function draftGrade(m, lg) {
   const parts = {
     left: gradeLeft(mine),
     reach: gradeReach(mine),
-    slots: gradeSlots(roster, lg),
+    bench: gradeBench(cards, lg),
     byes: gradeByes(cards),
     prefs: gradePrefs(mine),
   };
@@ -2291,7 +2317,7 @@ const gradeCard = (label, score, head, why, data = '') => `<div class="gradeCard
 function gradeHTML(m, lg) {
   const g = draftGrade(m, lg);
   if (g.overall == null) return '';
-  const { left, reach, slots, byes, prefs } = g.parts;
+  const { left, reach, bench, byes, prefs } = g.parts;
   const nm = (id) => esc(byId(id)?.name || 'that pick');
   const cards = [];
 
@@ -2324,13 +2350,26 @@ function gradeHTML(m, lg) {
           + 'early is a rounding error and is not counted.') + aside,
     ` data-reaches="${reach.reaches}" data-unpriced="${reach.unpriced}"`));
   }
-  cards.push(gradeCard('Filling your starting slots', slots.score,
-    slots.empty === 0 ? 'Full lineup' : `${slots.empty} slot${slots.empty === 1 ? '' : 's'} empty`,
-    slots.empty === 0
-      ? `All ${slots.slots} starting slots filled. This is the one thing on this page that is `
-        + 'not a matter of taste — an empty slot scores nothing every single week.'
-      : `You finished with no ${slots.short.join(', no ')}. That is the one mistake worth `
-        + 'avoiding: an empty slot scores zero every week, whoever else is on your bench.'));
+  if (bench) {
+    cards.push(gradeCard('What your bench is worth', bench.score,
+      bench.empty
+        ? `${bench.empty} starting slot${bench.empty === 1 ? '' : 's'} empty`
+        : bench.dead === 0 ? 'Every bench man earns his slot'
+          : `${bench.dead} of ${bench.size} doing nothing`,
+      (bench.empty
+        ? `You finished with no ${bench.short.join(', no ')}, which costs more than any bench `
+          + 'question — an empty slot scores zero every week. '
+        : '')
+      + `A bench player is only worth what he beats a free add by, times how often he `
+      + `actually reaches your lineup. Yours average ${bench.per} points on that measure`
+      + `${bench.best ? `, the best of them ${esc(bench.best.r.p.name)}` : ''}. `
+      + `${bench.dead
+        ? `${bench.dead === 1 ? 'One' : bench.dead} of them beat nothing you could not have `
+          + 'picked up for free during the season — a second man at a position you only start '
+          + 'one of is the usual culprit.'
+        : 'None of them is a man you could have replaced off waivers for nothing.'}`,
+      ` data-dead="${bench.dead}" data-empty="${bench.empty}"`));
+  }
   cards.push(gradeCard('Bye weeks among your starters', byes.score,
     byes.worst
       ? `${byes.bad.length === 1 ? `Week ${byes.worst.week}` : `${byes.bad.length} bad weeks`}: `
@@ -3062,7 +3101,7 @@ function renderLean() {
   // "receivers are the scarce thing, so backs can wait" immediately below "Take RB".
   // Same field the pills and the reason sentence use now.
   const res = planDraft(board.rows, clock, drafted, board.league, have,
-    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league) });
+    { candidates: 10, horizon: PLAN_HORIZON, caps: capsOf(board.league, board.shares) });
   if (!res) { box.innerHTML = ''; return; }
   const s = suggestLean(res.cost.map((c) => ({ pos: c.pos, cost: c.gap })));
   const on = activeLean(st) || 'custom';

@@ -3236,10 +3236,18 @@ const fire = (el, type) => {
   ok('the grade is a number from 0 to 100', n != null && n >= 0 && n <= 100, `${n}`);
   ok('and it is labelled as being out of 100', /out of 100/.test(text));
 
+  // "Filling your starting slots" is gone. It scored 100 on every completed draft - the
+  // draft fills the slots by definition - and then lectured you about it. What replaced it
+  // asks the question that still has an answer afterwards: is a bench body worth more than
+  // the man you could have added off waivers for nothing?
   for (const measure of ['Points left on the board', 'Taking men before their price',
-    'Filling your starting slots', 'Bye weeks among your starters']) {
+    'What your bench is worth', 'Bye weeks among your starters']) {
     ok(`it grades ${measure.toLowerCase()}`, text.includes(measure));
   }
+  ok('the grade no longer congratulates you for filling slots the draft filled',
+    !/Filling your starting slots/.test(text));
+  ok('the bench measure is priced against a free add, in words',
+    /beats a free add by/.test(text), text.slice(0, 0));
   const cards = out.querySelectorAll('.gradeCard');
   ok('every measure carries its own mark', cards.length >= 4, `${cards.length} cards`);
   const marks = [...cards].map((c) => +c.querySelector('.gradeN').textContent);
