@@ -1012,7 +1012,17 @@ export function buildBoard(data, st, cache) {
       // same score. The simulator caught it immediately: with the band flattened the room
       // could no longer tell one bench receiver from another and reached 49 picks early for
       // one. Only a man with something to inherit is allowed near this.
-      const benchVor = bw.gain > 0 ? Math.max(plainVor, bw.gain) : plainVor;
+      // Capped, and no longer allowed to replace the surplus outright. Taking
+      // max(surplus, gain) let insurance decide a pick on its own, and that credit is known
+      // to be too generous - jobGain pays the heir the LEAD man's points, as though a backup
+      // inherits an elite starter's production rather than his snaps. An unbounded number
+      // built on a known over-credit is the wrong shape whatever its size.
+      //
+      // So a handcuff now moves like a star or a preference does: enough to pass men he is
+      // level with, never enough to jump a tier. Same family, same reasoning, same ceiling
+      // (STAR_BAND). The chip on the row is what actually tells you he is insurance; the
+      // number no longer argues the case louder than the evidence supports.
+      const benchVor = plainVor + Math.min(HANDCUFF_BAND, Math.max(0, bw.gain));
       const cached = cache?.get(p.id);
       const scores = cached ? { ...cached } : (() => {
         const s = {};
@@ -1612,6 +1622,9 @@ export function startableSlots(league, shares) {
 // The gap has to be wide before this means anything. Two backs splitting a committee are
 // not a starter and a handcuff, and treating them as one would hand a lift to half the
 // league.
+// How far insurance may move a man. Same ceiling as a star, for the same reason: it is a
+// consideration you hold about a player, not a forecast of his points. See benchVor.
+export const HANDCUFF_BAND = STAR_BAND;
 export const HANDCUFF_GAP = 2.2;      // the lead man must be worth this many times the next
 export const HANDCUFF_MIN = 40;       // and the job itself has to be worth having
 
@@ -2577,6 +2590,18 @@ export function pickShot(res, id, clock, opts = {}) {
     top: top.row.p.id === id ? null : cut(top),
     lost: lost ? { ...cut(lost), keep: r1((keepOf(lost.row) ?? 0) * 100) } : null,
     gap: r1(Math.max(0, top.total - me.total)),
+    // The best man you PASSED, whether or not he beat you. `top` goes null exactly when you
+    // took the best thing on your board, which is most of the time and is precisely when
+    // "nothing better was there" stops being informative - it names no alternative at all.
+    // This always names one, with the odds he was still sitting there at your next pick,
+    // which is the pair of facts that actually justifies a pick: I took him now, and the man
+    // I passed came back to me.
+    alt: (() => {
+      const a = pool.find((c) => c.row.p.id !== id);
+      if (!a) return null;
+      return { ...cut(a), keep: r1((keepOf(a.row) ?? 0) * 100),
+        hasKeep: keepOf(a.row) != null };
+    })(),
   };
 }
 

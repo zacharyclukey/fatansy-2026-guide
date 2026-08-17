@@ -2302,6 +2302,20 @@ const fire = (el, type) => {
     ok('the batch reports back', /drafts/.test(out) && !/Running draft/.test(out),
       out.slice(0, 120));
     ok('it counts how often each pick went the same way', /\/5/.test(out), out.slice(0, 160));
+    ok('it grades the batch on average, not just one draft',
+      /out of 100 on average/.test(out), out.slice(0, 200));
+    ok('and it reports the spread, because a wide one means luck not plan',
+      /Best \d+, worst \d+/.test(out), out.slice(0, 240));
+    ok('it says which measure is weakest', /Weakest measure/.test(out));
+    ok('it still refuses to claim it knows the season',
+      /nothing here knows the season/i.test(out));
+    // The verdict column is gone. It read "Best there" on nearly every row, because the
+    // auto-drafter takes the top of its own board by construction, so it named no
+    // alternative at all. What replaced it names the man you passed and whether he came back.
+    ok('the batch no longer just says "best there"', !/Best there/.test(out));
+    ok('it names who you passed instead', /Who you passed/.test(out), out.slice(0, 200));
+    ok('and whether that man came back to you',
+      /came back \d+ in 100/.test(out), out.slice(0, 400));
     ok('it answers the question it exists for — who you lost by waiting badly',
       /not going anywhere|no pick was spent/.test(out), out.slice(0, 200));
     ok('every round of the draft is reported',

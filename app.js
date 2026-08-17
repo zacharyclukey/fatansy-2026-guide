@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171312';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171325';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171312';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171312';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171312';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171312';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171325';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171325';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171325';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171325';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171312';
+const BUILD = '202608171325';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -860,11 +860,16 @@ function harvestRun(run) {
       verdict: v.kind,
       gave: v.points || 0,
       lost: v.kind === 'wasted' ? (shot?.lost?.name || '') : '',
+      // who you passed to take him, and whether that man came back
+      alt: shot?.alt?.name || '',
+      altPos: shot?.alt?.pos || '',
+      altLasts: shot?.alt?.hasKeep ? Math.round(shot.alt.keep) : null,
     };
   });
 }
 
 let batchRows = [];
+let batchGrades = [];
 
 // pickCost's five verdicts, short enough for a table cell. Same words, same meanings.
 const VERDICT_WORD = {
@@ -884,6 +889,7 @@ async function runBatch(slot, n) {
     slot: st.slots?.[st.league],
   };
   batchRows = [];
+  batchGrades = [];
   try {
     for (let i = 1; i <= n; i += 1) {
       $('#batchOut').innerHTML = `<p class="facts">Running draft ${i} of ${n} from slot `
@@ -893,6 +899,15 @@ async function runBatch(slot, n) {
       seedRun(slot, 1000 + i * 7919);
       autoDraft(true);
       batchRows.push(...harvestRun(i));
+      // Graded by the same draftGrade the single-draft report uses, so "how does the board
+      // grade on average from this seat" is the same question asked N times and not a new
+      // measure invented for the batch.
+      const g = draftGrade(st.mock, lg);
+      if (g.overall != null) {
+        batchGrades.push({ run: i, overall: g.overall, word: g.word,
+          parts: Object.fromEntries(Object.entries(g.parts)
+            .filter(([, v]) => v && v.score != null).map(([k, v]) => [k, v.score])) });
+      }
       // Hand the frame back so the progress line above actually paints and the tab does
       // not appear frozen for the second and a half this takes.
       await new Promise((r) => setTimeout(r, 0));
@@ -909,7 +924,37 @@ async function runBatch(slot, n) {
     save();
     rebuild();
   }
-  return { rows: batchRows, n, slot, league: lg.name };
+  return { rows: batchRows, grades: batchGrades, n, slot, league: lg.name };
+}
+
+const GRADE_LABEL = { left: 'points left on the board', reach: 'reaching',
+  bench: 'bench worth', byes: 'bye weeks', prefs: 'your preferences' };
+
+// How the board grades itself from this seat, on average. Worth more than any single draft's
+// mark: one draft's grade is partly the room's behaviour on the night, and averaging over
+// runs leaves the part that is actually the board's doing. The spread matters as much as the
+// average - a seat that grades 82 every time is a plan; 82 on average from 60 to 95 is luck.
+function batchGradeHTML(res) {
+  const g = res.grades || [];
+  if (!g.length) return '';
+  const marks = g.map((x) => x.overall);
+  const avg = Math.round(marks.reduce((a, b) => a + b, 0) / marks.length);
+  const lo = Math.min(...marks);
+  const hi = Math.max(...marks);
+  const keys = [...new Set(g.flatMap((x) => Object.keys(x.parts)))];
+  const per = keys.map((k) => {
+    const vals = g.map((x) => x.parts[k]).filter((v) => v != null);
+    return { k, avg: Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) };
+  }).sort((a, b) => a.avg - b.avg);
+  const worst = per[0];
+  return `<div class="gradeBig"><b>${avg}</b><span>out of 100 on average, across
+${res.n} draft${res.n === 1 ? '' : 's'} from slot ${res.slot}</span>
+<span class="hint">Best ${hi}, worst ${lo}${hi - lo > 20
+    ? ' — a spread that wide means the night matters more than the plan does'
+    : ' — tight enough that this is the plan rather than luck'}.
+${worst ? `Weakest measure: <b>${GRADE_LABEL[worst.k] || worst.k}</b>, averaging ${worst.avg}.` : ''}
+This grades how you drafted, not how the team will do — nothing here knows the season.</span>
+<span class="hint">${per.map((x) => `${GRADE_LABEL[x.k] || x.k} ${x.avg}`).join(' · ')}</span></div>`;
 }
 
 function batchHTML(res) {
@@ -946,7 +991,7 @@ ${lostTop.length ? `<span class="hint">Who you lost, most often: ${lostTop
 
   const table = `<div class="board costPicks">
 <div class="row head costPick"><span>Round</span><span>Who you took</span>
-<span>How often</span><span>Would have lasted</span><span>Verdict</span></div>
+<span>How often</span><span>He lasts</span><span>Who you passed</span></div>
 ${[...byRound.keys()].sort((a, b) => a - b).map((rd) => {
     const list = byRound.get(rd);
     const tally = {};
@@ -955,35 +1000,59 @@ ${[...byRound.keys()].sort((a, b) => a - b).map((rd) => {
       tally[r.name].k += 1;
     }
     const order = Object.entries(tally).sort((a, b) => b[1].k - a[1].k);
+    // Who the runs usually left on the board at this pick, and whether he came back. This
+    // replaced the verdict column, which read "Best there" on nineteen rows in twenty -
+    // true, and useless, because the auto-drafter takes the top of its own board by
+    // construction. Naming nothing is not a verdict.
+    const alts = {};
+    for (const r of list) if (r.alt) alts[r.alt] = (alts[r.alt] || 0) + 1;
+    const altTop = Object.entries(alts).sort((a, b) => b[1] - a[1])[0];
+    const altRow = altTop ? list.find((r) => r.alt === altTop[0]) : null;
+    const bad = list.filter((r) => r.verdict === 'wasted').length;
     return order.map(([nm, { r, k }], idx) => `<div class="row costPick">
 <span class="num">${idx === 0 ? rd : ''}</span>
 <span class="who">${posTag(r.pos)}<span class="nm">${nm}
 <span class="tm">${r.team}${r.adp ? ` · ADP ${r.adp.toFixed(0)}` : ''}</span></span></span>
 <span class="num">${k}/${list.length}${k === list.length ? '' : ` · ${pct(k, list.length)}`}</span>
-<span class="num">${r.lasts == null ? '—' : `${r.lasts} in 100`}</span>
-<span class="cost ${COST_TONE[r.verdict]}"><b>${VERDICT_WORD[r.verdict] || r.verdict}</b></span>
-<span class="costWhy">${r.lost ? `lost ${r.lost}` : ''}</span></div>`).join('');
+<span class="num ${r.lasts != null && r.lasts >= 50 ? 'dn' : ''}">${r.lasts == null ? '—'
+      : `${r.lasts} in 100`}</span>
+<span class="who">${idx === 0 && altRow
+      ? `${posTag(altRow.altPos)}<span class="nm">${altTop[0]}
+<span class="tm">${altTop[1]} of ${list.length} runs${altRow.altLasts != null
+        ? ` · came back ${altRow.altLasts} in 100` : ''}</span></span>` : ''}</span>
+<span class="costWhy">${idx !== 0 ? '' : bad
+      ? `<b class="dn">${bad} of ${list.length} runs cost you a player here</b>`
+      : altRow && altRow.altLasts != null && r.lasts != null
+        ? (r.lasts < altRow.altLasts
+          ? 'Right way round in most runs — the man taken was going, the man passed came back.'
+          : 'Worth a look: the man passed was likelier to go than the man taken.')
+        : ''}</span></div>`).join('');
   }).join('')}</div>
 <p class="hint"><b>How often</b> is out of ${n} drafts from the same seat, so a name showing
 ${n}/${n} means the board never wavered and one showing 3/${n} means it is a coin flip between
-several men. <b>Would have lasted</b> is the chance that man was still there at your next
-pick — a high number next to a bad verdict is the pattern worth hunting: you did not have to
-take him yet.</p>`;
+several men. <b>He lasts</b> is the chance the man you took was still sitting there at your
+next pick — a high number there is the warning sign, because you did not have to take him
+yet. <b>Who you passed</b> is the best man left on the board, and whether he came back to
+you. Those two numbers together are the whole argument for a pick: take the one who was
+going, and the one who was not will still be there.</p>`;
 
-  return head + table;
+  return batchGradeHTML(res) + head + table;
 }
 
 function batchCsv(res) {
   const head = ['draft', 'pick', 'round', 'player', 'pos', 'team', 'adp', 'our_rank',
     'our_score', 'chance_he_lasted_to_next_pick', 'verdict', 'points_given_up',
-    'player_lost_instead'];
+    'player_lost_instead', 'best_man_passed', 'passed_pos',
+    'chance_passed_man_came_back', 'draft_grade'];
   const esc = (v) => {
     const s = v == null ? '' : String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const gradeOf = new Map((res.grades || []).map((g) => [g.run, g.overall]));
   return [head.join(','), ...res.rows.map((r) => [r.run, r.pick, r.round, r.name, r.pos,
     r.team, r.adp?.toFixed(1) ?? '', r.ourRank ?? '', r.score?.toFixed(1) ?? '',
-    r.lasts ?? '', r.verdict, r.gave, r.lost].map(esc).join(','))].join('\n');
+    r.lasts ?? '', r.verdict, r.gave, r.lost, r.alt, r.altPos, r.altLasts ?? '',
+    gradeOf.get(r.run) ?? ''].map(esc).join(','))].join('\n');
 }
 
 let lastBatch = null;

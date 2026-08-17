@@ -934,6 +934,13 @@ button.primary:hover { background: var(--fieldDeep); border-color: var(--fieldDe
   font-style: normal; font-size: 11px; color: var(--ink3);
   text-transform: uppercase; letter-spacing: .06em; margin-top: 4px;
 }
+/* The batch grade reuses .gradeBig but stands alone rather than sitting beside a .gradeSay,
+   so it needs the panel the pair used to share. */
+#batchOut .gradeBig {
+  padding: 14px 16px; margin: 14px 0 12px; border-radius: 0 var(--r) var(--r) 0;
+  background: var(--fieldSoft); border-left: 4px solid var(--field);
+}
+#batchOut .gradeBig span { margin-top: 6px; line-height: 1.5; }
 .gradeSay { display: flex; flex-direction: column; gap: 4px; flex: 1 1 240px; }
 .gradeSay b { font-size: 18px; color: var(--ink); }
 .gradeSay span { font-size: 13px; color: var(--ink2); line-height: 1.5; }
