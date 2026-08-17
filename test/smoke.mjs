@@ -3261,7 +3261,7 @@ const fire = (el, type) => {
     await settle();
     const text = d.querySelector('#cmpOut').textContent.replace(/\s+/g, ' ');
     const m = text.match(/(?:by|separates them by) ([\d.]+) points of draft score/i);
-    return { text, gap: m ? +m[1] : null,
+    return { text, gap: m ? +m[1] : null, el: d.querySelector('#cmpOut'),
       flip: /Coin flip/.test(text), prefers: /Your board prefers/.test(text) };
   };
 
@@ -3271,10 +3271,19 @@ const fire = (el, type) => {
   ok('the board has both a back and a receiver to compare', !!rb && !!wr);
   const cross = await compare(rb.value, wr.value);
   ok('comparing two positions renders', cross.text.length > 400, `${cross.text.length} chars`);
-  for (const heading of ['Projected points', 'Worth taking at', 'Bye week',
-    'If he plays what he has played', 'What you said you like']) {
+  // The panel leads with the four things Zach asked for - total projection, rank at his
+  // position, the positional grade bars, and last season - and the preference essay that
+  // used to sit under it is gone, replaced by the same numbered adjustments the card shows.
+  for (const heading of ['Projected points', 'Rank at his position',
+    'Graded against his position', 'Games played, 2025', 'Work per game', 'Yards, 2025',
+    'Share of snaps, 2025', 'Worth taking at', 'Bye week',
+    'If he plays what he has played', 'What moved his score']) {
     ok(`the comparison shows ${heading.toLowerCase()}`, cross.text.includes(heading));
   }
+  ok('the grade bars really are drawn for both men',
+    cross.el.querySelectorAll('.cmpBars').length === 2,
+    `${cross.el.querySelectorAll('.cmpBars').length}`);
+  ok('and the preference essay is gone', !/points of percentile apart/.test(cross.text));
   ok('it says one thing or the other, never both', cross.flip !== cross.prefers);
   ok('it refuses to say who will score more',
     /cannot tell you which of these two will score more/.test(cross.text));
@@ -3288,7 +3297,7 @@ const fire = (el, type) => {
     const res = await compare(s.value, wr.value);
     ok(`comparing a ${pos} does not throw`, res.text.length > 400 && errs.length === 0,
       errs.join('; '));
-    ok(`a ${pos} is shown as having no preference labels`, /No labels/.test(res.text));
+    ok(`a ${pos} is shown as having no positional grade`, /No grade/.test(res.text));
     ok(`a ${pos} still gets a verdict`, res.flip || res.prefers);
   }
 

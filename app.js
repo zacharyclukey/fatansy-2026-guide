@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171513';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171527';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171513';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171513';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171513';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171513';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171527';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171527';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608171527';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171527';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171513';
+const BUILD = '202608171527';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -1452,13 +1452,41 @@ function renderBoard() {
 
 const posTag = (p) => `<span class="pos ${POSCOL[p] || ''}">${p}</span>`;
 
-function detail(r) {
-  const bars = data.components.map((c) => {
+// The positional grade bars. One definition, used by the player card and by the compare
+// panel - two copies would eventually disagree about what a component is called.
+function barsFor(r) {
+  return data.components.map((c) => {
     const v = r.scores[c.key];
     if (v == null) return '';
     return `<span class="bar" data-tip="${c.key}" tabindex="0"><span>${c.label}</span>`
       + `<i><b style="width:${Math.max(2, Math.round(v))}%"></b></i><u>${Math.round(v)}</u></span>`;
   }).join('');
+}
+
+// Last season in four numbers, asked the right way per position: a quarterback's work is
+// attempts, a back's is carries and catches, a receiver's is targets.
+function lastYear(r) {
+  const a = r.p.a || {};
+  const m = r.p.m || {};
+  const g = Math.max(a.gp || 0, 1);
+  const per = (n) => (n ? (n / g).toFixed(1) : null);
+  const work = r.p.pos === 'QB'
+    ? [per(a.pass_att), 'pass attempts a game']
+    : r.p.pos === 'RB'
+      ? [per((a.rush_att || 0) + (a.rec_tgt || 0)), 'carries + targets a game']
+      : [per(a.rec_tgt), 'targets a game'];
+  const yards = r.p.pos === 'QB' ? a.pass_yd : a.rush_rec_yd;
+  return {
+    games: a.gp ?? null,
+    work: work[0],
+    workLabel: work[1],
+    yards: yards ?? null,
+    snaps: m.snap_share ?? null,
+  };
+}
+
+function detail(r) {
+  const bars = barsFor(r);
   const m = r.p.m || {};
   const facts = [
     r.p.a?.gp ? `${r.p.a.gp} games` : null,
@@ -1629,43 +1657,6 @@ function cmpVerdict(a, b) {
       + `(${pts < 1 ? 'their projections are level' : `the projections are ${pts.toFixed(0)} points apart`}).` };
 }
 
-// Where the two differ on the four preferences. Read off the same traits fitTags reads,
-// so the panel cannot say one thing while the card says another.
-//
-// The words are FIT_TAGS' words, not the slider's. The slider's ends say what YOU want
-// ("Ignore it" / "Demand it"); FIT_TAGS says what the PLAYER is ("Injury risk" /
-// "Ever-present"). An earlier version printed the slider's ends against the player and
-// produced "Gibbs is further toward Demand it", which is not a sentence about anybody.
-function cmpPrefs(a, b) {
-  const league = board.league;
-  const leans = st.fit || {};
-  const axes = FIT_AXES.filter((x) => !x.needsPenalties || hasPenalties(league));
-  const out = [];
-  for (const ax of axes) {
-    // A kicker or defence has no trait here, only a placeholder tie at 50, and comparing
-    // placeholders is exactly the invented opinion the rest of the app refuses to give.
-    if (!a.rated || !b.rated) break;
-    const pa = a.traits?.[ax.key];
-    const pb = b.traits?.[ax.key];
-    if (pa == null || pb == null) continue;
-    const d = pa - pb;
-    if (Math.abs(d) < 15) continue;             // the same, near enough, on this axis
-    const [ahead, behind] = d > 0 ? [a, b] : [b, a];
-    const lean = leans[ax.key] || 0;
-    const [hiTag, loTag] = FIT_TAGS[ax.key] || [[ax.right], [ax.left]];
-    // Does the difference point the way you said you wanted, the other way, or nowhere?
-    // A positive lean is a vote for the high end of the trait - see the Fit sum in
-    // buildBoard - so a positive lean favours whoever is further up it.
-    const suits = lean === 0 ? null : (lean > 0) === (d > 0) ? ahead : behind;
-    out.push({ axis: ax.key, label: ax.label,
-      want: lean === 0 ? null : lean > 0 ? ax.right : ax.left,
-      ahead: ahead.p.name, behind: behind.p.name,
-      hiTag: hiTag[0], loTag: loTag[0], suits: suits?.p.name || null,
-      lean: fitWord(lean), gap: Math.abs(Math.round(d)) });
-  }
-  return out;
-}
-
 function compareHTML(a, b) {
   const lg = board.league;
   const v = cmpVerdict(a, b);
@@ -1677,16 +1668,6 @@ function compareHTML(a, b) {
     const k = r.kind ? KINDS[r.kind] : null;
     return cmpCell(k ? `<em class="kind ${r.kind}">${k[0]}</em>` : '<em class="kind soft">Not yet</em>',
       k ? k[1] : 'His range is still a long way off — the board is not asking you to take him here.');
-  };
-  const tagCell = (r) => {
-    if (!r.rated) {
-      return cmpCell('No labels', `There are no ${r.p.pos} stats to describe, so your `
-        + 'preferences have nothing to say about him either way.');
-    }
-    if (!r.tags?.length) return cmpCell('Nothing stands out', 'He is unremarkable on all four of your preferences.');
-    return cmpCell(r.tags.map((t) => `<span class="tag${t.match === true ? ' want'
-      : t.match === false ? ' against' : ''}" title="${tip(t.why)}">${t.tag}</span>`).join(' '),
-    r.tags.map((t) => t.why).join('; '));
   };
   const availCell = (r, x) => {
     if (!x) return cmpCell('—', '');
@@ -1704,6 +1685,19 @@ function compareHTML(a, b) {
   const waitCell = (r) => {
     const w = waitAdvice(r, drafted);
     return cmpCell(w || '—', w ? '' : 'Set your draft slot on this page to see whether he comes back to you.');
+  };
+  // Everything that moved him off plain value, with its size. Same list the player card
+  // shows, so the two screens cannot disagree about why a man sits where he sits - and the
+  // total says at a glance whether preferences are deciding this comparison or barely
+  // touching it.
+  const boostCell = (r) => {
+    const list = (r.boosts || []).slice().sort((x, y) => Math.abs(y.amount) - Math.abs(x.amount));
+    if (!list.length) return cmpCell('Nothing', 'Plain value — no preference of yours moved him.');
+    const net = list.reduce((s, x) => s + x.amount, 0);
+    return `<span class="cmpCell"><b>${net >= 0 ? '+' : '−'}${Math.abs(net).toFixed(2)}</b>
+<span class="dBoosts">${list.map((x) => `<span class="boost ${x.amount >= 0 ? 'up' : 'dn'}"
+title="${tip(TIPS[x.key] || [x.label, 'Moves the score by this many points.'])}">${esc(x.label)}
+<b>${x.amount >= 0 ? '+' : '−'}${Math.abs(x.amount).toFixed(2)}</b></span>`).join('')}</span></span>`;
   };
 
   // Does the availability assumption change the answer? This is the only thing on the
@@ -1745,21 +1739,9 @@ staying on the field. It does not change which one the board prefers.</p>`;
 hole in the same week. That matters more than it looks if you have already got starters on
 that bye.</p>` : '';
 
-  const prefs = cmpPrefs(a, b);
-  const prefLine = !(a.rated && b.rated)
-    ? `<p class="cmpNote">Your preferences cannot separate these two — there are no
-${esc(a.rated ? b.p.pos : a.p.pos)} stats to describe, so every trait a ${
-  esc(a.rated ? b.p.pos : a.p.pos)} appears to have is a placeholder rather than a fact
-about him.</p>`
-    : !prefs.length
-      ? '<p class="cmpNote">On your four preferences these two look much the same.</p>'
-      : `<ul class="cmpPrefs">${prefs.map((x) => `<li><b>${esc(x.label)}</b> — of the two, your
-board calls ${esc(x.ahead)} <b>${esc(x.hiTag.toLowerCase())}</b> and ${esc(x.behind)}
-<b>${esc(x.loTag.toLowerCase())}</b> (${x.gap} points of percentile apart).${x.want
-    ? ` You said you lean toward <b>${esc(x.want.toLowerCase())}</b> — ${x.lean} — so this one
-favours <b>${esc(x.suits)}</b>.`
-    : ' You have no preference set here, so it is information rather than a nudge.'}</li>`).join('')}</ul>`;
-
+  // The four-paragraph preference essay is gone. The "What you said you like" row already
+  // shows the same labels with their tooltips, and the bars above show the grades those
+  // labels come from - restating all of it in prose was the third telling of one fact.
   const head = (r) => `<span class="cmpWho">${posTag(r.p.pos)}<b>${esc(r.p.name)}</b>
 <i>${esc(r.p.team || '')}${r.p.rookie ? ' · rookie' : ''}${r.p.inj ? ` · ${esc(r.p.inj)}` : ''}</i></span>`;
 
@@ -1773,10 +1755,32 @@ favours <b>${esc(x.suits)}</b>.`
 ${cmpRow('Projected points', cmpCell(Math.round(a.pts), ''), cmpCell(Math.round(b.pts), ''),
     `A full season in ${esc(lg.name)} scoring`)}
 
-${cmpRow('Where your board has him',
-    cmpCell(`#${a.rank}`, `${a.p.pos}${a.posRank} on your board`),
-    cmpCell(`#${b.rank}`, `${b.p.pos}${b.posRank} on your board`),
-    'Draft score order, not a grade')}
+${cmpRow('Rank at his position',
+    cmpCell(`${a.p.pos}${a.posRank}`, `#${a.rank} overall`),
+    cmpCell(`${b.p.pos}${b.posRank}`, `#${b.rank} overall`),
+    'By draft score, not by this grade')}
+
+${cmpRow('Graded against his position',
+    a.rated ? `<div class="bars cmpBars">${barsFor(a)}</div>`
+      : cmpCell('No grade', `No ${a.p.pos} stats worth rating`),
+    b.rated ? `<div class="bars cmpBars">${barsFor(b)}</div>`
+      : cmpCell('No grade', `No ${b.p.pos} stats worth rating`),
+    '0–100 against others at his own position')}
+
+${(() => {
+    const la = lastYear(a);
+    const lb = lastYear(b);
+    const line = (get, fmt, lab, sub) => cmpRow(lab,
+      cmpCell(get(la) == null ? '—' : fmt(get(la)), sub ? sub(a, la) : ''),
+      cmpCell(get(lb) == null ? '—' : fmt(get(lb)), sub ? sub(b, lb) : ''));
+    return [
+      line((x) => x.games, (n) => `${n} of ${FULL_GAMES}`, 'Games played, 2025'),
+      line((x) => x.work, (n) => n, 'Work per game', (r2, x) => x.workLabel),
+      line((x) => x.yards, (n) => Math.round(n), 'Yards, 2025',
+        (r2) => (r2.p.pos === 'QB' ? 'passing' : 'rushing + receiving')),
+      line((x) => x.snaps, (n) => `${Math.round(n)}%`, 'Share of snaps, 2025'),
+    ].join('\n');
+  })()}
 
 ${cmpRow('Worth taking at',
     cmpCell(windowWords(a), `The room takes him around pick ${a.adpRank}`),
@@ -1785,22 +1789,20 @@ ${cmpRow('Worth taking at',
 
 ${cmpRow(at ? `At pick ${at}, right now` : 'Before the draft starts', kindCell(a), kindCell(b))}
 
+${cmpRow('Still there next time you pick?', waitCell(a), waitCell(b),
+    'From how far the room usually lets him fall')}
+
 ${cmpRow('Bye week', cmpCell(a.p.bye || '—', ''), cmpCell(b.p.bye || '—', ''),
     'The week he scores you nothing')}
 
 ${cmpRow('If he plays what he has played', availCell(a, av), availCell(b, bv),
     'The projection assumes a full season. This does not.')}
 
-${cmpRow('What you said you like', tagCell(a), tagCell(b),
-    'Your preferences, not a forecast')}
-
-${cmpRow('Still there next time you pick?', waitCell(a), waitCell(b),
-    'From how far the room usually lets him fall')}
+${cmpRow('What moved his score', boostCell(a), boostCell(b),
+    'Preferences, stars, need and the room — already in the score')}
 </div>
 
-${durLine}
-${byeLine}
-${prefLine}
+${durLine}${byeLine}
 
 <p class="cmpFoot"><b>What this panel is not.</b> It cannot tell you which of these two will
 score more this season. Nothing can — that is the one thing five years of testing on this
