@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608171527';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608210959';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608171527';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608171527';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608171527';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608171527';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608210959';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608210959';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608210959';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608210959';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608171527';
+const BUILD = '202608210959';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -1300,14 +1300,59 @@ ${mock() ? '' : `<button data-d="${r.p.id}" aria-pressed="${d}">Gone</button>`}
 // Everything the board would show, before the display cut-off: the position filter, the
 // search box, hide-drafted and my-list-only, in that order. Pulled out of renderBoard so
 // that saving the board to a file cannot drift away from what is on the screen.
+// ---------------------------------------------------------------- sorting
+// Sort by whatever a column actually shows, rather than by a second definition of it.
+//
+// Every column already knows how to render itself, so the sort value is read back out of
+// that: strip the tags, take the first number if there is one, otherwise the text. It means
+// a new column is sortable the moment it exists, with nobody having to remember to write a
+// comparator - and it can never sort by something different from what your eye is reading,
+// which is the usual way a sorted table starts lying.
+//
+// Two columns need help, because what they print is not what they mean. Type prints a word
+// with an order nobody would guess alphabetically, and Worth prints a range.
+const TYPE_ORDER = { steal: 0, safe: 1, swing: 2, reach: 3 };
+let sortCol = null;               // column label, or null for the board's own order
+let sortDir = -1;                 // -1 biggest first, 1 smallest first
+
+function sortValue(r, col) {
+  const [label, render] = col;
+  if (label === 'Type') return r.kind ? TYPE_ORDER[r.kind] : 9;
+  if (label === 'Worth') return r.worthFrom ?? null;
+  const txt = String(render(r)).replace(/<[^>]*>/g, '').replace(/&[a-z]+;/g, ' ').trim();
+  if (!txt || txt === '—') return null;
+  const n = txt.replace(/[,%]/g, '').match(/-?\d+(\.\d+)?/);
+  return n ? +n[0] : txt.toLowerCase();
+}
+
+function sortRows(rows) {
+  if (!sortCol) return rows;
+  const col = activeCols().find((c) => c[0] === sortCol);
+  if (!col) return rows;
+  // A blank is not a zero. "No red-zone touches recorded" and "zero red-zone touches" look
+  // the same in a cell and are different facts, so blanks go to the bottom whichever way
+  // the arrow points rather than pretending to be the smallest number.
+  const keyed = rows.map((r) => ({ r, v: sortValue(r, col) }));
+  keyed.sort((x, y) => {
+    if (x.v == null && y.v == null) return x.r.rank - y.r.rank;
+    if (x.v == null) return 1;
+    if (y.v == null) return -1;
+    if (typeof x.v === 'string' || typeof y.v === 'string') {
+      return String(x.v).localeCompare(String(y.v)) * -sortDir;
+    }
+    return (x.v - y.v) * sortDir || x.r.rank - y.r.rank;
+  });
+  return keyed.map((k) => k.r);
+}
+
 function filteredRows() {
   const q = query.trim().toLowerCase();
   const drafted = new Set(picks().drafted);
   const mine = new Set(picks().mine);
-  return board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
+  return sortRows(board.rows.filter((r) => (filter === 'ALL' || r.p.pos === filter)
     && (!st.hideGone || !drafted.has(r.p.id) || mine.has(r.p.id))
     && (!st.cols?.starsonly || r.star || r.fade)
-    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q));
+    && (!q || r.p.name.toLowerCase().includes(q) || r.p.team?.toLowerCase() === q)));
 }
 
 function renderBoard() {
@@ -1318,13 +1363,23 @@ function renderBoard() {
 
   $('#board').style.setProperty('--cols',
     `34px minmax(190px, 1fr) ${cols.map((c) => `${c[2]}px`).join(' ')} 102px`);
-  if (colKey !== lastCols) {
-    $('#colHeads').innerHTML = cols
-      .map((c) => `<span data-tip="${c[0]}" tabindex="0">${c[0]}</span>`).join('');
-    rowEls = new Map();            // the cell layout changed, so start the rows again
-    $('#rows').innerHTML = '';
-    lastCols = colKey;
+  // The header is rebuilt whenever the columns change OR the sort does, because the arrow
+  // and the pressed state live on it.
+  const headKey = `${colKey}#${sortCol || ''}${sortDir}`;
+  if (headKey !== lastCols) {
+    $('#colHeads').innerHTML = cols.map((c) => {
+      const on = sortCol === c[0];
+      return `<button class="colSort${on ? ' on' : ''}" data-sort="${c[0]}"
+data-tip="${c[0]}" aria-pressed="${on}">${c[0]}${on ? `<i>${sortDir === -1 ? '▾' : '▴'}</i>` : ''}</button>`;
+    }).join('');
+    if (colKey !== (lastCols || '').split('#')[0]) {
+      rowEls = new Map();          // the cell layout changed, so start the rows again
+      $('#rows').innerHTML = '';
+    }
+    lastCols = headKey;
   }
+  const rb = $('#resetSort');
+  if (rb) rb.hidden = !sortCol;
 
   const all = filteredRows();
 
@@ -3683,7 +3738,19 @@ function wire() {
     } else if (b.id === 'mockQuit') { endMock(false); }
     else if (b.id === 'mockAuto') { autoDraft(false); }
     else if (b.id === 'mockFinish') { autoDraft(true); show('mock'); }
-    else if (b.id === 'more') { limit += 100; renderBoard(); }
+    else if (b.dataset.sort) {
+      // Same column twice flips the direction; a different one starts biggest-first, which
+      // is what somebody means every time they click a column of numbers.
+      if (sortCol === b.dataset.sort) sortDir = -sortDir;
+      else { sortCol = b.dataset.sort; sortDir = -1; }
+      limit = 100;
+      renderBoard();
+    } else if (b.id === 'resetSort') {
+      sortCol = null;
+      sortDir = -1;
+      limit = 100;
+      renderBoard();
+    } else if (b.id === 'more') { limit += 100; renderBoard(); }
     else if (b.dataset.v) show(b.dataset.v);
     else if (b.dataset.f) {
       filter = b.dataset.f;

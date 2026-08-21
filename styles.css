@@ -422,6 +422,17 @@ span.nm:hover { text-decoration: none; }
 [data-tip] { cursor: help; }
 .knobLabel > [data-tip], .cName[data-tip] { text-decoration: underline dotted var(--ink3); text-underline-offset: 3px; }
 .row.head [data-tip] { text-decoration: underline dotted var(--ink3); text-underline-offset: 2px; }
+/* Column headers are buttons now, and must not look like buttons - they sit in a table
+   header and anything with a border or a background there reads as a cell of data. */
+.colSort {
+  all: unset; cursor: pointer; display: inline-flex; align-items: baseline; gap: 3px;
+  font: inherit; color: inherit; white-space: nowrap;
+  text-decoration: underline dotted var(--ink3); text-underline-offset: 2px;
+}
+.colSort:hover { color: var(--ink); }
+.colSort:focus-visible { outline: 2px solid var(--field); outline-offset: 2px; }
+.colSort.on { color: var(--field); text-decoration-color: var(--field); }
+.colSort i { font-style: normal; font-size: 10px; }
 .tip {
   position: fixed; z-index: 100; pointer-events: none;
   background: var(--fieldDeep); color: var(--chalk);

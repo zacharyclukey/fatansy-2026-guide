@@ -661,7 +661,7 @@ const fire = (el, type) => {
   await settle();
   ok('rows render', d.querySelectorAll('.row.player').length === 100);
   ok('the five fixed columns are always shown',
-    [...d.querySelectorAll('#colHeads span')].slice(0, 5).map((x) => x.textContent).join(',')
+    [...d.querySelectorAll('#colHeads .colSort')].slice(0, 5).map((x) => x.textContent.replace(/[▾▴]/g, '').trim()).join(',')
       === 'Type,Worth,ADP,VOR,Score');
 
   // Score is 0-100 now, because "minus 44" is a true statement that stops a person reading.
@@ -675,6 +675,51 @@ const fire = (el, type) => {
     scoreCells.every((s) => /^\d+\.\d{2}$/.test(s) && +s >= 0 && +s <= 100),
     scoreCells.slice(0, 5).join(', '));
   ok('the best man on the board scores 100', scoreCells[0] === '100.00', scoreCells[0]);
+  // ---- sorting by any column, and getting back --------------------------
+  {
+    const names = () => [...d.querySelectorAll('.row.player .nm')].map((x) => x.textContent.trim());
+    const nums = (cls) => [...d.querySelectorAll(`.row.player .num.${cls}`)]
+      .map((x) => parseFloat(x.textContent.replace(/[^\d.-]/g, '')))
+      .filter((n) => !Number.isNaN(n));
+    const draftOrder = names();
+
+    ok('no reset button until you have sorted something',
+      d.querySelector('#resetSort')?.hidden === true);
+
+    d.querySelector('[data-sort="ADP"]').click();
+    await settle();
+    ok('sorting by a column reorders the board', names()[0] !== draftOrder[0],
+      `${names()[0]} vs ${draftOrder[0]}`);
+    ok('the header says which column is sorted',
+      d.querySelector('[data-sort="ADP"]').getAttribute('aria-pressed') === 'true');
+    ok('and the reset button appears', d.querySelector('#resetSort').hidden === false);
+
+    // biggest first on the first click, because that is what anybody means
+    d.querySelector('[data-sort="VOR"]').click();
+    await settle();
+    const desc = nums('vr');
+    ok('a numeric column sorts biggest first',
+      desc.every((v, i) => i === 0 || desc[i - 1] >= v), desc.slice(0, 6).join(', '));
+    d.querySelector('[data-sort="VOR"]').click();
+    await settle();
+    const asc = nums('vr');
+    ok('and clicking it again flips it',
+      asc.every((v, i) => i === 0 || asc[i - 1] <= v), asc.slice(0, 6).join(', '));
+
+    // Type is a word with an order nobody would guess alphabetically
+    d.querySelector('[data-sort="Type"]').click();
+    await settle();
+    ok('sorting by Type does not throw and keeps the board full',
+      d.querySelectorAll('.row.player').length > 50);
+
+    d.querySelector('#resetSort').click();
+    await settle();
+    ok('reset puts the draft order back',
+      JSON.stringify(names()) === JSON.stringify(draftOrder));
+    ok('and the reset button goes away again', d.querySelector('#resetSort').hidden === true);
+    ok('sorting raised no errors', errs.length === 0, errs.join('; '));
+  }
+
   // ---- filtering to a position asks a question, so answer it ------------
   {
     d.querySelector('#slot').value = '4';
@@ -777,8 +822,8 @@ const fire = (el, type) => {
   const tpl = d.querySelector('#board').style.getPropertyValue('--cols');
   ok('columns grow rightwards', tpl.includes('minmax(190px, 1fr)'));
   // 5 fixed + bye 2 + per-game 3 + totals 3 + projection 3 + back 1 + red zone 2
-  ok('all groups on', d.querySelectorAll('#colHeads span').length === 19,
-    `${d.querySelectorAll('#colHeads span').length} columns`);
+  ok('all groups on', d.querySelectorAll('#colHeads .colSort').length === 19,
+    `${d.querySelectorAll('#colHeads .colSort').length} columns`);
 
   // the expensive one: dragging a slider must not rebuild the list
   let created = 0;
@@ -918,13 +963,13 @@ const fire = (el, type) => {
   ok('a position filter offers its own stats', !!pd);
   pd.checked = true; fire(pd, 'change');
   await settle();
-  const heads = [...d.querySelectorAll('#colHeads span')].map((x) => x.textContent);
+  const heads = [...d.querySelectorAll('#colHeads .colSort')].map((x) => x.textContent.replace(/[▾▴]/g, '').trim());
   ok('receiver columns are receiver stats', heads.includes('Catch%') && heads.includes('RZ tgt'),
     heads.join(' '));
   ok('and not carries', !heads.includes('Carries'));
   d.querySelector('[data-f="RB"]').click();
   await settle();
-  const rbHeads = [...d.querySelectorAll('#colHeads span')].map((x) => x.textContent);
+  const rbHeads = [...d.querySelectorAll('#colHeads .colSort')].map((x) => x.textContent.replace(/[▾▴]/g, '').trim());
   ok('backs get carries instead', rbHeads.includes('Carries') && !rbHeads.includes('Catch%'),
     rbHeads.join(' '));
   d.querySelector('[data-f="ALL"]').click();

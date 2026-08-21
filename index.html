@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>2026 draft guide</title>
-<link rel="stylesheet" href="styles.css?v=202608171527" />
+<link rel="stylesheet" href="styles.css?v=202608210959" />
 </head>
 <body>
 
@@ -164,6 +164,9 @@
   <div class="colBar">
     <span class="colBarLabel">Show</span>
     <span id="colToggles" class="chips"></span>
+    <!-- Only appears once you have sorted by something. A button that undoes a thing you
+         have not done is clutter on every screen where it is not needed. -->
+    <button id="resetSort" class="small" hidden>Back to draft order</button>
   </div>
 
   <main>
@@ -373,6 +376,6 @@
   </span>
 </footer>
 
-<script type="module" src="app.js?v=202608171527"></script>
+<script type="module" src="app.js?v=202608210959"></script>
 </body>
 </html>
