@@ -80,10 +80,15 @@ button.small { font-size: 13px; height: 28px; padding: 0 10px; }
    that stays made (a position filter), aria-expanded for a panel that is open. They looked
    different for a while - the filters went green and Compare, Save and Settings stayed
    white - which made three of the four buttons in the top bar give no sign they were on. */
-button[aria-pressed="true"], button[aria-expanded="true"] {
+/* :not(.colSort) is load-bearing. Column headers are buttons too, and without it this rule
+   painted the whole header cell dark green on the sorted column - dark green text on dark
+   green, so the label and the sort arrow both vanished. A header is not a toolbar button
+   and must not be styled as one. */
+button[aria-pressed="true"]:not(.colSort), button[aria-expanded="true"]:not(.colSort) {
   background: var(--field); color: var(--chalk); border-color: var(--field);
 }
-button[aria-pressed="true"]:hover, button[aria-expanded="true"]:hover {
+button[aria-pressed="true"]:not(.colSort):hover,
+button[aria-expanded="true"]:not(.colSort):hover {
   background: var(--fieldDeep); border-color: var(--fieldDeep);
 }
 
@@ -425,14 +430,22 @@ span.nm:hover { text-decoration: none; }
 /* Column headers are buttons now, and must not look like buttons - they sit in a table
    header and anything with a border or a background there reads as a cell of data. */
 .colSort {
-  all: unset; cursor: pointer; display: inline-flex; align-items: baseline; gap: 3px;
+  all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;
   font: inherit; color: inherit; white-space: nowrap;
+  background: none; border: 0; padding: 0; height: auto;
   text-decoration: underline dotted var(--ink3); text-underline-offset: 2px;
 }
-.colSort:hover { color: var(--ink); }
+.colSort:hover { color: var(--ink); text-decoration-color: var(--ink); }
 .colSort:focus-visible { outline: 2px solid var(--field); outline-offset: 2px; }
-.colSort.on { color: var(--field); text-decoration-color: var(--field); }
-.colSort i { font-style: normal; font-size: 10px; }
+/* The sorted column: darker text and a heavier underline, on the header's own pale
+   background. Never a filled block - the label has to stay readable, which is the whole
+   point of clicking it. */
+.colSort.on {
+  color: var(--field); font-weight: 700;
+  text-decoration: underline solid var(--field); text-decoration-thickness: 2px;
+}
+.colSort i { font-style: normal; font-size: 11px; font-weight: 700; line-height: 1; }
+.colSort.on i { color: var(--field); }
 .tip {
   position: fixed; z-index: 100; pointer-events: none;
   background: var(--fieldDeep); color: var(--chalk);

@@ -1984,9 +1984,16 @@ export function explainRank(r, ctx = {}) {
   if (r.openEnded) {
     equals = ' Dozens of players below him are close enough on your board that you would '
       + 'be roughly as happy with any of them, which is why his range has no real end.';
-  } else if (r.equals >= 4) {
+  } else if (r.equals >= 4 && r.equals < WINDOW_MAX) {
     equals = ` About ${r.equals} other players are close enough on your board that you `
       + 'would be roughly as happy with any of them.';
+  } else if (r.equals >= WINDOW_MAX) {
+    // Exactly at the cap and not flagged open-ended: hi - lo > cap is the flag, so a window
+    // that lands ON the cap slips past it and the number printed IS the cap. Today's data
+    // produced one such row. Guard the number rather than the flag, because the thing that
+    // must never happen is printing a readability limit as if it were a count of players.
+    equals = ' Dozens of players below him are close enough on your board that you would '
+      + 'be roughly as happy with any of them.';
   }
 
   return lead + thin + equals;

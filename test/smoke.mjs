@@ -188,6 +188,17 @@ const fire = (el, type) => {
   ok('nothing that can be hidden has its display forced open', welded.length === 0,
     `${welded.join(', ')} — write it as :not([hidden])`);
 
+  // The toolbar's "this is on" style fills a button with dark green. Column headers are
+  // buttons too, so any rule that paints aria-pressed/aria-expanded has to exclude them
+  // or the sorted column's label turns dark green on dark green and vanishes.
+  // Only UNSCOPED rules matter. `.views button[aria-pressed]` can never reach a column
+  // header, so flagging it would be noise; a bare `button[aria-pressed]` reaches everything.
+  const painted = blocks.filter(([, sel, body]) => /background:/.test(body)
+    && sel.split(',').some((one) => /^\s*button\[aria-(pressed|expanded)="true"\]/.test(one)
+      && !/:not\(\.colSort\)/.test(one)));
+  ok('the pressed-button style cannot swallow a column header', painted.length === 0,
+    painted.map(([, s2]) => s2.trim()).join(' / '));
+
   // Every top-bar button says whether it is on through aria-expanded, and the stylesheet
   // has to colour that state. Three of the four looked identical on and off for a while,
   // which is how the Compare panel being welded open went unnoticed for so long.
@@ -562,8 +573,13 @@ const fire = (el, type) => {
     ok('there are open-ended rows to check', open.length > 0, `${open.length}`);
     ok('an open-ended row still gets told when he comes into range',
       open.filter(([r]) => !r.kind).every(([, e]) => /comes into range/.test(e.change)));
+    // The phrase, not the number. `about 45 short of an ordinary running back` is a points
+    // gap and perfectly true; the thing that must never appear is the cap dressed up as a
+    // headcount, which only ever reads "About 45 other players".
     ok('and it never prints the width cap as if it were a count of players',
-      open.every(([, e]) => !/About 45 |about 45 /.test(e.rank)));
+      open.every(([, e]) => !/about 45 other players/i.test(e.rank)),
+      open.filter(([, e]) => /about 45 other players/i.test(e.rank)).slice(0, 2)
+        .map(([r]) => `${r.p.name} equals=${r.equals}`).join(', '));
 
     // ---- the thin-position line must not argue with its own number -------
     // It used to say "the thinner his position, the more the same projection is worth" on
@@ -661,7 +677,7 @@ const fire = (el, type) => {
   await settle();
   ok('rows render', d.querySelectorAll('.row.player').length === 100);
   ok('the five fixed columns are always shown',
-    [...d.querySelectorAll('#colHeads .colSort')].slice(0, 5).map((x) => x.textContent.replace(/[▾▴]/g, '').trim()).join(',')
+    [...d.querySelectorAll('#colHeads .colSort')].slice(0, 5).map((x) => x.textContent.replace(/[↓↑]/g, '').trim()).join(',')
       === 'Type,Worth,ADP,VOR,Score');
 
   // Score is 0-100 now, because "minus 44" is a true statement that stops a person reading.
@@ -691,7 +707,11 @@ const fire = (el, type) => {
     ok('sorting by a column reorders the board', names()[0] !== draftOrder[0],
       `${names()[0]} vs ${draftOrder[0]}`);
     ok('the header says which column is sorted',
-      d.querySelector('[data-sort="ADP"]').getAttribute('aria-pressed') === 'true');
+      d.querySelector('[data-sort="ADP"]').getAttribute('aria-sort') === 'descending');
+    // A column header must never be styled as a pressed toolbar button: that rule fills the
+    // cell dark green, and the label and arrow disappear into it.
+    ok('a sorted header is not wearing the toolbar button state',
+      !d.querySelector('[data-sort="ADP"]').hasAttribute('aria-pressed'));
     ok('and the reset button appears', d.querySelector('#resetSort').hidden === false);
 
     // biggest first on the first click, because that is what anybody means
@@ -963,13 +983,13 @@ const fire = (el, type) => {
   ok('a position filter offers its own stats', !!pd);
   pd.checked = true; fire(pd, 'change');
   await settle();
-  const heads = [...d.querySelectorAll('#colHeads .colSort')].map((x) => x.textContent.replace(/[▾▴]/g, '').trim());
+  const heads = [...d.querySelectorAll('#colHeads .colSort')].map((x) => x.textContent.replace(/[↓↑]/g, '').trim());
   ok('receiver columns are receiver stats', heads.includes('Catch%') && heads.includes('RZ tgt'),
     heads.join(' '));
   ok('and not carries', !heads.includes('Carries'));
   d.querySelector('[data-f="RB"]').click();
   await settle();
-  const rbHeads = [...d.querySelectorAll('#colHeads .colSort')].map((x) => x.textContent.replace(/[▾▴]/g, '').trim());
+  const rbHeads = [...d.querySelectorAll('#colHeads .colSort')].map((x) => x.textContent.replace(/[↓↑]/g, '').trim());
   ok('backs get carries instead', rbHeads.includes('Carries') && !rbHeads.includes('Catch%'),
     rbHeads.join(' '));
   d.querySelector('[data-f="ALL"]').click();

@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608210959';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608211020';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608210959';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608210959';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608210959';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608210959';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608211020';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608211020';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608211020';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608211020';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608210959';
+const BUILD = '202608211020';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -1367,10 +1367,14 @@ function renderBoard() {
   // and the pressed state live on it.
   const headKey = `${colKey}#${sortCol || ''}${sortDir}`;
   if (headKey !== lastCols) {
+    // aria-sort, NOT aria-pressed. A sortable column header is not a toggle button, and
+    // borrowing the toggle's attribute also borrowed the toggle's dark-green styling, which
+    // painted the label out of existence on whichever column you had just sorted.
     $('#colHeads').innerHTML = cols.map((c) => {
       const on = sortCol === c[0];
-      return `<button class="colSort${on ? ' on' : ''}" data-sort="${c[0]}"
-data-tip="${c[0]}" aria-pressed="${on}">${c[0]}${on ? `<i>${sortDir === -1 ? '▾' : '▴'}</i>` : ''}</button>`;
+      return `<button class="colSort${on ? ' on' : ''}" data-sort="${c[0]}" data-tip="${c[0]}"
+${on ? `aria-sort="${sortDir === -1 ? 'descending' : 'ascending'}"` : ''}
+>${c[0]}<i aria-hidden="true">${on ? (sortDir === -1 ? '↓' : '↑') : ''}</i></button>`;
     }).join('');
     if (colKey !== (lastCols || '').split('#')[0]) {
       rowEls = new Map();          // the cell layout changed, so start the rows again
