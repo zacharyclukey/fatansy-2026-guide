@@ -3535,9 +3535,18 @@ const fire = (el, type) => {
   // asks the question that still has an answer afterwards: is a bench body worth more than
   // the man you could have added off waivers for nothing?
   for (const measure of ['Points left on the board', 'Taking men before their price',
+    'How far ahead of the room you drafted',
     'What your bench is worth', 'Bye weeks among your starters']) {
     ok(`it grades ${measure.toLowerCase()}`, text.includes(measure));
   }
+  // The outside check. Every other measure is derived from our own board, so a board that
+  // is systematically early scores itself perfectly - which is exactly what 25 practice
+  // drafts did, taking men 12 to 36 picks before the market while the grade called all 400
+  // picks "nothing better was there". This one measure has to come from ADP alone.
+  ok('the market check reports how far ahead of ADP the team was drafted',
+    out.querySelector('[data-avg]') != null);
+  ok('and it is stated as exposure rather than as an error',
+    /not a mistake/.test(text) && /only measure on this page not worked out from your own board/.test(text));
   ok('the grade no longer congratulates you for filling slots the draft filled',
     !/Filling your starting slots/.test(text));
   ok('the bench measure is priced against a free add, in words',

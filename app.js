@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608240829';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608241005';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608240829';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608240829';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608240829';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608240829';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608241005';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608241005';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608241005';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608241005';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608240829';
+const BUILD = '202608241005';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -982,7 +982,8 @@ async function runBatch(slot, n) {
 }
 
 const GRADE_LABEL = { left: 'points left on the board', reach: 'reaching',
-  bench: 'bench worth', byes: 'bye weeks', prefs: 'your preferences' };
+  market: 'drafting ahead of the room', bench: 'bench worth', byes: 'bye weeks',
+  prefs: 'your preferences' };
 
 // How the board grades itself from this seat, on average. Worth more than any single draft's
 // mark: one draft's grade is partly the room's behaviour on the night, and averaging over
@@ -2432,7 +2433,44 @@ function gradeReach(mine) {
   };
 }
 
-// 3. Is your bench worth anything?
+// 3. How far ahead of the room did you draft? THE ONLY OUTSIDE CHECK ON THIS PAGE.
+//
+// Every other measure here is computed from your own board: points left behind, reaching,
+// bench worth, all of them ask "did you follow your board" and none can ask "was your board
+// any good". A board that is systematically early therefore scores itself perfectly, and
+// that is not a hypothetical - 25 practice drafts from one seat took men an average of 12 to
+// 36 picks before the room would from round seven onward, and the grade called all 400 of
+// those picks "nothing better was there". True, circular, and useless.
+//
+// ADP is the one number in the file that does not come from us. It is not a better forecast
+// - the whole app exists because we think our board beats it - but it is INDEPENDENT, and
+// that is what makes it worth a card.
+//
+// Being early is not an error. It is how you end up with the players you want, and the
+// wording says so. What it is, is exposure: every pick spent ahead of the market is a pick
+// that only pays off if our projection is right and theirs is wrong. Worth seeing the size
+// of, especially when one provider supplies every projection we have.
+const MARKET_OK = 10;       // inside this, you are simply taking your man. No comment.
+const MARKET_FAR = 45;      // out here you are betting the pick on your own board being right
+function gradeMarket(mine) {
+  const each = [];
+  for (const x of mine) {
+    const p = byId(x.id);
+    if (!p?.adp) continue;                       // no market price, nothing to compare with
+    each.push({ n: x.n, id: x.id, early: p.adp - x.n });
+  }
+  if (each.length < 3) return null;
+  const early = each.map((e) => Math.max(0, e.early - MARKET_OK));
+  const avg = mean(early);
+  const ahead = each.filter((e) => e.early >= MARKET_OK).sort((a, b) => b.early - a.early);
+  return {
+    score: clamp100(100 * (1 - avg / MARKET_FAR)),
+    avg: Math.round(mean(each.map((e) => e.early))),
+    ahead: ahead.length, counted: each.length, worst: ahead[0] || null,
+  };
+}
+
+// 4. Is your bench worth anything?
 //
 // This replaced "can you field a lineup", which scored 100 on every completed draft and then
 // lectured you about it. Of course the slots are full - the draft filled them. It was only
@@ -2509,6 +2547,7 @@ function draftGrade(m, lg) {
   const parts = {
     left: gradeLeft(mine),
     reach: gradeReach(mine),
+    market: gradeMarket(mine),
     bench: gradeBench(cards, lg),
     byes: gradeByes(cards),
     prefs: gradePrefs(mine),
@@ -2529,7 +2568,7 @@ const gradeCard = (label, score, head, why, data = '') => `<div class="gradeCard
 function gradeHTML(m, lg) {
   const g = draftGrade(m, lg);
   if (g.overall == null) return '';
-  const { left, reach, bench, byes, prefs } = g.parts;
+  const { left, reach, market, bench, byes, prefs } = g.parts;
   const nm = (id) => esc(byId(id)?.name || 'that pick');
   const cards = [];
 
@@ -2561,6 +2600,23 @@ function gradeHTML(m, lg) {
           + `but each one is a pick spent earlier than it needed to be. Under ${SLACK} picks `
           + 'early is a rounding error and is not counted.') + aside,
     ` data-reaches="${reach.reaches}" data-unpriced="${reach.unpriced}"`));
+  }
+  if (market) {
+    cards.push(gradeCard('How far ahead of the room you drafted', market.score,
+      market.ahead === 0 ? 'In line with the market'
+        : `${market.avg} picks early on average`,
+      `${market.ahead === 0
+        ? `None of your ${market.counted} picks was more than ${MARKET_OK} picks ahead of where `
+          + 'the wider Sleeper room takes him.'
+        : `${market.ahead} of your ${market.counted} picks came at least ${MARKET_OK} picks `
+          + `before the room would${market.worst ? `, the furthest being ${nm(market.worst.id)} `
+            + `at pick ${market.worst.n} against a market price of `
+            + `${Math.round(market.worst.n + market.worst.early)}` : ''}.`} `
+      + 'This is the only measure on this page not worked out from your own board, so it is '
+      + 'the only one that can disagree with it. Being early is not a mistake — it is how you '
+      + 'get the players you want. It is a measure of how much you are betting on your board '
+      + 'being right and the market being wrong.',
+      ` data-ahead="${market.ahead}" data-avg="${market.avg}"`));
   }
   if (bench) {
     cards.push(gradeCard('What your bench is worth', bench.score,
