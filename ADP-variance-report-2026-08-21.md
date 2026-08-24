@@ -15,28 +15,45 @@ two places, for two different reasons.
 
 ---
 
-## 1. The one genuine defect: Jayden Higgins
+## 1. Jayden Higgins — **corrected: not a data error, a torn ACL**
+
+My first read of this was wrong and the correction matters, so here is the whole of it.
 
 | | |
 |---|---|
-| Board | **#353** |
-| Room | ADP **148.7** |
-| Gap | **−206 places** |
+| Board (before) | **#353** |
+| Room | ADP **172.2** |
 | Projection | **0 points** |
 
-Sleeper published no statistical projection for him at all — his projection object contains
-one field, `gp: 18`, and nothing else. No receptions, no yards, no touchdowns. The board
-scored that as zero points, gave him a VOR of −169 and buried him 200 places.
+Rotowire's projection object for him contains one field, `gp: 18`, and no statistics. I went
+looking for the missing data. It is not missing:
 
-He is not a fringe player: he played **17 games in 2025 for 525 yards and 6 touchdowns**.
+```
+injury_status : IR
+injury_body_part : Knee - ACL
+injury_notes : Surgery
+weekly projections, weeks 1–18 : all null
+```
 
-**Verdict: data error.** He is the only skill player inside the drafted range this affects —
-the next projection-less player the room drafts is at ADP 244, well past your last pick. So
-it is one name, but it is a wrong one, and if you had been staring at your board wondering
-why the room kept taking a receiver you had at #353, that is why.
+They are not failing to project him. They are **declining to**, deliberately, for all
+eighteen weeks. Of the 23 players carrying IR/PUP/DNR, 8 have a projection and 15 do not —
+so it is a judgement made player by player, and the absence is itself the forecast.
 
-**Fix:** a player with no projection should be marked *unrated* and held out of the ordering,
-not scored as zero. Zero is a claim; absent is the truth. Say the word and I will do it.
+There is therefore no data to go and fetch. Inventing a projection from his 2025 line would
+be manufacturing the exact opinion the provider withheld.
+
+**But the board's answer was still bad**, because zero is a confident-looking number and it
+buried him 180 places below where the room takes him. The room is not paying for his points;
+it is paying for a **spare IR slot** — your league has one — which is a roster move no points
+forecast can express.
+
+**What changed:** "no forecast at all" is now its own case in the ADP anchor, weighted 1.0.
+When we have no opinion to defend, the room's ADP is the only information in the building and
+the board defers to it completely. He now sits at **#147** on your settings (#212 at the
+default anchor), against an ADP of 172 — and his card carries a chip reading
+**"No projection — ranked on ADP"** so the screen says why rather than showing a silent zero.
+
+He is the only projection-less skill player the room drafts inside 200. The next is at 244.
 
 ---
 
@@ -148,11 +165,23 @@ small and all explainable:
 
 ## What I would actually do
 
-1. **Fix Higgins properly** — mark projection-less players unrated instead of scoring them
-   zero. One name today, but it is a silent wrong answer and it will recur whenever Sleeper's
-   feed is incomplete.
+1. ~~Fix Higgins~~ **Done.** No forecast is now its own anchor case, and the row says so.
 2. **Leave Bowers and Collins alone.** The maths is right and the board is already telling you
    to wait on both.
 3. **Decide about handcuffs deliberately** rather than letting the cap decide by accident.
 4. **Know that you are single-sourced.** Every number here traces to one projection provider.
    That is the largest uncertainty on the board and it is not visible anywhere on it.
+
+## A note on the method
+
+Two of my own findings in this report were wrong before they were right, and both were caught
+by checking rather than reasoning:
+
+- I first read your `anchor: 1` as 1% and reported the anchor slider as broken. It is the
+  engine's 0–1 scale, so you are at **100%** — maximum pull toward ADP — and my comparison had
+  clamped both sides to the same value. That matters for the conclusion: Bowers and Collins
+  hold their positions *at maximum anchoring*, which is a stronger result than I first had.
+- I called Higgins a data error before I fetched the player and found the ACL.
+
+Where I have not been able to check, I have said so — chiefly that every projection here comes
+from one provider, and nothing in this app can tell you when that provider is wrong.
