@@ -698,6 +698,9 @@ span.nm:hover { text-decoration: none; }
   white-space: nowrap;
 }
 .hcTag.mine { color: var(--chalk); background: var(--field); border-color: var(--field); }
+/* A stack that compounds gets the accent; the flat kind keeps the plain outline, because
+   "same team as yours" is information rather than a recommendation. */
+.hcTag.stack { color: var(--accent); border-color: var(--accent); }
 .footBtns { display: flex; gap: 8px; }
 #undo:disabled { opacity: .45; cursor: default; }
 #undo:disabled:hover { background: var(--card); border-color: var(--line2); }

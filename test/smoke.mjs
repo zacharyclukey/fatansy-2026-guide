@@ -804,6 +804,75 @@ const fire = (el, type) => {
       `${before} -> ${qbScore()}`);
     cb.checked = false; fire(cb, 'change');
     await settle();
+
+    // the same rule at tight end, added because 25 practice drafts from two seats took a
+    // second tight end in every single one of them
+    const te = d.querySelector('#noTe2');
+    ok('there is a second-tight-end rule too', !!te);
+    const teScore = () => {
+      d.querySelector('[data-f="TE"]').click();
+      const c = [...d.querySelectorAll('.row.player .num.sc')].map((x) => x.textContent);
+      d.querySelector('[data-f="ALL"]').click();
+      return c[1];
+    };
+    const teBefore = teScore();
+    te.checked = true; fire(te, 'change');
+    await settle();
+    ok('and it leaves his score alone as well', teScore() === teBefore,
+      `${teBefore} -> ${teScore()}`);
+    te.checked = false; fire(te, 'change');
+    await settle();
+  }
+
+  // ---- labels that are only labels --------------------------------------
+  // Insurance and stacking are facts about how a man fits the team you already have. Both
+  // are worth saying and neither is worth points, because nothing in this repo can measure
+  // what either is worth. If one of them ever moves a score again, this fails.
+  {
+    const e3 = await import(`file://${DIR}/engine.js`);
+    const pool = JSON.parse(JSON.stringify(players));
+    const settings = { ...e3.DEFAULT_SETTINGS(pool), atPick: 40 };
+    const plain = e3.buildBoard(pool, { ...settings, mine: [], mineIds: [] });
+    const hcRow = plain.rows.find((r) => r.hc && r.hcGain > 0.5);
+    ok('the pool still contains a handcuff to check', !!hcRow, 'none found');
+    if (hcRow) {
+      // Isolate the INSURANCE. Owning anybody at his position changes his score through the
+      // slot maths - he stops filling a starting slot and gets priced against a free add -
+      // so comparing "own nobody" with "own his lead man" measures two things at once.
+      // Hold the roster shape fixed and swap only WHICH man at that position you own: the
+      // lead he is behind, versus somebody else entirely. Only mineLead differs.
+      const same = pool.players.find((x) => x.pos === hcRow.hc.pos
+        && x.id !== hcRow.hc.leadId && x.id !== hcRow.p.id);
+      const withLead = e3.buildBoard(JSON.parse(JSON.stringify(players)),
+        { ...settings, mine: [hcRow.hc.pos], mineIds: [hcRow.hc.leadId] });
+      const withOther = e3.buildBoard(JSON.parse(JSON.stringify(players)),
+        { ...settings, mine: [hcRow.hc.pos], mineIds: [same.id] });
+      const a2 = withLead.rows.find((r) => r.p.id === hcRow.p.id);
+      const b2 = withOther.rows.find((r) => r.p.id === hcRow.p.id);
+      ok('insurance behind a man you own is worth exactly zero points',
+        Math.abs(a2.benchVor - b2.benchVor) < 0.001,
+        `${b2.benchVor.toFixed(2)} -> ${a2.benchVor.toFixed(2)}`);
+      ok('the badge still knows he is your cover', a2.mineLead === true);
+      ok('and no boost chip claims it moved a score',
+        !(a2.boosts || []).some((x) => x.key === 'handcuff'),
+        (a2.boosts || []).map((x) => x.key).join(', '));
+    }
+
+    // a quarterback and his own receiver
+    const qb = pool.players.find((p) => p.pos === 'QB' && p.team
+      && pool.players.some((x) => x.team === p.team && (x.pos === 'WR' || x.pos === 'TE')));
+    const mate = pool.players.find((x) => x.team === qb.team && (x.pos === 'WR' || x.pos === 'TE'));
+    ok('a quarterback and his own receiver stack', e3.stackWith(mate, [qb])?.kind === 'good');
+    ok('and it reads both ways round', e3.stackWith(qb, [mate])?.kind === 'good');
+    const back = pool.players.find((x) => x.team === qb.team && x.pos === 'RB');
+    if (back) {
+      ok('a quarterback and his own back is flat, not good',
+        e3.stackWith(back, [qb])?.kind === 'flat');
+    }
+    const otherTeam = pool.players.find((x) => x.pos === 'WR' && x.team && x.team !== qb.team);
+    ok('two men on different teams are not a stack', e3.stackWith(otherTeam, [qb]) === null);
+    ok('and a stack moves no score either',
+      !(plain.rows[0].boosts || []).some((b) => b.key === 'stack'));
   }
 
   // ---- a star must change the NUMBER, not just the order ----------------

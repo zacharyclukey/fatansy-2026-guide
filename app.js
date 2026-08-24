@@ -1,15 +1,15 @@
-import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608240758';
+import { DEFAULT_SETTINGS, buildBoard, priorityOrder, subScores, SAMPLE_LEAGUE, applyCustomStats, draftContext, availability, poolAround, planDraft, PLAN_HORIZON, STAR_BAND, FIT_AXES, hasPenalties, swingShare, riskPoints, axisKeys, ANCHOR_CASES, ANCHOR_DEFAULT, STEAL_DILUTION, anchorReach, axisSpare, keyName, inLeague, roundsOf, STREAMED, explain, pickShot, pickCost, marketNote, injuryGap, ownGames, FULL_GAMES, SLACK, REACH_RANGE, FIT_TAGS, DUR_ANCHORS, DUR_DEFAULT, durAnchor } from './engine.js?v=202608240829';
 // adpWord is deliberately no longer imported. It reads a pick against ADP in plain words,
 // which is exactly the judgement the cost view has stopped making - see costTable below.
 // It survives in mock.js because it is still an honest description of what the ROOM did.
-import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608240758';
-import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608240758';
-import { TIPS, PCT_NOTE } from './tips.js?v=202608240758';
-import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608240758';
+import { simulate, pickTeam, roundOf, totalPicks, needsOf, roomWord, vsAdp, isRanked, teamsOf, autoPick, capsOf } from './mock.js?v=202608240829';
+import { importLeagues, draftPicks, dryRun, parseDraftId, followDraft, SleeperError } from './sleeper.js?v=202608240829';
+import { TIPS, PCT_NOTE } from './tips.js?v=202608240829';
+import { PRESETS, LEANS, activePreset, activeLean, suggestLean } from './strategies.js?v=202608240829';
 
 const $ = (s) => document.querySelector(s);
 const KEY = 'draft2026';
-const BUILD = '202608240758';
+const BUILD = '202608240829';
 const POSCOL = { QB: 'QB', RB: 'RB', WR: 'WR', TE: 'TE' };
 
 let data;
@@ -601,6 +601,7 @@ function myCaps(league) {
   const lg = league || board?.league || data.leagues[st.league];
   const caps = capsOf(lg, board?.shares);
   if (st.noQb2 && caps.QB > 1) caps.QB = 1;
+  if (st.noTe2 && caps.TE > 1) caps.TE = 1;
   return caps;
 }
 
@@ -1275,11 +1276,22 @@ let lastCols = '';
 // misses a game, so there is nothing to inherit and nothing to say; the badge appearing and
 // disappearing as that dial moves is the point rather than a glitch.
 function hcBadge(r) {
-  if (!r.hc || !(r.hcGain > 0.5)) return '';
-  const last = esc(r.hc.leadName.split(' ').pop());
-  return r.mineLead
-    ? `<span class="hcTag mine" data-tip="handcuff">covers your ${last}</span>`
-    : `<span class="hcTag" data-tip="handcuff">if ${last} sits</span>`;
+  // A stack is the same KIND of thing as a handcuff - a fact about how he fits the team you
+  // already have, worth no points and worth saying - so the two share the badge slot.
+  // Insurance first when a man is somehow both, because it is the rarer fact.
+  if (r.hc && r.hcGain > 0.5) {
+    const last = esc(r.hc.leadName.split(' ').pop());
+    return r.mineLead
+      ? `<span class="hcTag mine" data-tip="handcuff">covers your ${last}</span>`
+      : `<span class="hcTag" data-tip="handcuff">if ${last} sits</span>`;
+  }
+  if (r.stack) {
+    const who = esc(r.stack.name.split(' ').pop());
+    return r.stack.kind === 'good'
+      ? `<span class="hcTag stack" data-tip="stack">stacks with ${who}</span>`
+      : `<span class="hcTag" data-tip="stackflat">same team as ${who}</span>`;
+  }
+  return '';
 }
 
 function rowHTML(r, cols, d, m) {
@@ -1593,6 +1605,10 @@ function detail(r) {
     r.p.bye ? `<span class="chip">Bye ${r.p.bye}</span>` : '',
     // The one case where the board is not showing you its own opinion at all.
     r.noProj ? '<span class="chip inj" data-tip="noProj">No projection — ranked on ADP</span>' : '',
+    r.stack && r.stack.kind === 'good'
+      ? `<span class="chip tier" data-tip="stack">Stacks with your ${esc(r.stack.name)}</span>` : '',
+    r.stack && r.stack.kind === 'flat'
+      ? `<span class="chip" data-tip="stackflat">Same team as your ${esc(r.stack.name)}</span>` : '',
   ].filter(Boolean).join('');
 
   const sec = (title, body, cls = '') => (body
@@ -2397,10 +2413,18 @@ function gradeReach(mine) {
     const early = win.from - x.n;               // + = taken before his window opened
     const reach = win.kind === 'reach';
     if (!reach && win.kind == null && early > SLACK) unpriced += 1;
-    each.push({ n: x.n, id: x.id, early, over: reach ? Math.max(0, early - SLACK) : 0 });
+    each.push({ n: x.n, id: x.id, early, reach, over: reach ? Math.max(0, early - SLACK) : 0 });
   }
   if (!each.length) return null;
-  const reaches = each.filter((e) => e.over > 0).sort((a, b) => b.early - a.early);
+  // Counted by the board's OWN verdict, not by re-deriving one here. It used to filter on
+  // `over > 0`, and `over` is `early - SLACK` - so a pick taken exactly SLACK picks early
+  // scored zero severity and vanished from the count, while pickType had already called it
+  // a reach on `early >= SLACK`. Strictly-greater against greater-or-equal, one borderline
+  // pick, and the grade quietly disagreed with the label you were shown at the time.
+  //
+  // Severity still comes from `over`, so the mildest possible reach costs nothing on the
+  // score. It just is not hidden any more.
+  const reaches = each.filter((e) => e.reach).sort((a, b) => b.early - a.early);
   return {
     score: clamp100(100 * mean(each.map((e) => Math.max(0, 1 - e.over / REACH_RANGE)))),
     reaches: reaches.length, counted: each.length, unpriced,
@@ -3236,6 +3260,7 @@ function renderChrome() {
   if ($('#rookie')) $('#rookie').checked = st.rookie;
   $('#hideGone').checked = !!st.hideGone;
   if ($('#noQb2')) $('#noQb2').checked = !!st.noQb2;
+  if ($('#noTe2')) $('#noTe2').checked = !!st.noTe2;
   const dur = $('#durAnchor');
   if (dur) {
     const now = st.durAnchor || DUR_DEFAULT;
@@ -3661,6 +3686,9 @@ function wire() {
   $('#hideGone').onchange = (e) => { st.hideGone = e.target.checked; save(); renderBoard(); };
   if ($('#noQb2')) {
     $('#noQb2').onchange = (e) => { st.noQb2 = e.target.checked; save(); rebuild(); };
+  }
+  if ($('#noTe2')) {
+    $('#noTe2').onchange = (e) => { st.noTe2 = e.target.checked; save(); rebuild(); };
   }
   // Changing the assumption changes what every bench player is worth, so this rebuilds the
   // board rather than just repainting it.

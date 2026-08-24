@@ -69,6 +69,10 @@ export const TIPS = {
     'Every player with no projection is hurt, and the provider projects him for nothing in '
     + 'all 18 weeks — that is a judgement, not a missing file. With no forecast to defend, '
     + 'the board places him exactly where the room drafts him and says so here.'],
+  noTe2: ['Never suggest a second tight end.',
+    'The same rule as the quarterback one, for the same reason: you only start one, and a '
+    + 'usable one is usually on waivers. His score and his rank are untouched — he is '
+    + 'simply not offered.'],
   noQb2: ['Never suggest a backup quarterback.',
     'A rule about how YOU draft, not a claim that the maths is wrong — it keeps his score '
     + 'and his rank honest and simply takes him out of every recommendation. Saved on this '
@@ -118,8 +122,18 @@ export const TIPS = {
     'Steal = fallen past his range. Reach = too early. Priced right is always Safe or '
     + 'Swing, never a dash. A dash means his range is still a long way off - check Worth.'],
   handcuff: ['He takes over the job if the man ahead of him cannot play.',
-    'Worth the points that job is above a waiver-wire replacement, for as long as you have '
-    + 'assumed that man is out. Set that under Time missed.'],
+    'A label only — it changes no score. What insurance behind your own starter is worth to '
+    + 'you is a judgement, and the app has no honest number for it.'],
+
+  stack: ['His good days are your quarterback’s good days.',
+    'A touchdown pass counts twice for you, so a big week from one is usually a big week '
+    + 'from both. It raises your ceiling and your floor together. A label only — how much '
+    + 'that is worth depends on your league and your playoff format, which nothing here '
+    + 'measures.'],
+  stackflat: ['Same team as one of yours, but not the pairing that compounds.',
+    'A quarterback and his own running back partly cancel: the back’s touchdowns are '
+    + 'runs the quarterback did not throw. Neither good nor bad, said so you are not '
+    + 'guessing which kind it is.'],
 
   durdial: ['How much time you assume players miss.',
     'Projections are accurate per game and too high per season, and the whole gap is games '

@@ -965,6 +965,8 @@ export function buildBoard(data, st, cache) {
     chart.set(id, handcuffValue(hc, repl, pg, byId.get(hc.leadId), anchor));
   }
   const mineIds = new Set(st.mineIds || []);
+  // The men you already own, as players, so stackWith can ask what team they are on.
+  const myPlayers = (st.mineIds || []).map((id) => byId.get(id)).filter(Boolean);
   const queue = {};                     // how many of each position you already own
   for (const q of st.mine || []) queue[q] = (queue[q] || 0) + 1;
 
@@ -979,8 +981,12 @@ export function buildBoard(data, st, cache) {
       // asking, he came out as the best thing on the board once every other position had
       // been honestly discounted. When a kicker goes is a matter of timing and is handled
       // by the need bonus below, which holds him back until the picks run out.
-      const bw = benchWorth(pts, (queue[p.pos] || 0) + 1, slots[p.pos] ?? 1, avail,
-        hc, !!hc && mineIds.has(hc.leadId));
+      // No `hc` argument. Insurance is a label now, and the only way to be sure of that is
+      // to keep it out of the function that produces the number - handing benchWorth a
+      // handcuff made it return a different `worth` AND a different `chance`, both of which
+      // feed the score further down. Zeroing the visible bonus while those two still moved
+      // would have been a claim the code did not honour.
+      const bw = benchWorth(pts, (queue[p.pos] || 0) + 1, slots[p.pos] ?? 1, avail);
       const lineup = bw.worth;
       const vor = pts - (repl[p.pos] || 0);
       // WHICH BAR HE IS MEASURED AGAINST, and this took three wrong answers to get right.
@@ -1043,17 +1049,18 @@ export function buildBoard(data, st, cache) {
       // same score. The simulator caught it immediately: with the band flattened the room
       // could no longer tell one bench receiver from another and reached 49 picks early for
       // one. Only a man with something to inherit is allowed near this.
-      // Capped, and no longer allowed to replace the surplus outright. Taking
-      // max(surplus, gain) let insurance decide a pick on its own, and that credit is known
-      // to be too generous - jobGain pays the heir the LEAD man's points, as though a backup
-      // inherits an elite starter's production rather than his snaps. An unbounded number
-      // built on a known over-credit is the wrong shape whatever its size.
+      // Insurance moves NOTHING. It is a label and only a label.
       //
-      // So a handcuff now moves like a star or a preference does: enough to pass men he is
-      // level with, never enough to jump a tier. Same family, same reasoning, same ceiling
-      // (STAR_BAND). The chip on the row is what actually tells you he is insurance; the
-      // number no longer argues the case louder than the evidence supports.
-      const benchVor = plainVor + Math.min(HANDCUFF_BAND, Math.max(0, bw.gain));
+      // It was an uncapped override, then a capped nudge, and now nothing at all, and each
+      // step was the same argument getting shorter. jobGain pays the heir the LEAD man's
+      // points, as though a backup inherits an elite starter's production rather than his
+      // snaps. That credit is known to be too generous and nobody has measured what the
+      // right size would be - so any number built on it is a guess wearing a decimal point.
+      //
+      // The chip on his row already tells you he is cover for a man you own. That is a fact.
+      // Turning the fact into points was the part that could not be defended, so it is gone,
+      // and what the handcuff is worth to you stays where it belongs: your judgement.
+      const benchVor = plainVor;
       const cached = cache?.get(p.id);
       const scores = cached ? { ...cached } : (() => {
         const s = {};
@@ -1063,10 +1070,14 @@ export function buildBoard(data, st, cache) {
         return s;
       })();
       scores.floorish = floorScore(scores);   // display only, never weighted
-      return { p, pts, vor, benchVor, scores, hc, lineup, hcGain: bw.gain || 0,
+      // hcGain comes straight off the depth chart now, not out of the scoring function. It
+      // decides whether the badge is worth showing - there is nothing to inherit when the
+      // durability dial says nobody misses a game - and it decides nothing else.
+      return { p, pts, vor, benchVor, scores, hc, lineup, hcGain: hc?.gain || 0,
         // nobody forecast him at all, so his place on the board is the room's opinion and
         // the screen has to say so rather than showing a confident-looking zero
         noProj: !hasProjection(p),
+        stack: stackWith(p, myPlayers),
         mineLead: !!hc && mineIds.has(hc.leadId) };
     });
 
@@ -1308,8 +1319,9 @@ export function buildBoard(data, st, cache) {
     add('need', 'A position you still need', r.need || 0);
     add('rookie', 'Rookie', (st.rookie && r.p.rookie ? rookieBonus(r.p, st) : 0));
     add('anchor', 'Where the room drafts him', r.anchorAdj || 0);
-    add('handcuff', 'Cover for a starter', r.hcGain > 0
-      ? Math.min(HANDCUFF_BAND, r.hcGain) : 0);
+    // Handcuffs and stacks are absent from this list on purpose - they move no points, so
+    // listing them here at +0.00 would suggest they had been weighed and found tiny, when
+    // in fact they were never weighed at all. They are labels. See r.hc and r.stack.
   }
   rows.sort((a, b) => b.score - a.score);
   rows.forEach((r, i) => { r.rank = i + 1; });
@@ -1717,7 +1729,36 @@ export function startableSlots(league, shares) {
 // league.
 // How far insurance may move a man. Same ceiling as a star, for the same reason: it is a
 // consideration you hold about a player, not a forecast of his points. See benchVor.
-export const HANDCUFF_BAND = STAR_BAND;
+// Stacking: two men whose good days are the same day.
+//
+// A quarterback and his own receiver or tight end score the same touchdown twice, so a big
+// week from one is usually a big week from the other. That raises your ceiling and your
+// floor together, which is worth knowing about and is NOT worth points - the size of the
+// effect depends on your league's scoring, your playoff format and how many teams you are
+// beating, none of which this app measures. So it is said, not scored.
+//
+// A quarterback with his own running back is the flat case: the back's touchdowns are runs
+// the quarterback does not throw, so the two partly cancel. Not harmful, not helpful, and
+// labelled as neither rather than left to look like the good kind.
+export function stackWith(p, mine) {
+  if (!p.team || !mine?.length) return null;
+  const mates = mine.filter((m) => m && m.team === p.team && m.id !== p.id);
+  if (!mates.length) return null;
+  const qbHere = p.pos === 'QB' ? p : mates.find((m) => m.pos === 'QB');
+  if (!qbHere) return null;
+  const other = p.pos === 'QB' ? mates : [p];
+  const catcher = other.find((m) => m.pos === 'WR' || m.pos === 'TE');
+  if (catcher) {
+    const withWhom = p.pos === 'QB' ? catcher : qbHere;
+    return { kind: 'good', pos: catcher.pos, name: withWhom.name };
+  }
+  const back = other.find((m) => m.pos === 'RB');
+  if (back) {
+    const withWhom = p.pos === 'QB' ? back : qbHere;
+    return { kind: 'flat', pos: 'RB', name: withWhom.name };
+  }
+  return null;
+}
 export const HANDCUFF_GAP = 2.2;      // the lead man must be worth this many times the next
 export const HANDCUFF_MIN = 40;       // and the job itself has to be worth having
 

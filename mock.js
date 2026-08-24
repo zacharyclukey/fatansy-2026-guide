@@ -14,7 +14,7 @@
 // stripped imports with a per-line regex and a wrapped statement left a stray brace behind
 // that killed the whole suite. The harness now matches through to the module string, so a
 // source file's line breaks are no longer load-bearing and this can wrap like anything else.
-import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608240758';
+import { myPicks, roundsOf, benchWorth, lineupChance, depthChart, flexShares, startableSlots, availableShare, positionGames, projectedPoints } from './engine.js?v=202608240829';
 
 // Everything the bench pricing needs, worked out once for a whole draft rather than once
 // per pick. See the long note above benchWorth in engine.js for what this is for.
