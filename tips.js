@@ -65,6 +65,10 @@ export const TIPS = {
   need: ['Nudges toward positions you still need.', 'Adds points to a position short of starters.'],
   rookie: ['Pay up for rookies.', 'Up to +10, scaled by how sure the draft-capital read is.'],
   hideGone: ['Clear drafted players off the board.', ''],
+  noProj: ['Nobody has forecast him this season.',
+    'Every player with no projection is hurt, and the provider projects him for nothing in '
+    + 'all 18 weeks — that is a judgement, not a missing file. With no forecast to defend, '
+    + 'the board places him exactly where the room drafts him and says so here.'],
   noQb2: ['Never suggest a backup quarterback.',
     'A rule about how YOU draft, not a claim that the maths is wrong — it keeps his score '
     + 'and his rank honest and simply takes him out of every recommendation. Saved on this '

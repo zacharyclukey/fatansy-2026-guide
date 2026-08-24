@@ -691,6 +691,33 @@ const fire = (el, type) => {
     scoreCells.every((s) => /^\d+\.\d{2}$/.test(s) && +s >= 0 && +s <= 100),
     scoreCells.slice(0, 5).join(', '));
   ok('the best man on the board scores 100', scoreCells[0] === '100.00', scoreCells[0]);
+  // ---- a man nobody has forecast --------------------------------------
+  // Some players carry a projection object with only `gp` in it. That is not a gap in the
+  // feed - every one of them is hurt and the provider projects them for nothing all season.
+  // Scoring the absence as zero points buried Jayden Higgins at #353 while the room drafted
+  // him around 172, which is a confident-looking answer built on no information at all.
+  {
+    const e2 = await import(`file://${DIR}/engine.js`);
+    const noProj = players.players.filter((p) => !e2.hasProjection(p));
+    ok('the pool still contains men with no projection', noProj.length > 0, `${noProj.length}`);
+    ok('and the anchor treats that as its own case',
+      noProj.every((p) => e2.anchorCase(p) === 'noProjection'));
+    ok('which defers to the room completely', e2.ANCHOR_CASES.noProjection === 1);
+    // and having no forecast outranks being a kicker, because it is the stronger fact
+    const k = players.players.find((p) => p.pos === 'K' && e2.hasProjection(p));
+    if (k) ok('a kicker WITH a forecast is still streamed', e2.anchorCase(k) === 'stream');
+
+    // On a COPY. buildBoard writes `_games` onto the player objects it is handed, so
+    // running one here against the shared pool changed a number a later block asserts on.
+    const pool = JSON.parse(JSON.stringify(players));
+    const bb = e2.buildBoard(pool, { ...e2.DEFAULT_SETTINGS(pool), anchor: 0.7, atPick: 1 });
+    const worst = bb.rows.filter((r) => r.noProj && r.p.adp && r.p.adp <= 200);
+    ok('nobody with no forecast is buried far below where the room takes him',
+      worst.every((r) => Math.abs(r.rank - r.p.adp) < 90),
+      worst.map((r) => `${r.p.name} #${r.rank} vs adp ${r.p.adp}`).join(', '));
+    ok('the row is marked so the screen can say why', worst.every((r) => r.noProj === true));
+  }
+
   // ---- sorting by any column, and getting back --------------------------
   {
     const names = () => [...d.querySelectorAll('.row.player .nm')].map((x) => x.textContent.trim());
@@ -2768,9 +2795,14 @@ const fire = (el, type) => {
   const mendoza = row('Fernando Mendoza');
   const collins = row('Nico Collins');
   if (mendoza && collins) {
-    ok('a rookie projected below replacement no longer outrates a proven WR1',
-      mendoza.rating < collins.rating,
-      `${mendoza.rating.toFixed(0)} vs ${collins.rating.toFixed(0)}`);
+    // Compared on RANK, not on rating. Rating is a 0-100 grade against a man's own
+    // position and the app says so out loud - "cannot compare a QB to an RB" - so setting a
+    // rookie quarterback's 81.7 against a receiver's 81.1 was asserting on a number that
+    // does not mean anything across the two. It sat a hair from the line for months and
+    // today's data refresh tipped it, which is how it was noticed.
+    ok('a rookie projected below replacement is nowhere near a proven WR1',
+      mendoza.rank > collins.rank + 100,
+      `#${mendoza.rank} vs #${collins.rank}`);
     ok('and he is no longer a top-70 pick', mendoza.rank > 70, `#${mendoza.rank}`);
   }
   const cheats = b.rows.filter((r) => r.rank <= 60 && r.vor < -40);

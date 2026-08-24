@@ -477,6 +477,23 @@ const SKILL = new Set(['QB', 'RB', 'WR', 'TE']);
 // (poor) rating is doing useful work holding them down the board. Left alone deliberately.
 export const noSeason = (p) => SKILL.has(p.pos) && !(p.a?.gp);
 
+// Does anybody have a forecast for this man at all?
+//
+// Rotowire publishes a projection object for every player, but for some it contains only
+// `gp` and no statistics - and that absence is a judgement, not a gap in the feed. Every
+// one of them is hurt: Jayden Higgins is IR with a repaired ACL, Ricky Pearsall IR with a
+// PCL, and their weekly projections are null for all eighteen weeks. The provider is
+// saying "he will not produce", not "we forgot".
+//
+// Scoring that as zero points is defensible arithmetic and a terrible answer, because the
+// room still drafts Higgins around pick 172 - not for his points but for a spare IR slot,
+// which is a roster move no points forecast can express. See anchorCase.
+export const hasProjection = (p) => {
+  if (p.ppts != null) return true;                 // kickers and defences arrive pre-scored
+  const keys = Object.keys(p.proj || {});
+  return keys.some((k) => k !== 'gp');
+};
+
 // Components built out of 2025 stats. For a man with no 2025 these have no answer, and
 // saying so is the whole point - componentScore already returns 50 for "nothing to go on".
 export const HISTORY_COMPS = new Set(['volume', 'efficiency', 'redzone', 'explosive',
@@ -666,6 +683,17 @@ export const STREAM_DEPTH = 0.5;
 // weight is set by CONFIDENCE, per player, with the three cases written out here rather
 // than buried in four separate constants - four buried constants are what caused this.
 export const ANCHOR_CASES = {
+  // Total. Not "the market knows better" but "we know nothing at all" - there is no
+  // forecast for this man, so a board built on forecasts has no opinion to defend. The
+  // room's ADP is then the only information in the building, and deferring to it entirely
+  // is the honest answer.
+  //
+  // The alternative was to invent a projection out of last season, and that would have
+  // been manufacturing exactly the opinion the provider deliberately withheld: these men
+  // are hurt, and rotowire projects them for nothing across all eighteen weeks. Where the
+  // room drafts them already prices the thing our numbers cannot see - a healthy return,
+  // or a spare IR slot - so the room is what we use.
+  noProjection: 1,
   // Heavy. There is no defensible replacement level here, so the market is simply better
   // informed than we are.
   stream: 1,
@@ -715,6 +743,9 @@ export const anchorReach = (rows, st = {}) => (rows.length
 // Which of the three cases a man falls into. One function, so the board, the tests and
 // the explanation all read the same rule.
 export function anchorCase(p) {
+  // Checked FIRST, and before the streamed shortcut, because having no forecast is a
+  // stronger fact about a player than what position he plays.
+  if (!hasProjection(p)) return 'noProjection';
   if (STREAMED.includes(p.pos)) return 'stream';
   if (noSeason(p)) return 'noSeason';
   return 'known';
@@ -1033,6 +1064,9 @@ export function buildBoard(data, st, cache) {
       })();
       scores.floorish = floorScore(scores);   // display only, never weighted
       return { p, pts, vor, benchVor, scores, hc, lineup, hcGain: bw.gain || 0,
+        // nobody forecast him at all, so his place on the board is the room's opinion and
+        // the screen has to say so rather than showing a confident-looking zero
+        noProj: !hasProjection(p),
         mineLead: !!hc && mineIds.has(hc.leadId) };
     });
 
